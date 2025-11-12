@@ -1,17 +1,15 @@
-// Edtools Custom Branding JavaScript
+// Edtools Text Replacement - Keep Frappe design, only change text
 
 frappe.ready(function() {
-    // Replace "Frappe" and "ERPNext" text throughout the UI
+    // Replace text throughout the application
     replaceTextInPage();
 
-    // Override app title
-    if (frappe.boot) {
-        frappe.boot.app_name = "Edtools";
-    }
+    // Update page titles
+    updatePageTitles();
 });
 
 function replaceTextInPage() {
-    // Replace text in common elements
+    // Text replacements - only changes wording, not design
     const replacements = {
         'Frappe': 'Edtools',
         'ERPNext': 'Edtools',
@@ -20,8 +18,8 @@ function replaceTextInPage() {
         'Powered by ERPNext': 'Powered by Edtools'
     };
 
-    // Function to replace text in a node
-    function replaceInNode(node) {
+    // Function to replace text in a text node
+    function replaceInTextNode(node) {
         if (node.nodeType === Node.TEXT_NODE) {
             let text = node.nodeValue;
             for (let [oldText, newText] of Object.entries(replacements)) {
@@ -29,21 +27,24 @@ function replaceTextInPage() {
             }
             node.nodeValue = text;
         } else if (node.nodeType === Node.ELEMENT_NODE) {
-            for (let child of node.childNodes) {
-                replaceInNode(child);
+            // Skip script and style tags
+            if (node.tagName !== 'SCRIPT' && node.tagName !== 'STYLE') {
+                for (let child of node.childNodes) {
+                    replaceInTextNode(child);
+                }
             }
         }
     }
 
-    // Replace in body
-    replaceInNode(document.body);
+    // Replace in current page
+    replaceInTextNode(document.body);
 
-    // Watch for dynamic content changes
+    // Watch for new content (like modals, dialogs)
     const observer = new MutationObserver(function(mutations) {
         mutations.forEach(function(mutation) {
             mutation.addedNodes.forEach(function(node) {
                 if (node.nodeType === Node.ELEMENT_NODE) {
-                    replaceInNode(node);
+                    replaceInTextNode(node);
                 }
             });
         });
@@ -55,20 +56,25 @@ function replaceTextInPage() {
     });
 }
 
-// Custom boot session modifications
-$(document).on('app_ready', function() {
-    // Override default branding
-    if (window.frappe && frappe.boot) {
-        frappe.boot.app_name = "Edtools";
-        frappe.boot.website_settings = frappe.boot.website_settings || {};
-        frappe.boot.website_settings.app_name = "Edtools";
-    }
-
-    // Update page title
+function updatePageTitles() {
+    // Update browser tab title
     if (document.title.includes('Frappe')) {
         document.title = document.title.replace('Frappe', 'Edtools');
     }
     if (document.title.includes('ERPNext')) {
         document.title = document.title.replace('ERPNext', 'Edtools');
     }
+
+    // Update frappe.boot if available
+    if (window.frappe && frappe.boot) {
+        frappe.boot.app_name = "Edtools";
+        if (frappe.boot.website_settings) {
+            frappe.boot.website_settings.app_name = "Edtools";
+        }
+    }
+}
+
+// Also run on app_ready event
+$(document).on('app_ready', function() {
+    updatePageTitles();
 });

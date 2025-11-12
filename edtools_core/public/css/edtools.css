@@ -1,120 +1,11 @@
-/* Edtools Custom Branding CSS */
-/* ============================= */
-
-/* Color Variables */
-:root {
-    --edtools-primary: #667eea;
-    --edtools-secondary: #764ba2;
-    --edtools-dark: #5568d3;
-    --edtools-light: #f8f9ff;
-}
+/* Edtools Text-Only Branding CSS */
+/* Only replaces text, keeps Frappe's original colors and design */
 
 /* ============================= */
-/* LOGIN PAGE */
+/* HIDE FRAPPE/ERPNEXT BRANDING */
 /* ============================= */
 
-.for-login {
-    background: linear-gradient(135deg, var(--edtools-primary) 0%, var(--edtools-secondary) 100%) !important;
-    min-height: 100vh;
-}
-
-.login-content {
-    background: white !important;
-    border-radius: 16px !important;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.3) !important;
-    padding: 40px !important;
-}
-
-.page-card-head {
-    text-align: center;
-    margin-bottom: 30px;
-}
-
-.page-card-head .page-card-head-title {
-    font-size: 2.5rem;
-    font-weight: 700;
-    color: var(--edtools-primary);
-    margin-bottom: 10px;
-}
-
-/* Hide default Frappe/ERPNext branding */
-.page-card-head .indicator,
-.page-card-head .text-muted {
-    display: none !important;
-}
-
-/* Add Edtools branding */
-.page-card-head::before {
-    content: "Edtools";
-    display: block;
-    font-size: 2.5rem;
-    font-weight: 700;
-    color: var(--edtools-primary);
-    margin-bottom: 10px;
-}
-
-.page-card-head::after {
-    content: "Educational Management System";
-    display: block;
-    color: #6c757d;
-    font-size: 0.95rem;
-    margin-top: 5px;
-}
-
-/* ============================= */
-/* NAVBAR */
-/* ============================= */
-
-.navbar {
-    background: linear-gradient(90deg, var(--edtools-primary) 0%, var(--edtools-secondary) 100%) !important;
-}
-
-.navbar-brand-text,
-.navbar-home {
-    font-weight: 700 !important;
-    color: white !important;
-    letter-spacing: 0.5px;
-}
-
-/* ============================= */
-/* BUTTONS */
-/* ============================= */
-
-.btn-primary {
-    background: linear-gradient(135deg, var(--edtools-primary) 0%, var(--edtools-secondary) 100%) !important;
-    border: none !important;
-    padding: 12px 24px;
-    font-weight: 600;
-    transition: all 0.2s;
-}
-
-.btn-primary:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4) !important;
-}
-
-/* ============================= */
-/* SIDEBAR */
-/* ============================= */
-
-.sidebar-label {
-    color: var(--edtools-primary) !important;
-    font-weight: 600;
-}
-
-.desk-sidebar .standard-sidebar-item:hover {
-    background-color: var(--edtools-light) !important;
-}
-
-/* ============================= */
-/* FOOTER */
-/* ============================= */
-
-footer .footer-links {
-    text-align: center;
-}
-
-/* Hide Frappe/ERPNext links in footer */
+/* Hide "Powered by Frappe/ERPNext" links */
 .text-muted a[href*="frappe"],
 .text-muted a[href*="erpnext"],
 footer a[href*="frappe"],
@@ -122,43 +13,28 @@ footer a[href*="erpnext"] {
     display: none !important;
 }
 
-/* ============================= */
-/* CARDS & CONTAINERS */
-/* ============================= */
-
-.widget-head {
-    color: var(--edtools-primary) !important;
-}
-
-.card-header {
-    background-color: var(--edtools-light) !important;
+/* Hide indicator badges that say "Frappe" or "ERPNext" */
+.page-card-head .indicator {
+    display: none !important;
 }
 
 /* ============================= */
-/* LINKS */
+/* ADD EDTOOLS BRANDING (TEXT ONLY) */
 /* ============================= */
 
-a {
-    color: var(--edtools-primary) !important;
+/* Replace login page title with "Edtools" */
+.page-card-head .page-card-head-title::after {
+    content: "Edtools";
+    display: block;
 }
 
-a:hover {
-    color: var(--edtools-dark) !important;
+/* Add subtitle on login page */
+.page-card-head::after {
+    content: "Educational Management System";
+    display: block;
+    font-size: 0.9rem;
+    color: #6c757d;
+    margin-top: 10px;
 }
 
-/* ============================= */
-/* INDICATORS & BADGES */
-/* ============================= */
-
-.indicator.blue,
-.badge-primary {
-    background-color: var(--edtools-primary) !important;
-}
-
-/* ============================= */
-/* PAGE TITLES */
-/* ============================= */
-
-.page-title {
-    color: var(--edtools-primary) !important;
-}
+/* That's it! Keep everything else as default Frappe styling */
