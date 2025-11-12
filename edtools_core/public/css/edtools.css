@@ -1,44 +1,164 @@
 /* Edtools Custom Branding CSS */
+/* ============================= */
 
-/* Hide/Replace ERPNext branding */
-.navbar-brand-text {
-    font-weight: 600;
+/* Color Variables */
+:root {
+    --edtools-primary: #667eea;
+    --edtools-secondary: #764ba2;
+    --edtools-dark: #5568d3;
+    --edtools-light: #f8f9ff;
 }
 
-/* Custom login page styling */
+/* ============================= */
+/* LOGIN PAGE */
+/* ============================= */
+
 .for-login {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, var(--edtools-primary) 0%, var(--edtools-secondary) 100%) !important;
+    min-height: 100vh;
 }
 
 .login-content {
-    background: white;
-    border-radius: 8px;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    background: white !important;
+    border-radius: 16px !important;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3) !important;
+    padding: 40px !important;
 }
 
-/* Hide "Powered by" text if it mentions Frappe/ERPNext */
-.text-muted a[href*="frappe"],
-.text-muted a[href*="erpnext"] {
-    display: none;
+.page-card-head {
+    text-align: center;
+    margin-bottom: 30px;
 }
 
-/* Custom footer branding */
+.page-card-head .page-card-head-title {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--edtools-primary);
+    margin-bottom: 10px;
+}
+
+/* Hide default Frappe/ERPNext branding */
+.page-card-head .indicator,
+.page-card-head .text-muted {
+    display: none !important;
+}
+
+/* Add Edtools branding */
+.page-card-head::before {
+    content: "Edtools";
+    display: block;
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--edtools-primary);
+    margin-bottom: 10px;
+}
+
+.page-card-head::after {
+    content: "Educational Management System";
+    display: block;
+    color: #6c757d;
+    font-size: 0.95rem;
+    margin-top: 5px;
+}
+
+/* ============================= */
+/* NAVBAR */
+/* ============================= */
+
+.navbar {
+    background: linear-gradient(90deg, var(--edtools-primary) 0%, var(--edtools-secondary) 100%) !important;
+}
+
+.navbar-brand-text,
+.navbar-home {
+    font-weight: 700 !important;
+    color: white !important;
+    letter-spacing: 0.5px;
+}
+
+/* ============================= */
+/* BUTTONS */
+/* ============================= */
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--edtools-primary) 0%, var(--edtools-secondary) 100%) !important;
+    border: none !important;
+    padding: 12px 24px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4) !important;
+}
+
+/* ============================= */
+/* SIDEBAR */
+/* ============================= */
+
+.sidebar-label {
+    color: var(--edtools-primary) !important;
+    font-weight: 600;
+}
+
+.desk-sidebar .standard-sidebar-item:hover {
+    background-color: var(--edtools-light) !important;
+}
+
+/* ============================= */
+/* FOOTER */
+/* ============================= */
+
 footer .footer-links {
     text-align: center;
 }
 
-/* Optional: Custom color scheme */
-:root {
-    --primary-color: #667eea;
-    --dark-primary-color: #5568d3;
+/* Hide Frappe/ERPNext links in footer */
+.text-muted a[href*="frappe"],
+.text-muted a[href*="erpnext"],
+footer a[href*="frappe"],
+footer a[href*="erpnext"] {
+    display: none !important;
 }
 
-.btn-primary {
-    background-color: var(--primary-color) !important;
-    border-color: var(--primary-color) !important;
+/* ============================= */
+/* CARDS & CONTAINERS */
+/* ============================= */
+
+.widget-head {
+    color: var(--edtools-primary) !important;
 }
 
-.btn-primary:hover {
-    background-color: var(--dark-primary-color) !important;
-    border-color: var(--dark-primary-color) !important;
+.card-header {
+    background-color: var(--edtools-light) !important;
+}
+
+/* ============================= */
+/* LINKS */
+/* ============================= */
+
+a {
+    color: var(--edtools-primary) !important;
+}
+
+a:hover {
+    color: var(--edtools-dark) !important;
+}
+
+/* ============================= */
+/* INDICATORS & BADGES */
+/* ============================= */
+
+.indicator.blue,
+.badge-primary {
+    background-color: var(--edtools-primary) !important;
+}
+
+/* ============================= */
+/* PAGE TITLES */
+/* ============================= */
+
+.page-title {
+    color: var(--edtools-primary) !important;
 }

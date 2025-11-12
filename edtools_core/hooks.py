@@ -15,8 +15,8 @@ app_include_css = "/assets/edtools_core/css/edtools.css"
 app_include_js = "/assets/edtools_core/js/edtools.js"
 
 # include js, css files in header of web template
-# web_include_css = "/assets/edtools_core/css/edtools.css"
-# web_include_js = "/assets/edtools_core/js/edtools.js"
+web_include_css = "/assets/edtools_core/css/edtools.css"
+web_include_js = "/assets/edtools_core/js/edtools.js"
 
 # include custom scss in every website theme (without file extension ".scss")
 # website_theme_scss = "edtools_core/public/scss/website"
