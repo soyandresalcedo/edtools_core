@@ -1,0 +1,18 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include edtools_core *.css
+recursive-include edtools_core *.csv
+recursive-include edtools_core *.html
+recursive-include edtools_core *.ico
+recursive-include edtools_core *.js
+recursive-include edtools_core *.json
+recursive-include edtools_core *.md
+recursive-include edtools_core *.png
+recursive-include edtools_core *.py
+recursive-include edtools_core *.svg
+recursive-include edtools_core *.txt
+recursive-exclude edtools_core *.pyc

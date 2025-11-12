@@ -1,0 +1,44 @@
+/* Edtools Custom Branding CSS */
+
+/* Hide/Replace ERPNext branding */
+.navbar-brand-text {
+    font-weight: 600;
+}
+
+/* Custom login page styling */
+.for-login {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.login-content {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+}
+
+/* Hide "Powered by" text if it mentions Frappe/ERPNext */
+.text-muted a[href*="frappe"],
+.text-muted a[href*="erpnext"] {
+    display: none;
+}
+
+/* Custom footer branding */
+footer .footer-links {
+    text-align: center;
+}
+
+/* Optional: Custom color scheme */
+:root {
+    --primary-color: #667eea;
+    --dark-primary-color: #5568d3;
+}
+
+.btn-primary {
+    background-color: var(--primary-color) !important;
+    border-color: var(--primary-color) !important;
+}
+
+.btn-primary:hover {
+    background-color: var(--dark-primary-color) !important;
+    border-color: var(--dark-primary-color) !important;
+}
