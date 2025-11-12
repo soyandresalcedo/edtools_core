@@ -19,18 +19,32 @@ footer a[href*="erpnext"] {
 }
 
 /* ============================= */
-/* ADD EDTOOLS BRANDING (TEXT ONLY) */
+/* LOGIN PAGE - REPLACE TEXT */
 /* ============================= */
 
-/* Replace login page title with "Edtools" */
-.page-card-head .page-card-head-title::after {
-    content: "Edtools";
-    display: block;
+/* Hide the original "Iniciar sesión en Frappe" text */
+.page-card-head .page-card-head-title {
+    font-size: 0 !important;
+    line-height: 0 !important;
 }
 
-/* Add subtitle on login page */
+/* Replace with "Iniciar sesión en Edtools" */
+.page-card-head .page-card-head-title::before {
+    content: "Iniciar sesión en Edtools";
+    font-size: 1.5rem !important;
+    line-height: 1.2 !important;
+    display: block;
+    font-weight: 500;
+}
+
+/* Hide any subtitle that mentions Frappe */
+.page-card-head .text-muted {
+    display: none !important;
+}
+
+/* Add Edtools subtitle */
 .page-card-head::after {
-    content: "Educational Management System";
+    content: "Sistema de Gestión Educativa";
     display: block;
     font-size: 0.9rem;
     color: #6c757d;
