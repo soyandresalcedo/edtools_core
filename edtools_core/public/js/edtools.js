@@ -15,7 +15,9 @@ function replaceTextInPage() {
         'ERPNext': 'Edtools',
         'with ERPNext': 'with Edtools',
         'Powered by Frappe': 'Powered by Edtools',
-        'Powered by ERPNext': 'Powered by Edtools'
+        'Powered by ERPNext': 'Powered by Edtools',
+        "Let's begin your journey with ERPNext": "Comencemos tu experiencia con Edtools",
+        "Let's begin your journey with Edtools": "Comencemos tu experiencia con Edtools"
     };
 
     // Function to replace text in a text node
