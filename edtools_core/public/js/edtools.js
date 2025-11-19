@@ -1,12 +1,13 @@
 // Edtools Text Replacement - Keep Frappe design, only change text
 
-frappe.ready(function() {
+// Wait for DOM to be ready
+(function() {
     // Replace text throughout the application
     replaceTextInPage();
 
     // Update page titles
     updatePageTitles();
-});
+})();
 
 function replaceTextInPage() {
     // Text replacements - only changes wording, not design
@@ -76,7 +77,18 @@ function updatePageTitles() {
     }
 }
 
-// Also run on app_ready event
-$(document).on('app_ready', function() {
-    updatePageTitles();
-});
+// Also run on app_ready event (for Frappe Desk)
+if (typeof $ !== 'undefined') {
+    $(document).on('app_ready', function() {
+        updatePageTitles();
+        replaceTextInPage();
+    });
+}
+
+// Run again when Frappe is ready (for web pages)
+if (typeof frappe !== 'undefined' && frappe.ready) {
+    frappe.ready(function() {
+        updatePageTitles();
+        replaceTextInPage();
+    });
+}
