@@ -5,12 +5,13 @@
         if (typeof frappe !== 'undefined' && frappe.realtime) {
             // Override get_host method to use external Socket.IO service
             frappe.realtime.get_host = function() {
-                // TODO: Replace with actual Railway Socket.IO service URL
-                // Format: https://socketio-production-XXXX.up.railway.app
-                const socketio_url = "RAILWAY_SOCKETIO_URL_PLACEHOLDER";
+                // Definimos la URL directamente para evitar errores de tipos de datos
+                const url = "https://socketio-production-ef94.up.railway.app";
 
-                console.log("🔌 Conectando Socket.IO a:", socketio_url);
-                return socketio_url;
+                // (Opcional) Log para ver que funciona
+                console.log("🔌 SocketIO Override activo conectando a:", url);
+
+                return url;
             };
 
             console.log('✅ Socket.IO override configurado para servicio externo');
