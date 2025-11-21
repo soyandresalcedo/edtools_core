@@ -1,7 +1,8 @@
 // Override Socket.IO client to use external Railway service
+// IMPORTANTE: Este script se ejecuta ANTES de que Frappe inicialice Socket.IO
 (function() {
-    // Wait for frappe to be ready
-    document.addEventListener('DOMContentLoaded', function() {
+    // Ejecutar inmediatamente, no esperar a DOMContentLoaded
+    function applyOverride() {
         if (typeof frappe !== 'undefined' && frappe.realtime) {
             // Override get_host method to use external Socket.IO service
             frappe.realtime.get_host = function() {
@@ -15,6 +16,14 @@
             };
 
             console.log('✅ Socket.IO override configurado para servicio externo');
+            return true;
         }
-    });
+        return false;
+    }
+
+    // Intentar aplicar inmediatamente
+    if (!applyOverride()) {
+        // Si frappe no está listo, esperar a que se cargue
+        document.addEventListener('DOMContentLoaded', applyOverride);
+    }
 })();
