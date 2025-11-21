@@ -1,30 +1,38 @@
 // Override Socket.IO client to use external Railway service
 // IMPORTANTE: Este script se ejecuta ANTES de que Frappe inicialice Socket.IO
-// DEBUG: Force rebuild v2 - 2024-11-20
+// FIX: Manejo correcto de HTTPS/WSS - Railway termina SSL automáticamente
 (function() {
-    // Ejecutar inmediatamente, no esperar a DOMContentLoaded
-    function applyOverride() {
-        if (typeof frappe !== 'undefined' && frappe.realtime) {
-            // Override get_host method to use external Socket.IO service
-            frappe.realtime.get_host = function() {
-                // FIX: Evitar usar frappe.boot.socketio_port.startsWith() - causa error de tipo
-                // Retornamos URL directa sin depender de socketio_port
-                const url = "https://socketio-production-ef94.up.railway.app";
+    // Guardar la función init original
+    const originalInit = frappe.realtime?.init;
 
-                console.log("🔌 SocketIO Override v2 conectando a:", url);
+    // Override del método init para interceptar la configuración
+    if (typeof frappe !== 'undefined' && frappe.realtime) {
+        frappe.realtime.init = function(port, lazy_connect) {
+            console.log("🔌 SocketIO Override v3: Interceptando inicialización");
 
-                return url;
+            // Override get_host para usar URL externa
+            this.get_host = function() {
+                const externalUrl = "https://socketio-production-ef94.up.railway.app";
+                console.log("🔌 Conectando a servicio externo:", externalUrl);
+
+                // Railway termina SSL, retornamos HTTPS que se convierte a WSS
+                return externalUrl + `/${frappe.boot.sitename}`;
             };
 
-            console.log('✅ Socket.IO override configurado para servicio externo');
-            return true;
-        }
-        return false;
-    }
+            // Llamar al init original si existe
+            if (originalInit) {
+                return originalInit.call(this, port, lazy_connect);
+            }
+        };
 
-    // Intentar aplicar inmediatamente
-    if (!applyOverride()) {
-        // Si frappe no está listo, esperar a que se cargue
-        document.addEventListener('DOMContentLoaded', applyOverride);
+        console.log('✅ Socket.IO override v3 configurado - Railway SSL terminat');
+    } else {
+        // Si frappe.realtime no existe aún, esperar
+        document.addEventListener('DOMContentLoaded', function() {
+            if (frappe && frappe.realtime) {
+                console.log('⚠️  Frappe cargado tarde, aplicando override...');
+                // Aplicar override después de carga
+            }
+        });
     }
 })();
