@@ -8,8 +8,9 @@
     // Override del método init para interceptar la configuración
     if (typeof frappe !== 'undefined' && frappe.realtime) {
         frappe.realtime.init = function(port, lazy_connect) {
-            console.log("🔌 SocketIO Override v4: Interceptando inicialización");
-            console.log("🔌 Sitename:", frappe.boot?.sitename);
+            console.log("🔌 SocketIO Override v5: PRODUCCIÓN - Usando hostname real");
+            console.log("🔌 Sitename (boot):", frappe.boot?.sitename);
+            console.log("🔌 Hostname (window):", window.location.hostname);
 
             // Override get_host para usar URL externa
             this.get_host = function() {
@@ -47,7 +48,7 @@
             }
         };
 
-        console.log('✅ Socket.IO override v4 configurado - Railway SSL + headers');
+        console.log('✅ Socket.IO override v5 configurado - hostname consistency fix');
     } else {
         // Si frappe.realtime no existe aún, esperar
         document.addEventListener('DOMContentLoaded', function() {
