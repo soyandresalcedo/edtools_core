@@ -8,7 +8,7 @@
     // Override del método init para interceptar la configuración
     if (typeof frappe !== 'undefined' && frappe.realtime) {
         frappe.realtime.init = function(port, lazy_connect) {
-            console.log("🔌 SocketIO Override v5: PRODUCCIÓN - Usando hostname real");
+            console.log("🔌 SocketIO Override v6: Cross-domain cookies + credentials");
             console.log("🔌 Sitename (boot):", frappe.boot?.sitename);
             console.log("🔌 Hostname (window):", window.location.hostname);
 
@@ -28,15 +28,29 @@
                 return fullUrl;
             };
 
-            // FIX: Override get_socket_options para añadir extraHeaders
+            // FIX: Override get_socket_options para añadir extraHeaders y cookies
             const originalGetSocketOptions = this.get_socket_options;
             this.get_socket_options = function() {
                 const options = originalGetSocketOptions ? originalGetSocketOptions.call(this) : {};
 
                 // Añadir header personalizado con sitename para autenticación
-                // Usar siempre window.location.hostname para consistencia
                 options.extraHeaders = options.extraHeaders || {};
                 options.extraHeaders['x-frappe-site-name'] = window.location.hostname;
+
+                // CRITICAL: Enviar cookies en cross-domain requests
+                options.withCredentials = true;
+
+                // Enviar cookie sid manualmente en headers para cross-domain
+                const cookies = document.cookie.split(';').reduce((acc, cookie) => {
+                    const [key, value] = cookie.trim().split('=');
+                    acc[key] = value;
+                    return acc;
+                }, {});
+
+                if (cookies.sid) {
+                    options.extraHeaders['Cookie'] = 'sid=' + cookies.sid;
+                    console.log("🔌 Enviando cookie sid en headers");
+                }
 
                 console.log("🔌 Socket options:", options);
                 return options;
@@ -48,7 +62,7 @@
             }
         };
 
-        console.log('✅ Socket.IO override v5 configurado - hostname consistency fix');
+        console.log('✅ Socket.IO override v6 configurado - cross-domain cookies fix');
     } else {
         // Si frappe.realtime no existe aún, esperar
         document.addEventListener('DOMContentLoaded', function() {
