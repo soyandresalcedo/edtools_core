@@ -8,15 +8,32 @@
     // Override del método init para interceptar la configuración
     if (typeof frappe !== 'undefined' && frappe.realtime) {
         frappe.realtime.init = function(port, lazy_connect) {
-            console.log("🔌 SocketIO Override v3: Interceptando inicialización");
+            console.log("🔌 SocketIO Override v4: Interceptando inicialización");
+            console.log("🔌 Sitename:", frappe.boot?.sitename);
 
             // Override get_host para usar URL externa
             this.get_host = function() {
                 const externalUrl = "https://socketio-production-ef94.up.railway.app";
-                console.log("🔌 Conectando a servicio externo:", externalUrl);
+                const sitename = frappe.boot?.sitename || '';
+                const fullUrl = externalUrl + (sitename ? `/${sitename}` : '');
+
+                console.log("🔌 URL completa:", fullUrl);
 
                 // Railway termina SSL, retornamos HTTPS que se convierte a WSS
-                return externalUrl + `/${frappe.boot.sitename}`;
+                return fullUrl;
+            };
+
+            // FIX: Override get_socket_options para añadir extraHeaders
+            const originalGetSocketOptions = this.get_socket_options;
+            this.get_socket_options = function() {
+                const options = originalGetSocketOptions ? originalGetSocketOptions.call(this) : {};
+
+                // Añadir header personalizado con sitename para autenticación
+                options.extraHeaders = options.extraHeaders || {};
+                options.extraHeaders['x-frappe-site-name'] = frappe.boot?.sitename || window.location.hostname;
+
+                console.log("🔌 Socket options:", options);
+                return options;
             };
 
             // Llamar al init original si existe
@@ -25,7 +42,7 @@
             }
         };
 
-        console.log('✅ Socket.IO override v3 configurado - Railway SSL terminat');
+        console.log('✅ Socket.IO override v4 configurado - Railway SSL + headers');
     } else {
         // Si frappe.realtime no existe aún, esperar
         document.addEventListener('DOMContentLoaded', function() {
