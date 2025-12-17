@@ -32,7 +32,9 @@ web_include_js = "/assets/edtools_core/js/edtools.js"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {
+	"Student": "public/js/student.js"
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -105,13 +107,17 @@ web_include_js = "/assets/edtools_core/js/edtools.js"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-#	}
-# }
+doc_events = {
+	"Program Enrollment": {
+		"validate": "edtools_core.validations.enrollment.validate_student_status"
+	},
+	"Course Enrollment": {
+		"validate": "edtools_core.validations.enrollment.validate_student_status"
+	},
+	"Student": {
+		"before_save": "edtools_core.validations.student.track_status_change"
+	}
+}
 
 # Scheduled Tasks
 # ---------------
