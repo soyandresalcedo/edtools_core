@@ -169,8 +169,8 @@ def get_current_enrollment(student, academic_year=None):
 
     if program_enrollment_list:
         return program_enrollment_list[0]
-	else:
-		return None
+    else:
+        return None
 
 @frappe.whitelist()
 def get_student_info():
