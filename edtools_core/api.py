@@ -360,3 +360,110 @@ def get_posting_date_from_fee_payment(fee_name):
         as_dict=1,
     )
     return result[0].posting_date if result else None
+
+
+# ------------------------------------------------------------------
+# FEE STRUCTURE ENDPOINTS (Ported from Education develop branch)
+# ------------------------------------------------------------------
+
+def get_future_dates(fee_plan, start_date=None):
+    """Helper function to calculate future payment dates based on fee plan."""
+    from frappe.utils import add_months, nowdate
+
+    today = start_date or nowdate()
+    gap_map = {
+        "Monthly": 1,
+        "Quarterly": 3,
+        "Semi-Annually": 6,
+        "Annually": 12,
+    }
+    frequency_map = {
+        "Monthly": 12,
+        "Quarterly": 4,
+        "Semi-Annually": 2,
+        "Annually": 1,
+    }
+    months = []
+    gap = gap_map.get(fee_plan)
+    frequency = frequency_map.get(fee_plan)
+
+    for i in range(1, frequency + 1):
+        months.append(add_months(today, gap * i))
+
+    return months
+
+
+@frappe.whitelist()
+def get_amount_distribution_based_on_fee_plan(
+    components,
+    total_amount=0,
+    fee_plan="Monthly",
+    academic_year=None,
+):
+    """Calculate fee distribution based on payment plan.
+
+    Args:
+        components: JSON string of fee components with fees_category and total
+        total_amount: Total fee amount
+        fee_plan: Payment plan type (Monthly, Quarterly, Semi-Annually, Term-Wise, Annually)
+        academic_year: Required for Term-Wise plan
+
+    Returns:
+        dict with 'distribution' (list of due dates and amounts) and 'per_component_amount'
+    """
+    total_amount = flt(total_amount)
+    if isinstance(components, str):
+        components = json.loads(components)
+
+    month_dict = {
+        "Monthly": {"month_list": get_future_dates("Monthly"), "amount": 1 / 12},
+        "Quarterly": {
+            "month_list": get_future_dates("Quarterly"),
+            "amount": 1 / 4,
+        },
+        "Semi-Annually": {"month_list": get_future_dates("Semi-Annually"), "amount": 1 / 2},
+        "Term-Wise": {"month_list": [], "amount": 0},
+        "Annually": {"month_list": get_future_dates("Annually"), "amount": 1},
+    }
+
+    academic_terms = []
+    if fee_plan == "Term-Wise":
+        academic_terms = frappe.get_list(
+            "Academic Term",
+            filters={"academic_year": academic_year},
+            fields=["name", "term_start_date"],
+            order_by="term_start_date asc",
+        )
+        if not academic_terms:
+            frappe.throw(
+                _("No Academic Terms found for Academic Year {0}").format(academic_year)
+            )
+        month_dict.get(fee_plan)["amount"] = 1 / len(academic_terms)
+
+        for term in academic_terms:
+            month_dict.get(fee_plan)["month_list"].append(
+                {"term": term.get("name"), "due_date": term.get("term_start_date")}
+            )
+
+    month_list_and_amount = month_dict[fee_plan]
+
+    per_component_amount = {}
+    for component in components:
+        per_component_amount[component.get("fees_category")] = component.get(
+            "total"
+        ) * month_list_and_amount.get("amount")
+
+    amount = sum(per_component_amount.values())
+
+    final_month_list = []
+
+    if fee_plan == "Term-Wise":
+        for term in month_list_and_amount.get("month_list"):
+            final_month_list.append(
+                {"term": term.get("term"), "due_date": term.get("due_date"), "amount": amount}
+            )
+    else:
+        for date in month_list_and_amount.get("month_list"):
+            final_month_list.append({"due_date": date, "amount": amount})
+
+    return {"distribution": final_month_list, "per_component_amount": per_component_amount}
