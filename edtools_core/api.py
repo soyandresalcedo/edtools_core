@@ -195,10 +195,28 @@ def get_student_info():
 
 @frappe.whitelist()
 def get_school_abbr_logo():
-    abbr = frappe.db.get_single_value(
-        "Education Settings", "school_college_name_abbreviation"
-    )
-    logo = frappe.db.get_single_value("Education Settings", "school_college_logo")
+    """Get school abbreviation and logo from Education Settings.
+
+    Returns default values if fields don't exist (requires bench migrate).
+    """
+    try:
+        abbr = frappe.db.get_single_value(
+            "Education Settings", "school_college_name_abbreviation"
+        )
+    except Exception:
+        abbr = None
+
+    try:
+        logo = frappe.db.get_single_value("Education Settings", "school_college_logo")
+    except Exception:
+        logo = None
+
+    # Fallback: try to get from Website Settings if Education Settings fields don't exist
+    if not abbr:
+        abbr = frappe.db.get_single_value("Website Settings", "app_name") or "EdTools"
+    if not logo:
+        logo = frappe.db.get_single_value("Website Settings", "app_logo")
+
     return {"name": abbr, "logo": logo}
 
 @frappe.whitelist()
@@ -260,51 +278,85 @@ def apply_leave(leave_data, program_name):
 
 @frappe.whitelist()
 def get_student_invoices(student):
-    student_sales_invoices = []
+    """Get student fees/invoices.
 
-    sales_invoice_list = frappe.db.get_list(
-        "Sales Invoice",
+    Uses the Fees doctype which always has the student field.
+    Falls back to Sales Invoice if custom fields are configured.
+    """
+    student_invoices = []
+
+    # Primary: Use Fees doctype (native to Education module)
+    fees_list = frappe.db.get_list(
+        "Fees",
         filters={
             "student": student,
-            "status": ["in", ["Paid", "Unpaid", "Overdue", "Partly Paid"]],
             "docstatus": 1,
         },
         fields=[
             "name",
-            "status",
             "student",
+            "student_name",
             "due_date",
+            "posting_date",
             "fee_schedule",
             "outstanding_amount",
             "currency",
             "grand_total",
+            "program",
         ],
-        order_by="status desc",
+        order_by="posting_date desc",
     )
 
-    for si in sales_invoice_list:
-        student_program_invoice_status = {}
-        student_program_invoice_status["status"] = si.status
-        # Validar si fee_schedule existe antes de buscar
-        if si.fee_schedule:
-            student_program_invoice_status["program"] = get_program_from_fee_schedule(si.fee_schedule)
+    for fee in fees_list:
+        # Determine status based on outstanding amount
+        if fee.outstanding_amount <= 0:
+            status = "Paid"
+        elif fee.outstanding_amount < fee.grand_total:
+            status = "Partly Paid"
+        elif fee.due_date and getdate(fee.due_date) < getdate(today()):
+            status = "Overdue"
         else:
-            student_program_invoice_status["program"] = None
+            status = "Unpaid"
 
-        symbol = get_currency_symbol(si.get("currency", "INR"))
-        student_program_invoice_status["amount"] = symbol + " " + str(si.outstanding_amount)
-        student_program_invoice_status["invoice"] = si.name
+        symbol = get_currency_symbol(fee.get("currency") or "USD")
 
-        if si.status == "Paid":
-            student_program_invoice_status["amount"] = symbol + " " + str(si.grand_total)
-            student_program_invoice_status["payment_date"] = get_posting_date_from_payment_entry_against_sales_invoice(si.name)
-            student_program_invoice_status["due_date"] = "-"
+        invoice_data = {
+            "status": status,
+            "program": fee.program,
+            "invoice": fee.name,
+            "due_date": fee.due_date or "-",
+            "payment_date": "-",
+        }
+
+        if status == "Paid":
+            invoice_data["amount"] = symbol + " " + str(fee.grand_total)
+            # Get payment date from Payment Entry
+            invoice_data["payment_date"] = get_posting_date_from_fee_payment(fee.name) or fee.posting_date
+            invoice_data["due_date"] = "-"
         else:
-            student_program_invoice_status["due_date"] = si.due_date
-            student_program_invoice_status["payment_date"] = "-"
+            invoice_data["amount"] = symbol + " " + str(fee.outstanding_amount)
 
-        student_sales_invoices.append(student_program_invoice_status)
+        student_invoices.append(invoice_data)
 
     print_format = get_fees_print_format() or "Standard"
 
-    return {"invoices": student_sales_invoices, "print_format": print_format}
+    return {"invoices": student_invoices, "print_format": print_format}
+
+
+def get_posting_date_from_fee_payment(fee_name):
+    """Get payment date for a Fee from Payment Entry Reference."""
+    result = frappe.db.sql(
+        """
+        SELECT pe.posting_date
+        FROM `tabPayment Entry` pe
+        INNER JOIN `tabPayment Entry Reference` per ON pe.name = per.parent
+        WHERE per.reference_doctype = 'Fees'
+        AND per.reference_name = %s
+        AND pe.docstatus = 1
+        ORDER BY pe.posting_date DESC
+        LIMIT 1
+        """,
+        (fee_name,),
+        as_dict=1,
+    )
+    return result[0].posting_date if result else None
