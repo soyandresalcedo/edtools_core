@@ -467,3 +467,119 @@ def get_amount_distribution_based_on_fee_plan(
             final_month_list.append({"due_date": date, "amount": amount})
 
     return {"distribution": final_month_list, "per_component_amount": per_component_amount}
+
+
+def validate_due_date(due_date, idx):
+    """Validate that due date is not in the past."""
+    from frappe.utils import nowdate
+    if due_date < nowdate():
+        frappe.throw(
+            _("Due Date in row {0} should be greater than or same as today's date.").format(idx)
+        )
+
+
+@frappe.whitelist()
+def make_fee_schedule(
+    source_name,
+    dialog_values,
+    per_component_amount,
+    total_amount,
+    target_doc=None,
+):
+    """Create Fee Schedule(s) from Fee Structure based on distribution plan.
+
+    This creates multiple Fee Schedules based on the fee plan distribution
+    (Monthly, Quarterly, etc.) selected in the modal dialog.
+
+    Args:
+        source_name: Fee Structure name
+        dialog_values: JSON with distribution and student_groups from modal
+        per_component_amount: JSON with amount per component
+        total_amount: Total amount from Fee Structure
+        target_doc: Optional target document
+
+    Returns:
+        Number of Fee Schedules created
+    """
+    from frappe.model.mapper import get_mapped_doc
+
+    dialog_values = json.loads(dialog_values) if isinstance(dialog_values, str) else dialog_values
+    per_component_amount = json.loads(per_component_amount) if isinstance(per_component_amount, str) else per_component_amount
+
+    student_groups = dialog_values.get("student_groups")
+    fee_plan_wise_distribution = [
+        fee_plan.get("due_date") for fee_plan in dialog_values.get("distribution", [])
+    ]
+
+    for distribution in dialog_values.get("distribution", []):
+        validate_due_date(distribution.get("due_date"), distribution.get("idx"))
+
+        doc = get_mapped_doc(
+            "Fee Structure",
+            source_name,
+            {
+                "Fee Structure": {
+                    "doctype": "Fee Schedule",
+                },
+                "Fee Component": {"doctype": "Fee Component"},
+            },
+        )
+        doc.due_date = distribution.get("due_date")
+        if distribution.get("term"):
+            doc.academic_term = distribution.get("term")
+        amount_per_month = 0
+
+        for component in doc.components:
+            component_ratio = component.get("total") / flt(total_amount)
+            component_ratio = round((component_ratio * 100) / 100, 2)
+            component.total = flt(component_ratio * distribution.get("amount"))
+
+            if component.discount == 100:
+                component.amount = component.total
+            else:
+                component.amount = flt((component.total) / flt(100 - component.discount)) * 100
+
+            amount_per_month += component.total
+
+        # Each distribution will be a separate fee schedule
+        doc.total_amount = distribution.get("amount")
+
+        for group in student_groups:
+            fee_schedule_student_group = doc.append("student_groups", {})
+            fee_schedule_student_group.student_group = group.get("student_group")
+
+        doc.save()
+
+    return len(fee_plan_wise_distribution)
+
+
+@frappe.whitelist()
+def make_term_wise_fee_schedule(source_name, target_doc=None):
+    """Create a single Fee Schedule from Fee Structure (term-wise).
+
+    Used when Fee Structure has an academic_term set.
+    Simply maps the Fee Structure to a new Fee Schedule.
+
+    Args:
+        source_name: Fee Structure name
+        target_doc: Optional target document
+
+    Returns:
+        Mapped Fee Schedule document
+    """
+    from frappe.model.mapper import get_mapped_doc
+
+    return get_mapped_doc(
+        "Fee Structure",
+        source_name,
+        {
+            "Fee Structure": {
+                "doctype": "Fee Schedule",
+                "validation": {
+                    "docstatus": ["=", 1],
+                },
+            },
+            "Fee Component": {"doctype": "Fee Component"},
+        },
+        target_doc,
+    )
