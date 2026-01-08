@@ -449,9 +449,13 @@ def get_amount_distribution_based_on_fee_plan(
 
     per_component_amount = {}
     for component in components:
-        per_component_amount[component.get("fees_category")] = component.get(
-            "total"
-        ) * month_list_and_amount.get("amount")
+        # Use 'total' if available, otherwise calculate from 'amount' and 'discount'
+        component_total = component.get("total")
+        if component_total is None:
+            amount = flt(component.get("amount", 0))
+            discount = flt(component.get("discount", 0))
+            component_total = amount - (amount * discount / 100)
+        per_component_amount[component.get("fees_category")] = flt(component_total) * month_list_and_amount.get("amount")
 
     amount = sum(per_component_amount.values())
 
