@@ -645,3 +645,51 @@ def get_program_enrollments(program, academic_year=None, academic_term=None):
             enrollment.update(student)
 
     return enrollments
+
+
+@frappe.whitelist()
+def get_enrolled_courses(program_enrollment):
+    """Get courses enrolled for a program enrollment.
+
+    Args:
+        program_enrollment: Program Enrollment name (required)
+
+    Returns:
+        List of courses with enrollment details
+    """
+    # Get the program enrollment document
+    enrollment = frappe.get_doc("Program Enrollment", program_enrollment)
+
+    if not enrollment:
+        frappe.throw(_("Program Enrollment {0} not found").format(program_enrollment))
+
+    # Get courses from the enrollment's courses child table
+    enrolled_courses = []
+
+    for course_enrollment in enrollment.courses:
+        course_data = {
+            "course": course_enrollment.course,
+            "course_name": frappe.db.get_value("Course", course_enrollment.course, "course_name"),
+        }
+        enrolled_courses.append(course_data)
+
+    # If no courses in enrollment, get courses from the program
+    if not enrolled_courses:
+        program = frappe.get_doc("Program", enrollment.program)
+        for program_course in program.courses:
+            course_data = {
+                "course": program_course.course,
+                "course_name": frappe.db.get_value("Course", program_course.course, "course_name"),
+                "required": program_course.required,
+            }
+            enrolled_courses.append(course_data)
+
+    return {
+        "program_enrollment": program_enrollment,
+        "student": enrollment.student,
+        "student_name": enrollment.student_name,
+        "program": enrollment.program,
+        "academic_year": enrollment.academic_year,
+        "academic_term": enrollment.academic_term,
+        "courses": enrolled_courses,
+    }
