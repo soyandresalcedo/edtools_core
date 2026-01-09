@@ -1055,3 +1055,282 @@ def get_student_average(student, program=None, academic_year=None, academic_term
         "maximum_score": round(maximum_score, 2),
         "grade": grade,
     }
+
+
+# ------------------------------------------------------------------
+# TOOL ENDPOINTS (Ported from Education develop branch)
+# ------------------------------------------------------------------
+
+@frappe.whitelist()
+def get_students_for_program_enrollment(academic_year, academic_term=None, program=None, student_batch=None):
+    """Get students for program enrollment tool.
+
+    Args:
+        academic_year: Academic year (required)
+        academic_term: Academic term filter (optional)
+        program: Program filter (optional)
+        student_batch: Student batch filter (optional)
+
+    Returns:
+        List of students eligible for enrollment
+    """
+    filters = {"enabled": 1}
+
+    students = frappe.db.get_list(
+        "Student",
+        filters=filters,
+        fields=[
+            "name",
+            "student_name",
+            "student_email_id",
+            "student_mobile_number",
+        ],
+        order_by="student_name asc",
+    )
+
+    # Filter out students already enrolled in the program for this academic year
+    if program and academic_year:
+        enrolled_students = frappe.db.get_list(
+            "Program Enrollment",
+            filters={
+                "program": program,
+                "academic_year": academic_year,
+                "docstatus": ["!=", 2],  # Not cancelled
+            },
+            fields=["student"],
+            pluck="student",
+        )
+
+        students = [s for s in students if s.name not in enrolled_students]
+
+    return students
+
+
+@frappe.whitelist()
+def get_courses_for_student_group(program, academic_term=None):
+    """Get courses for student group creation tool.
+
+    Args:
+        program: Program name (required)
+        academic_term: Academic term filter (optional)
+
+    Returns:
+        List of courses in the program
+    """
+    program_doc = frappe.get_doc("Program", program)
+
+    courses = []
+    for program_course in program_doc.courses:
+        course_data = {
+            "course": program_course.course,
+            "course_name": frappe.db.get_value("Course", program_course.course, "course_name"),
+            "required": program_course.required,
+        }
+        courses.append(course_data)
+
+    return courses
+
+
+@frappe.whitelist()
+def get_students_for_assessment_result(student_group, assessment_plan=None):
+    """Get students for assessment result tool.
+
+    Args:
+        student_group: Student Group name (required)
+        assessment_plan: Assessment Plan filter (optional)
+
+    Returns:
+        List of students with their existing assessment results
+    """
+    # Get students from the student group
+    student_group_doc = frappe.get_doc("Student Group", student_group)
+
+    students = []
+    for student_entry in student_group_doc.students:
+        student_data = {
+            "student": student_entry.student,
+            "student_name": student_entry.student_name,
+            "group_roll_number": student_entry.group_roll_number,
+        }
+
+        # Get existing assessment result if assessment_plan is provided
+        if assessment_plan:
+            existing_result = frappe.db.get_value(
+                "Assessment Result",
+                filters={
+                    "student": student_entry.student,
+                    "assessment_plan": assessment_plan,
+                    "docstatus": ["!=", 2],
+                },
+                fieldname=["name", "total_score", "grade"],
+                as_dict=True,
+            )
+            if existing_result:
+                student_data["assessment_result"] = existing_result.name
+                student_data["total_score"] = existing_result.total_score
+                student_data["grade"] = existing_result.grade
+
+        students.append(student_data)
+
+    return students
+
+
+# ------------------------------------------------------------------
+# REPORT CARD ENDPOINTS (Ported from Education develop branch)
+# ------------------------------------------------------------------
+
+@frappe.whitelist()
+def get_report_card_data(student, academic_year=None, academic_term=None):
+    """Get report card data for a student.
+
+    Args:
+        student: Student ID (required)
+        academic_year: Academic year filter (optional)
+        academic_term: Academic term filter (optional)
+
+    Returns:
+        dict with student info, courses, grades, attendance, and summary
+    """
+    # Get student info
+    student_doc = frappe.get_doc("Student", student)
+
+    # Get current enrollment
+    enrollment_filters = {"student": student, "docstatus": 1}
+    if academic_year:
+        enrollment_filters["academic_year"] = academic_year
+    if academic_term:
+        enrollment_filters["academic_term"] = academic_term
+
+    enrollment = frappe.db.get_value(
+        "Program Enrollment",
+        filters=enrollment_filters,
+        fieldname=["name", "program", "academic_year", "academic_term", "student_batch_name"],
+        as_dict=True,
+        order_by="creation desc",
+    )
+
+    if not enrollment:
+        return {
+            "student": student,
+            "student_name": student_doc.student_name,
+            "message": _("No enrollment found for the specified criteria"),
+        }
+
+    # Get assessment results
+    result_filters = {"student": student, "docstatus": 1}
+    if academic_year:
+        result_filters["academic_year"] = academic_year
+    if academic_term:
+        result_filters["academic_term"] = academic_term
+
+    assessment_results = frappe.db.get_list(
+        "Assessment Result",
+        filters=result_filters,
+        fields=[
+            "name",
+            "course",
+            "assessment_plan",
+            "total_score",
+            "maximum_score",
+            "grade",
+            "grading_scale",
+        ],
+        order_by="course asc",
+    )
+
+    # Group results by course
+    courses = {}
+    for result in assessment_results:
+        course = result.course
+        if course not in courses:
+            courses[course] = {
+                "course": course,
+                "course_name": frappe.db.get_value("Course", course, "course_name"),
+                "assessments": [],
+                "total_score": 0,
+                "maximum_score": 0,
+            }
+
+        courses[course]["assessments"].append({
+            "assessment_plan": result.assessment_plan,
+            "score": result.total_score,
+            "maximum_score": result.maximum_score,
+            "grade": result.grade,
+        })
+        courses[course]["total_score"] += flt(result.total_score)
+        courses[course]["maximum_score"] += flt(result.maximum_score)
+
+    # Calculate course grades
+    for course_data in courses.values():
+        if course_data["maximum_score"] > 0:
+            course_data["percentage"] = round(
+                course_data["total_score"] / course_data["maximum_score"] * 100, 2
+            )
+        else:
+            course_data["percentage"] = 0
+
+    # Get attendance summary
+    attendance_filters = {"student": student, "docstatus": 1}
+    if academic_year:
+        # Get date range from academic year
+        year_dates = frappe.db.get_value(
+            "Academic Year", academic_year, ["year_start_date", "year_end_date"], as_dict=True
+        )
+        if year_dates:
+            attendance_filters["date"] = ["between", [year_dates.year_start_date, year_dates.year_end_date]]
+
+    attendance_records = frappe.db.get_list(
+        "Student Attendance",
+        filters=attendance_filters,
+        fields=["status"],
+    )
+
+    total_classes = len(attendance_records)
+    present_count = sum(1 for r in attendance_records if r.status == "Present")
+    absent_count = sum(1 for r in attendance_records if r.status == "Absent")
+    leave_count = sum(1 for r in attendance_records if r.status == "Leave")
+
+    attendance_percentage = (present_count / total_classes * 100) if total_classes > 0 else 0
+
+    # Calculate overall summary
+    total_score = sum(c["total_score"] for c in courses.values())
+    maximum_score = sum(c["maximum_score"] for c in courses.values())
+    overall_percentage = (total_score / maximum_score * 100) if maximum_score > 0 else 0
+
+    return {
+        "student": student,
+        "student_name": student_doc.student_name,
+        "program": enrollment.program,
+        "academic_year": enrollment.academic_year,
+        "academic_term": enrollment.academic_term,
+        "student_batch": enrollment.student_batch_name,
+        "courses": list(courses.values()),
+        "attendance": {
+            "total_classes": total_classes,
+            "present": present_count,
+            "absent": absent_count,
+            "leave": leave_count,
+            "percentage": round(attendance_percentage, 2),
+        },
+        "summary": {
+            "total_score": round(total_score, 2),
+            "maximum_score": round(maximum_score, 2),
+            "overall_percentage": round(overall_percentage, 2),
+            "total_courses": len(courses),
+        },
+    }
+
+
+@frappe.whitelist()
+def get_student_report_card(student, academic_year=None, academic_term=None):
+    """Get student report card (alias for get_report_card_data).
+
+    Args:
+        student: Student ID (required)
+        academic_year: Academic year filter (optional)
+        academic_term: Academic term filter (optional)
+
+    Returns:
+        Report card data
+    """
+    return get_report_card_data(student, academic_year, academic_term)
