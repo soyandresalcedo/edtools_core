@@ -693,3 +693,365 @@ def get_enrolled_courses(program_enrollment):
         "academic_term": enrollment.academic_term,
         "courses": enrolled_courses,
     }
+
+
+# ------------------------------------------------------------------
+# ATTENDANCE ENDPOINTS (Ported from Education develop branch)
+# ------------------------------------------------------------------
+
+@frappe.whitelist()
+def get_student_attendance(student, student_group=None, from_date=None, to_date=None):
+    """Get attendance records for a student.
+
+    Args:
+        student: Student ID (required)
+        student_group: Student Group filter (optional)
+        from_date: Start date filter (optional)
+        to_date: End date filter (optional)
+
+    Returns:
+        List of attendance records
+    """
+    filters = {
+        "student": student,
+        "docstatus": 1,
+    }
+
+    if student_group:
+        filters["student_group"] = student_group
+
+    if from_date and to_date:
+        filters["date"] = ["between", [from_date, to_date]]
+    elif from_date:
+        filters["date"] = [">=", from_date]
+    elif to_date:
+        filters["date"] = ["<=", to_date]
+
+    attendance_records = frappe.db.get_list(
+        "Student Attendance",
+        filters=filters,
+        fields=[
+            "name",
+            "student",
+            "student_name",
+            "course_schedule",
+            "student_group",
+            "date",
+            "status",
+            "leave_application",
+        ],
+        order_by="date desc",
+    )
+
+    return attendance_records
+
+
+@frappe.whitelist()
+def get_attendance_percentage(student, student_group=None, from_date=None, to_date=None):
+    """Calculate attendance percentage for a student.
+
+    Args:
+        student: Student ID (required)
+        student_group: Student Group filter (optional)
+        from_date: Start date filter (optional)
+        to_date: End date filter (optional)
+
+    Returns:
+        dict with total_classes, present_count, absent_count, leave_count, and percentage
+    """
+    filters = {
+        "student": student,
+        "docstatus": 1,
+    }
+
+    if student_group:
+        filters["student_group"] = student_group
+
+    if from_date and to_date:
+        filters["date"] = ["between", [from_date, to_date]]
+    elif from_date:
+        filters["date"] = [">=", from_date]
+    elif to_date:
+        filters["date"] = ["<=", to_date]
+
+    attendance_records = frappe.db.get_list(
+        "Student Attendance",
+        filters=filters,
+        fields=["status"],
+    )
+
+    total_classes = len(attendance_records)
+    present_count = sum(1 for r in attendance_records if r.status == "Present")
+    absent_count = sum(1 for r in attendance_records if r.status == "Absent")
+    leave_count = sum(1 for r in attendance_records if r.status == "Leave")
+
+    percentage = (present_count / total_classes * 100) if total_classes > 0 else 0
+
+    return {
+        "total_classes": total_classes,
+        "present_count": present_count,
+        "absent_count": absent_count,
+        "leave_count": leave_count,
+        "percentage": round(percentage, 2),
+    }
+
+
+# ------------------------------------------------------------------
+# COURSE & INSTRUCTOR ENDPOINTS (Ported from Education develop branch)
+# ------------------------------------------------------------------
+
+@frappe.whitelist()
+def get_course_topics(course):
+    """Get topics for a course.
+
+    Args:
+        course: Course name (required)
+
+    Returns:
+        List of topics with their content
+    """
+    course_doc = frappe.get_doc("Course", course)
+
+    topics = []
+    for topic_item in course_doc.topics:
+        topic_data = {
+            "topic": topic_item.topic,
+            "topic_name": frappe.db.get_value("Topic", topic_item.topic, "topic_name"),
+        }
+
+        # Get topic contents
+        topic_doc = frappe.get_doc("Topic", topic_item.topic)
+        contents = []
+        for content_item in topic_doc.topic_content:
+            content_data = {
+                "content_type": content_item.content_type,
+                "content": content_item.content,
+            }
+            contents.append(content_data)
+
+        topic_data["contents"] = contents
+        topics.append(topic_data)
+
+    return {
+        "course": course,
+        "course_name": course_doc.course_name,
+        "topics": topics,
+    }
+
+
+@frappe.whitelist()
+def get_instructor_courses(instructor, academic_year=None, academic_term=None):
+    """Get courses taught by an instructor.
+
+    Args:
+        instructor: Instructor ID (required)
+        academic_year: Academic year filter (optional)
+        academic_term: Academic term filter (optional)
+
+    Returns:
+        List of courses with schedule details
+    """
+    filters = {
+        "instructor": instructor,
+    }
+
+    if academic_year:
+        # Get course schedules filtered by programs in this academic year
+        filters["schedule_date"] = [">=", frappe.db.get_value(
+            "Academic Year", academic_year, "year_start_date"
+        )]
+
+    course_schedules = frappe.db.get_list(
+        "Course Schedule",
+        filters=filters,
+        fields=[
+            "name",
+            "course",
+            "program",
+            "student_group",
+            "room",
+            "schedule_date",
+            "from_time",
+            "to_time",
+        ],
+        order_by="schedule_date desc",
+    )
+
+    # Get unique courses
+    courses = {}
+    for schedule in course_schedules:
+        course_key = schedule.course
+        if course_key not in courses:
+            course_name = frappe.db.get_value("Course", schedule.course, "course_name")
+            courses[course_key] = {
+                "course": schedule.course,
+                "course_name": course_name,
+                "programs": set(),
+                "student_groups": set(),
+                "schedules": [],
+            }
+
+        courses[course_key]["programs"].add(schedule.program)
+        courses[course_key]["student_groups"].add(schedule.student_group)
+        courses[course_key]["schedules"].append({
+            "schedule_date": schedule.schedule_date,
+            "from_time": schedule.from_time,
+            "to_time": schedule.to_time,
+            "room": schedule.room,
+            "student_group": schedule.student_group,
+        })
+
+    # Convert sets to lists for JSON serialization
+    result = []
+    for course_data in courses.values():
+        course_data["programs"] = list(course_data["programs"])
+        course_data["student_groups"] = list(course_data["student_groups"])
+        result.append(course_data)
+
+    return result
+
+
+# ------------------------------------------------------------------
+# ASSESSMENT & RESULTS ENDPOINTS (Ported from Education develop branch)
+# ------------------------------------------------------------------
+
+@frappe.whitelist()
+def get_student_results(student, program=None, academic_year=None, academic_term=None):
+    """Get assessment results for a student.
+
+    Args:
+        student: Student ID (required)
+        program: Program filter (optional)
+        academic_year: Academic year filter (optional)
+        academic_term: Academic term filter (optional)
+
+    Returns:
+        List of assessment results with details
+    """
+    filters = {
+        "student": student,
+        "docstatus": 1,
+    }
+
+    if program:
+        filters["program"] = program
+
+    if academic_year:
+        filters["academic_year"] = academic_year
+
+    if academic_term:
+        filters["academic_term"] = academic_term
+
+    results = frappe.db.get_list(
+        "Assessment Result",
+        filters=filters,
+        fields=[
+            "name",
+            "student",
+            "student_name",
+            "assessment_plan",
+            "course",
+            "program",
+            "academic_year",
+            "academic_term",
+            "total_score",
+            "maximum_score",
+            "grade",
+            "grading_scale",
+        ],
+        order_by="creation desc",
+    )
+
+    # Enrich with assessment plan details
+    for result in results:
+        plan = frappe.db.get_value(
+            "Assessment Plan",
+            result.assessment_plan,
+            ["assessment_name", "assessment_group", "assessment_criteria"],
+            as_dict=True,
+        )
+        if plan:
+            result.update(plan)
+
+        # Get course name
+        if result.course:
+            result["course_name"] = frappe.db.get_value("Course", result.course, "course_name")
+
+    return results
+
+
+@frappe.whitelist()
+def get_student_average(student, program=None, academic_year=None, academic_term=None):
+    """Calculate student's average grade across assessments.
+
+    Args:
+        student: Student ID (required)
+        program: Program filter (optional)
+        academic_year: Academic year filter (optional)
+        academic_term: Academic term filter (optional)
+
+    Returns:
+        dict with average_score, average_percentage, total_assessments, and grade
+    """
+    filters = {
+        "student": student,
+        "docstatus": 1,
+    }
+
+    if program:
+        filters["program"] = program
+
+    if academic_year:
+        filters["academic_year"] = academic_year
+
+    if academic_term:
+        filters["academic_term"] = academic_term
+
+    results = frappe.db.get_list(
+        "Assessment Result",
+        filters=filters,
+        fields=[
+            "total_score",
+            "maximum_score",
+            "grading_scale",
+        ],
+    )
+
+    if not results:
+        return {
+            "average_score": 0,
+            "average_percentage": 0,
+            "total_assessments": 0,
+            "grade": None,
+        }
+
+    total_score = sum(flt(r.total_score) for r in results)
+    maximum_score = sum(flt(r.maximum_score) for r in results)
+    total_assessments = len(results)
+
+    average_percentage = (total_score / maximum_score * 100) if maximum_score > 0 else 0
+    average_score = total_score / total_assessments if total_assessments > 0 else 0
+
+    # Get grade based on average percentage using the first grading scale found
+    grade = None
+    grading_scale = results[0].get("grading_scale") if results else None
+    if grading_scale:
+        grade_intervals = frappe.db.get_list(
+            "Grading Scale Interval",
+            filters={"parent": grading_scale},
+            fields=["grade_code", "threshold"],
+            order_by="threshold desc",
+        )
+        for interval in grade_intervals:
+            if average_percentage >= flt(interval.threshold):
+                grade = interval.grade_code
+                break
+
+    return {
+        "average_score": round(average_score, 2),
+        "average_percentage": round(average_percentage, 2),
+        "total_assessments": total_assessments,
+        "total_score": round(total_score, 2),
+        "maximum_score": round(maximum_score, 2),
+        "grade": grade,
+    }
