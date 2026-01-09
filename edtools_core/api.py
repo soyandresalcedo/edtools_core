@@ -587,3 +587,61 @@ def make_term_wise_fee_schedule(source_name, target_doc=None):
         },
         target_doc,
     )
+
+
+# ------------------------------------------------------------------
+# PROGRAM ENROLLMENT ENDPOINTS
+# ------------------------------------------------------------------
+
+@frappe.whitelist()
+def get_program_enrollments(program, academic_year=None, academic_term=None):
+    """Get students enrolled in a program.
+
+    Args:
+        program: Program name (required)
+        academic_year: Academic year filter (optional)
+        academic_term: Academic term filter (optional)
+
+    Returns:
+        List of program enrollments with student details
+    """
+    filters = {
+        "program": program,
+        "docstatus": 1,  # Only submitted enrollments
+    }
+
+    if academic_year:
+        filters["academic_year"] = academic_year
+
+    if academic_term:
+        filters["academic_term"] = academic_term
+
+    enrollments = frappe.db.get_list(
+        "Program Enrollment",
+        filters=filters,
+        fields=[
+            "name",
+            "student",
+            "student_name",
+            "program",
+            "academic_year",
+            "academic_term",
+            "student_batch_name",
+            "student_category",
+            "enrollment_date",
+        ],
+        order_by="enrollment_date desc",
+    )
+
+    # Enrich with student details
+    for enrollment in enrollments:
+        student = frappe.db.get_value(
+            "Student",
+            enrollment.student,
+            ["student_email_id", "student_mobile_number", "enabled"],
+            as_dict=True,
+        )
+        if student:
+            enrollment.update(student)
+
+    return enrollments
