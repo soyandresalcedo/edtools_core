@@ -511,6 +511,13 @@ def make_fee_schedule(
     per_component_amount = json.loads(per_component_amount) if isinstance(per_component_amount, str) else per_component_amount
 
     student_groups = dialog_values.get("student_groups")
+    # Aquí definimos la variable. 'total_amount' viene de los argumentos de la función.
+    safe_total_amount = flt(total_amount)
+
+    # Verificación de seguridad (opcional pero recomendada)
+    if safe_total_amount == 0:
+        frappe.throw("El monto total (Total Amount) no puede ser cero.")
+        
     fee_plan_wise_distribution = [
         fee_plan.get("due_date") for fee_plan in dialog_values.get("distribution", [])
     ]
@@ -531,12 +538,25 @@ def make_fee_schedule(
         doc.due_date = distribution.get("due_date")
         if distribution.get("term"):
             doc.academic_term = distribution.get("term")
-        amount_per_month = 0
+
+        amount_per_month = 0.0
 
         for component in doc.components:
-            component_ratio = component.get("total") / flt(total_amount)
-            component_ratio = round((component_ratio * 100) / 100, 2)
-            component.total = flt(component_ratio * distribution.get("amount"))
+            comp_origin_amount = flt(component.get("amount"))
+            
+            # Calculamos el ratio (porcentaje que representa este componente del total)
+            component_ratio = comp_origin_amount / safe_total_amount
+            
+            # Aplicamos el ratio al monto de esta cuota (distribución)
+            distribution_amount = flt(distribution.get("amount"))
+            installment_share = flt(component_ratio * distribution_amount)
+            
+            # Asignamos el valor calculado a una variable temporal o campo custom 'total'
+            # Nota: Asegúrate de que el campo 'total' exista en el DocType Fee Component si quieres guardarlo
+            component.total = installment_share 
+
+            # Lógica de Descuento Blindada
+            discount = flt(component.get("discount"))
 
             if component.discount == 100:
                 component.amount = component.total
