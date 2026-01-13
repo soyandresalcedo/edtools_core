@@ -517,7 +517,7 @@ def make_fee_schedule(
     # Verificación de seguridad (opcional pero recomendada)
     if safe_total_amount == 0:
         frappe.throw("El monto total (Total Amount) no puede ser cero.")
-        
+
     fee_plan_wise_distribution = [
         fee_plan.get("due_date") for fee_plan in dialog_values.get("distribution", [])
     ]
@@ -561,8 +561,14 @@ def make_fee_schedule(
             if component.discount == 100:
                 component.amount = component.total
             else:
-                component.amount = flt((component.total) / flt(100 - component.discount)) * 100
+                divisor = 100.0 - discount
+                if divisor == 0:
+                    component.amount = component.total
+                else:
+                    component.amount = flt((component.total) / divisor) * 100.0
 
+            component.amount = flt(component.amount, 2)
+            component.total = flt(component.total, 2)
             amount_per_month += component.total
 
         # Each distribution will be a separate fee schedule
