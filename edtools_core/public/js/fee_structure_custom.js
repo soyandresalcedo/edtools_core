@@ -127,14 +127,16 @@ frappe.ui.form.on('Fee Structure', {
             let custom_installments = dialog.get_value('custom_installments');
             let initial_payment_amount = dialog.get_value('initial_payment_amount');
 
+            // Visibilidad
             let is_monthly = (fee_plan === 'Monthly');
             dialog.set_df_property('custom_installments', 'hidden', !is_monthly);
             dialog.set_df_property('initial_payment_amount', 'hidden', !is_monthly);
             
+            // Limpiamos visualmente antes de llamar
             dialog.fields_dict.distribution.df.data = [];
-            dialog.refresh();
+            dialog.fields_dict.distribution.grid.refresh();
 
-            // CORREGIDO: edtools_core.api (sin repetir edtools_core)
+            // LLAMADA A LA API
             frappe.call({
                 method: 'edtools_core.api.get_amount_distribution_based_on_fee_plan',
                 args: {
@@ -148,23 +150,34 @@ frappe.ui.form.on('Fee Structure', {
                 callback: function (r) {
                     if (!r.message) return;
 
-                    let dialog_grid = dialog.fields_dict.distribution.grid;
                     let distribution = r.message.distribution;
                     frm.per_component_amount = r.message.per_component_amount;
+                    let dialog_grid = dialog.fields_dict.distribution.grid;
 
-                    fee_plan === 'Term-Wise'
-                        ? (dialog_grid.docfields[0].hidden = false)
-                        : (dialog_grid.docfields[0].hidden = true);
+                    // Manejo de visibilidad de columna Term
+                    // Buscamos el campo 'term' dentro de los campos del grid
+                    let term_field = dialog_grid.docfields.find(f => f.fieldname === 'term');
+                    if(term_field) {
+                        term_field.hidden = (fee_plan === 'Term-Wise') ? 0 : 1;
+                    }
 
-                    dialog_grid.reset_grid(); 
-                    distribution.forEach((month, idx) => {
-                        let row = dialog.fields_dict['distribution'].grid.add_new_row();
-                        row.term = month.term;
-                        row.due_date = month.due_date;
-                        row.amount = month.amount;
-                        row.idx = idx + 1;
+                    // --- CORRECCIÓN AQUÍ ---
+                    // En lugar de usar add_new_row() en un bucle, asignamos los datos directamente.
+                    // Esto evita el error "Cannot set properties of undefined"
+                    
+                    let new_data = distribution.map(item => {
+                        return {
+                            term: item.term,
+                            due_date: item.due_date,
+                            amount: item.amount
+                        };
                     });
-                    dialog_grid.refresh();
+
+                    // Asignamos el array completo de datos
+                    dialog.fields_dict.distribution.df.data = new_data;
+                    
+                    // Refrescamos la tabla para que pinte los datos nuevos
+                    dialog.fields_dict.distribution.grid.refresh();
                 },
             });
         };
