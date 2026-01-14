@@ -2,9 +2,6 @@
 
 frappe.ui.form.on('Fee Structure', {
     refresh: function(frm) {
-        // Sobrescribimos las funciones originales del formulario
-        // para que usen nuestra lógica personalizada y nuestra API
-
         // 1. Sobrescribir la función que abre el modal
         frm.events.open_fee_schedule_modal = function(frm) {
             let distribution_table_fields = [
@@ -127,11 +124,9 @@ frappe.ui.form.on('Fee Structure', {
             let dialog = frm.dialog;
             let fee_plan = dialog.get_value('fee_plan');
             
-            // Nuevos valores
             let custom_installments = dialog.get_value('custom_installments');
             let initial_payment_amount = dialog.get_value('initial_payment_amount');
 
-            // Visibilidad
             let is_monthly = (fee_plan === 'Monthly');
             dialog.set_df_property('custom_installments', 'hidden', !is_monthly);
             dialog.set_df_property('initial_payment_amount', 'hidden', !is_monthly);
@@ -139,9 +134,9 @@ frappe.ui.form.on('Fee Structure', {
             dialog.fields_dict.distribution.df.data = [];
             dialog.refresh();
 
-            // LLAMADA A TU API PERSONALIZADA
+            // CORREGIDO: edtools_core.api (sin repetir edtools_core)
             frappe.call({
-                method: 'edtools_core.edtools_core.api.get_amount_distribution_based_on_fee_plan',
+                method: 'edtools_core.api.get_amount_distribution_based_on_fee_plan',
                 args: {
                     fee_plan: fee_plan,
                     total_amount: frm.doc.total_amount,
@@ -194,7 +189,6 @@ frappe.ui.form.on('Fee Structure', {
                 (accumulated_value, current_value) => accumulated_value + current_value.amount, 0
             );
 
-            // Tolerancia de $1.0
             let diff = Math.abs(frm.doc.total_amount - total_amount_from_dialog);
             if (diff > 1.0) { 
                 frappe.throw(
@@ -204,9 +198,9 @@ frappe.ui.form.on('Fee Structure', {
                 return;
             }
 
-            // LLAMADA A TU API PERSONALIZADA
+            // CORREGIDO: edtools_core.api
             frappe.call({
-                method: 'edtools_core.edtools_core.api.make_fee_schedule',
+                method: 'edtools_core.api.make_fee_schedule',
                 args: {
                     source_name: frm.doc.name,
                     dialog_values: frm.dialog.get_values(),
@@ -224,10 +218,10 @@ frappe.ui.form.on('Fee Structure', {
             });
         };
 
-        // 4. Sobrescribir term-wise por si acaso
+        // 4. Sobrescribir term-wise
         frm.events.make_term_wise_fee_schedule = function(frm) {
             frappe.model.open_mapped_doc({
-                method: 'edtools_core.edtools_core.api.make_term_wise_fee_schedule',
+                method: 'edtools_core.api.make_term_wise_fee_schedule',
                 frm: frm,
             });
         };
