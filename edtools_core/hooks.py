@@ -33,7 +33,8 @@ web_include_js = "/assets/edtools_core/js/edtools.js"
 
 # include js in doctype views
 doctype_js = {
-	"Student": "public/js/student.js"
+	"Student": "public/js/student.js",
+	"Fee Structure": "public/js/fee_structure_custom.js"
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
