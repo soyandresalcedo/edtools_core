@@ -4,7 +4,7 @@
 import json
 import frappe
 from frappe import _
-from frappe.utils import cstr, flt, getdate, today
+from frappe.utils import cstr, flt, getdate, today, add_months, nowdate
 from frappe.utils.dateutils import get_dates_from_timegrain
 
 # ------------------------------------------------------------------
@@ -363,37 +363,18 @@ def get_posting_date_from_fee_payment(fee_name):
 
 
 # ------------------------------------------------------------------
-# FEE STRUCTURE ENDPOINTS (Ported from Education develop branch)
+# FEE STRUCTURE ENDPOINTS (Financial Logic - Updated)
 # ------------------------------------------------------------------
 
-def get_future_dates(fee_plan, start_date=None):
-    """Helper function to calculate future payment dates based on fee plan."""
-    from frappe.utils import add_months, nowdate
+# --- CONFIGURACIÓN FINANCIERA ---
+INTEREST_RATE_MONTHLY = 0.0103  # 1.03% Tasa Mensual
 
-    today = start_date or nowdate()
-    gap_map = {
-        "Monthly": 1,
-        "Quarterly": 3,
-        "Semi-Annually": 6,
-        "Annually": 12,
-    }
-    frequency_map = {
-        "Monthly": 12,
-        "Quarterly": 4,
-        "Semi-Annually": 2,
-        "Annually": 1,
-    }
-    months = []
-    gap = gap_map.get(fee_plan)
-    frequency = frequency_map.get(fee_plan)
-
-    for i in range(1, frequency + 1):
-        months.append(add_months(today, gap * i))
-
-    return months
-
-
-# En apps/edtools_core/edtools_core/api.py
+# --- CATEGORÍAS EXACTAS ---
+CAT_INSCRIPCION = "Inscripción"      # Mes 1
+CAT_TRADUCCION = "Traducción y equivalencia" # Mes 2
+CAT_GRADUACION = "Graduación"        # Último Mes
+CAT_REGISTRO = "Registro"            # Distribuido
+CAT_INTERESES = "Intereses"          # Calculado
 
 @frappe.whitelist()
 def get_amount_distribution_based_on_fee_plan(
@@ -401,273 +382,183 @@ def get_amount_distribution_based_on_fee_plan(
     total_amount=0,
     fee_plan="Monthly",
     academic_year=None,
-    # Nuevos parámetros opcionales
-    custom_installments=None, 
+    custom_installments=12, 
     initial_payment_amount=None 
 ):
-    """
-    Calculate fee distribution based on payment plan.
-    Supports custom installments and initial down payment.
-    """
-    from frappe.utils import add_months, nowdate, flt
-    
-    total_amount = flt(total_amount)
     if isinstance(components, str):
         components = json.loads(components)
 
-    # Lógica por defecto (Legacy)
+    # Si no es Mensual, usar lógica simple
+    if fee_plan != "Monthly" or not custom_installments:
+        return legacy_distribution(fee_plan, total_amount, components, academic_year)
+
+    try:
+        n_total_rows = int(custom_installments)
+    except:
+        n_total_rows = 12
+
+    if n_total_rows < 3: n_total_rows = 3 
+
+    # 1. CLASIFICAR
+    val_inscripcion = 0.0
+    val_traduccion = 0.0
+    val_graduacion = 0.0
+    val_registro = 0.0
+    val_capital = 0.0
+    
+    for c in components:
+        cat = c.get("fees_category")
+        amount = flt(c.get("amount") or 0)
+        
+        if cat == CAT_INSCRIPCION: val_inscripcion += amount
+        elif cat == CAT_TRADUCCION: val_traduccion += amount
+        elif cat == CAT_GRADUACION: val_graduacion += amount
+        elif cat == CAT_REGISTRO: val_registro += amount
+        elif cat == CAT_INTERESES: pass
+        else: val_capital += amount
+
+    # 2. CALCULAR
+    n_financial_months = n_total_rows - 2 
+    monthly_finance_quota = 0.0
+    total_finance_paid = 0.0
+    
+    if val_capital > 0:
+        r = INTEREST_RATE_MONTHLY
+        n = n_financial_months
+        numerator = r * ((1 + r) ** n)
+        denominator = ((1 + r) ** n) - 1
+        
+        if denominator != 0:
+            monthly_finance_quota = val_capital * (numerator / denominator)
+            total_finance_paid = monthly_finance_quota * n
+        else:
+            monthly_finance_quota = val_capital
+            total_finance_paid = val_capital
+    elif val_capital < 0:
+        monthly_finance_quota = val_capital / n_financial_months
+        total_finance_paid = val_capital
+    
+    calculated_interest = total_finance_paid - val_capital
+    if calculated_interest < 0: calculated_interest = 0
+
+    monthly_distributed_quota = val_registro / n_financial_months
+
+    # 3. GENERAR TABLA
+    final_month_list = []
+    start_date = nowdate()
+
+    # Mes 1: Inscripción
+    final_month_list.append({
+        "due_date": add_months(start_date, 1),
+        "amount": val_inscripcion,
+        "term": "Pago Inicial 1 (Inscripción)"
+    })
+
+    # Mes 2: Traducción
+    final_month_list.append({
+        "due_date": add_months(start_date, 2),
+        "amount": val_traduccion,
+        "term": "Pago Inicial 2 (Traducción)"
+    })
+
+    # Meses 3..N
+    combined_monthly_payment = monthly_finance_quota + monthly_distributed_quota
+    
+    for i in range(1, n_financial_months + 1):
+        real_month_idx = i + 2
+        is_last = (i == n_financial_months)
+        this_amount = combined_monthly_payment
+        if is_last: this_amount += val_graduacion
+
+        final_month_list.append({
+            "due_date": add_months(start_date, real_month_idx),
+            "amount": this_amount,
+            "term": f"Cuota {i}/{n_financial_months}"
+        })
+
+    return {
+        "distribution": final_month_list, 
+        "new_total_interest": calculated_interest,
+        "per_component_amount": {}
+    }
+
+def legacy_distribution(fee_plan, total_amount, components, academic_year):
+    # Lógica original simplificada para compatibilidad
+    from frappe.utils import add_months, nowdate
+    def get_future_dates(plan):
+        today = nowdate()
+        freq = {"Quarterly": 4, "Semi-Annually": 2, "Annually": 1}
+        gap = {"Quarterly": 3, "Semi-Annually": 6, "Annually": 12}
+        return [add_months(today, gap[plan] * i) for i in range(1, freq.get(plan, 0) + 1)]
+
     month_dict = {
-        "Monthly": {"month_list": get_future_dates("Monthly"), "amount": 1 / 12},
         "Quarterly": {"month_list": get_future_dates("Quarterly"), "amount": 1 / 4},
         "Semi-Annually": {"month_list": get_future_dates("Semi-Annually"), "amount": 1 / 2},
-        "Term-Wise": {"month_list": [], "amount": 0},
         "Annually": {"month_list": get_future_dates("Annually"), "amount": 1},
     }
 
-    # --- INICIO LÓGICA PERSONALIZADA ---
-    # Si seleccionan "Monthly" y envían parámetros personalizados
-    if fee_plan == "Monthly" and custom_installments:
-        num_installments = int(custom_installments)
-        initial_pay = flt(initial_payment_amount)
-        
-        # Validaciones básicas
-        if num_installments < 1:
-            num_installments = 1
-            
-        final_month_list = []
-        today = nowdate()
-        
-        # Caso 1: Solo 1 cuota (todo el pago ahora o pago inicial total)
-        if num_installments == 1:
-             final_month_list.append({
-                "due_date": add_months(today, 1), 
-                "amount": total_amount
-            })
-             
-        # Caso 2: Múltiples cuotas con pago inicial
-        else:
-            # 1. Primera cuota (Pago Inicial)
-            # Usualmente se cobra de inmediato o al primer mes
-            final_month_list.append({
-                "due_date": add_months(today, 1),
-                "amount": initial_pay if initial_pay > 0 else (total_amount / num_installments)
-            })
-            
-            # 2. Calcular el remanente
-            remaining_amount = total_amount - initial_pay
-            remaining_installments = num_installments - 1
-            
-            if remaining_amount > 0 and remaining_installments > 0:
-                monthly_share = remaining_amount / remaining_installments
-                
-                # Generar las cuotas restantes
-                for i in range(1, remaining_installments + 1):
-                    # add_months(today, 1 + i) para que sean meses consecutivos después del primero
-                    final_month_list.append({
-                        "due_date": add_months(today, 1 + i),
-                        "amount": monthly_share
-                    })
-
-        # Recalcular distribution para que coincida con el formato de retorno
-        # Nota: per_component_amount es referencial para UI, pero lo importante es 'distribution'
-        per_component_amount = {}
-        for component in components:
-            per_component_amount[component.get("fees_category")] = 0 # Valor dummy, se recalcula en make_fee_schedule
-
-        return {"distribution": final_month_list, "per_component_amount": per_component_amount}
-    
-    # --- FIN LÓGICA PERSONALIZADA ---
-
-    # ... (Mantener el resto de la lógica original para Term-Wise, Quarterly, etc.)
-    
-    # IMPORTANTE: Copia el resto de la función original para manejar los casos 
-    # donde NO es custom (Term-Wise, etc.) si el usuario no usa tu nueva UI.
-    
-    academic_terms = []
+    distribution = []
     if fee_plan == "Term-Wise":
-        # ... (código existente de academic terms) ...
-        academic_terms = frappe.get_list(
-            "Academic Term",
-            filters={"academic_year": academic_year},
-            fields=["name", "term_start_date"],
-            order_by="term_start_date asc",
-        )
-        # ... resto del código original ...
-        if not academic_terms:
-             frappe.throw(_("No Academic Terms found"))
-        month_dict.get(fee_plan)["amount"] = 1 / len(academic_terms)
-        for term in academic_terms:
-            month_dict.get(fee_plan)["month_list"].append(
-                {"term": term.get("name"), "due_date": term.get("term_start_date")}
-            )
-
-    month_list_and_amount = month_dict[fee_plan]
-    
-    # Calculo standard
-    per_component_amount = {}
-    for component in components:
-        component_total = component.get("total")
-        if component_total is None:
-            amount = flt(component.get("amount", 0))
-            discount = flt(component.get("discount", 0))
-            component_total = amount - (amount * discount / 100)
-        per_component_amount[component.get("fees_category")] = flt(component_total) * month_list_and_amount.get("amount")
-
-    amount = sum(per_component_amount.values())
-    final_month_list = []
-
-    if fee_plan == "Term-Wise":
-        for term in month_list_and_amount.get("month_list"):
-            final_month_list.append(
-                {"term": term.get("term"), "due_date": term.get("due_date"), "amount": amount}
-            )
-    else:
-        for date in month_list_and_amount.get("month_list"):
-            final_month_list.append({"due_date": date, "amount": amount})
-
-    return {"distribution": final_month_list, "per_component_amount": per_component_amount}
-
-
-def validate_due_date(due_date, idx):
-    """Validate that due date is not in the past."""
-    from frappe.utils import nowdate
-    if due_date < nowdate():
-        frappe.throw(
-            _("Due Date in row {0} should be greater than or same as today's date.").format(idx)
-        )
-
+        terms = frappe.get_list("Academic Term", filters={"academic_year": academic_year}, fields=["name", "term_start_date"])
+        amt = flt(total_amount) / (len(terms) or 1)
+        for t in terms:
+            distribution.append({"term": t.name, "due_date": t.term_start_date, "amount": amt})
+    elif fee_plan in month_dict:
+        data = month_dict[fee_plan]
+        amt = flt(total_amount) * data["amount"]
+        for d in data["month_list"]:
+            distribution.append({"due_date": d, "amount": amt})
+            
+    return {"distribution": distribution, "per_component_amount": {}}
 
 @frappe.whitelist()
-def make_fee_schedule(
-    source_name,
-    dialog_values,
-    per_component_amount,
-    total_amount,
-    target_doc=None,
-):
-    """Create Fee Schedule(s) from Fee Structure based on distribution plan.
-
-    This creates multiple Fee Schedules based on the fee plan distribution
-    (Monthly, Quarterly, etc.) selected in the modal dialog.
-
-    Args:
-        source_name: Fee Structure name
-        dialog_values: JSON with distribution and student_groups from modal
-        per_component_amount: JSON with amount per component
-        total_amount: Total amount from Fee Structure
-        target_doc: Optional target document
-
-    Returns:
-        Number of Fee Schedules created
-    """
+def make_fee_schedule(source_name, dialog_values, per_component_amount, total_amount):
     from frappe.model.mapper import get_mapped_doc
-
-    dialog_values = json.loads(dialog_values) if isinstance(dialog_values, str) else dialog_values
-    per_component_amount = json.loads(per_component_amount) if isinstance(per_component_amount, str) else per_component_amount
-
-    student_groups = dialog_values.get("student_groups")
-    # Aquí definimos la variable. 'total_amount' viene de los argumentos de la función.
-    safe_total_amount = flt(total_amount)
-
-    # Verificación de seguridad (opcional pero recomendada)
-    if safe_total_amount == 0:
-        frappe.throw("El monto total (Total Amount) no puede ser cero.")
-
-    fee_plan_wise_distribution = [
-        fee_plan.get("due_date") for fee_plan in dialog_values.get("distribution", [])
-    ]
-
-    for distribution in dialog_values.get("distribution", []):
-        validate_due_date(distribution.get("due_date"), distribution.get("idx"))
-
-        doc = get_mapped_doc(
-            "Fee Structure",
-            source_name,
-            {
-                "Fee Structure": {
-                    "doctype": "Fee Schedule",
-                },
-                "Fee Component": {"doctype": "Fee Component"},
-            },
-        )
-        doc.due_date = distribution.get("due_date")
-        if distribution.get("term"):
-            doc.academic_term = distribution.get("term")
-
-        amount_per_month = 0.0
-
-        for component in doc.components:
-            comp_origin_amount = flt(component.get("amount"))
+    
+    if isinstance(dialog_values, str): dialog_values = json.loads(dialog_values)
+    dist_total = sum(d.get("amount") for d in dialog_values.get("distribution", []))
+    created_count = 0
+    
+    for dist in dialog_values.get("distribution", []):
+        doc = get_mapped_doc("Fee Structure", source_name, {
+            "Fee Structure": {"doctype": "Fee Schedule"},
+            "Fee Component": {"doctype": "Fee Component"}
+        })
+        
+        doc.due_date = dist.get("due_date")
+        if dist.get("term"): doc.academic_term = dist.get("term")
+        
+        quota_amount = flt(dist.get("amount"))
+        current_quota_ratio = 0
+        if dist_total > 0:
+            current_quota_ratio = quota_amount / dist_total
             
-            # Calculamos el ratio (porcentaje que representa este componente del total)
-            component_ratio = comp_origin_amount / safe_total_amount
+        doc.grand_total = quota_amount
+        doc.outstanding_amount = quota_amount
+        
+        comp_sum = 0
+        for comp in doc.components:
+            original_comp_amount = flt(comp.amount)
+            new_comp_amount = original_comp_amount * current_quota_ratio
+            comp.amount = flt(new_comp_amount, 2)
+            comp_sum += comp.amount
             
-            # Aplicamos el ratio al monto de esta cuota (distribución)
-            distribution_amount = flt(distribution.get("amount"))
-            installment_share = flt(component_ratio * distribution_amount)
+        diff = quota_amount - comp_sum
+        if diff != 0 and doc.components:
+            doc.components[-1].amount += diff
             
-            # Asignamos el valor calculado a una variable temporal o campo custom 'total'
-            # Nota: Asegúrate de que el campo 'total' exista en el DocType Fee Component si quieres guardarlo
-            component.total = installment_share 
-
-            # Lógica de Descuento Blindada
-            discount = flt(component.get("discount"))
-
-            if component.discount == 100:
-                component.amount = component.total
-            else:
-                divisor = 100.0 - discount
-                if divisor == 0:
-                    component.amount = component.total
-                else:
-                    component.amount = flt((component.total) / divisor) * 100.0
-
-            component.amount = flt(component.amount, 2)
-            component.total = flt(component.total, 2)
-            amount_per_month += component.total
-
-        # Each distribution will be a separate fee schedule
-        doc.total_amount = distribution.get("amount")
-
-        for group in student_groups:
-            fee_schedule_student_group = doc.append("student_groups", {})
-            fee_schedule_student_group.student_group = group.get("student_group")
-
         doc.save()
-
-    return len(fee_plan_wise_distribution)
-
+        created_count += 1
+        
+    return created_count
 
 @frappe.whitelist()
 def make_term_wise_fee_schedule(source_name, target_doc=None):
-    """Create a single Fee Schedule from Fee Structure (term-wise).
-
-    Used when Fee Structure has an academic_term set.
-    Simply maps the Fee Structure to a new Fee Schedule.
-
-    Args:
-        source_name: Fee Structure name
-        target_doc: Optional target document
-
-    Returns:
-        Mapped Fee Schedule document
-    """
     from frappe.model.mapper import get_mapped_doc
-
-    return get_mapped_doc(
-        "Fee Structure",
-        source_name,
-        {
-            "Fee Structure": {
-                "doctype": "Fee Schedule",
-                "validation": {
-                    "docstatus": ["=", 1],
-                },
-            },
-            "Fee Component": {"doctype": "Fee Component"},
-        },
-        target_doc,
-    )
+    return get_mapped_doc("Fee Structure", source_name, {
+        "Fee Structure": {"doctype": "Fee Schedule", "validation": {"docstatus": ["=", 1]}},
+        "Fee Component": {"doctype": "Fee Component"}
+    }, target_doc)
 
 
 # ------------------------------------------------------------------

@@ -2,96 +2,74 @@
 
 frappe.ui.form.on('Fee Structure', {
     refresh: function(frm) {
+        
+        // Función auxiliar para actualizar el componente de intereses en la UI
+        // Esto es vital para que el "Total Amount" de la estructura coincida con la tabla de cuotas
+        frm.update_interest_component = function(new_interest_total) {
+            let components = frm.doc.components || [];
+            let interest_row = components.find(c => c.fees_category === 'Intereses');
+            
+            if (interest_row) {
+                // Actualizamos valor en el modelo local
+                frappe.model.set_value(interest_row.doctype, interest_row.name, 'amount', new_interest_total);
+                
+                // Recalcular el Gran Total de la Estructura (Suma de todos los componentes)
+                let new_total = components.reduce((sum, row) => sum + flt(row.amount), 0);
+                
+                frm.set_value('grand_total', new_total);
+                frm.set_value('total_amount', new_total);
+                
+                // Refrescar campos visuales
+                frm.refresh_field('components');
+                frm.refresh_field('grand_total');
+                frm.refresh_field('total_amount');
+            } else {
+                // Si no existe la fila, avisamos (pero no bloqueamos)
+                console.warn('No se encontró la categoría "Intereses" para actualizar el cálculo.');
+            }
+        };
+
         // 1. Sobrescribir la función que abre el modal
         frm.events.open_fee_schedule_modal = function(frm) {
             let distribution_table_fields = [
-                {
-                    fieldname: 'term',
-                    fieldtype: 'Link',
-                    in_list_view: 1,
-                    label: 'Term',
-                    read_only: 1,
-                    hidden: 1,
-                },
-                {
-                    fieldname: 'due_date',
-                    fieldtype: 'Date',
-                    in_list_view: 1,
-                    label: 'Due Date',
-                },
-                {
-                    fieldname: 'amount',
-                    fieldtype: 'Float',
-                    in_list_view: 1,
-                    label: 'Amount',
-                },
+                { fieldname: 'term', fieldtype: 'Data', in_list_view: 1, label: 'Description', read_only: 1 },
+                { fieldname: 'due_date', fieldtype: 'Date', in_list_view: 1, label: 'Due Date' },
+                { fieldname: 'amount', fieldtype: 'Float', in_list_view: 1, label: 'Amount' }
             ];
 
             let dialog_fields = [
                 {
-                    label: 'Select Fee Plan',
-                    fieldname: 'fee_plan',
-                    fieldtype: 'Select',
-                    reqd: 1,
-                    options: [
-                        'Monthly',
-                        'Quarterly',
-                        'Semi-Annually',
-                        'Annually',
-                        'Term-Wise',
-                    ],
+                    label: 'Select Fee Plan', fieldname: 'fee_plan', fieldtype: 'Select', reqd: 1,
+                    options: ['Monthly', 'Quarterly', 'Semi-Annually', 'Annually', 'Term-Wise'],
                     change: () => frm.events.get_amount_distribution_based_on_fee_plan(frm),
                 },
-                // --- NUEVOS CAMPOS ---
                 {
-                    label: 'Number of Installments (Months)',
+                    label: 'Number of Installments (Total Meses)',
                     fieldname: 'custom_installments',
                     fieldtype: 'Int',
-                    default: 12,
+                    default: 18, 
                     hidden: 1, 
-                    description: 'Total cuotas (Ej: 18)',
+                    description: 'Incluye Inscripción (Mes 1) y Traducción (Mes 2)',
                     change: () => frm.events.get_amount_distribution_based_on_fee_plan(frm)
                 },
                 {
-                    label: 'Initial Payment Amount',
-                    fieldname: 'initial_payment_amount',
-                    fieldtype: 'Currency',
-                    hidden: 1, 
-                    description: 'Monto primera cuota (Ej: 200)',
-                    change: () => frm.events.get_amount_distribution_based_on_fee_plan(frm)
-                },
-                // ---------------------
-                {
-                    fieldname: 'distribution',
-                    label: 'Distribution',
-                    fieldtype: 'Table',
-                    in_place_edit: false,
-                    data: [],
-                    cannot_add_rows: true,
-                    reqd: 1,
+                    fieldname: 'distribution', label: 'Distribution', fieldtype: 'Table',
+                    in_place_edit: false, data: [], cannot_add_rows: true, reqd: 1,
                     fields: distribution_table_fields,
                 },
                 {
-                    label: 'Select Student Groups',
-                    fieldname: 'student_groups',
-                    fieldtype: 'Table',
-                    in_place_edit: false,
-                    reqd: 1,
-                    data: [],
+                    label: 'Select Student Groups', fieldname: 'student_groups', fieldtype: 'Table',
+                    in_place_edit: false, reqd: 1, data: [],
                     fields: [
                         {
-                            fieldname: 'student_group',
-                            fieldtype: 'Link',
-                            in_list_view: 1,
-                            label: 'Student Group',
-                            options: 'Student Group',
+                            fieldname: 'student_group', fieldtype: 'Link', in_list_view: 1,
+                            label: 'Student Group', options: 'Student Group',
                             get_query: () => {
                                 return {
                                     filters: {
                                         program: frm.doc.program,
                                         academic_year: frm.doc.academic_year,
-                                        academic_term: frm.doc.academic_term,
-                                        student_category: frm.doc.student_category,
+                                        academic_term: frm.doc.academic_term
                                     },
                                 }
                             },
@@ -100,10 +78,8 @@ frappe.ui.form.on('Fee Structure', {
                 },
             ];
 
-            frm.per_component_amount = [];
-
             frm.dialog = new frappe.ui.Dialog({
-                title: 'Create Fee Schedule (Custom)',
+                title: 'Create Fee Schedule (Plan Financiero)',
                 fields: dialog_fields,
                 primary_action: function () {
                     frm.events.make_fee_schedule(frm);
@@ -113,76 +89,55 @@ frappe.ui.form.on('Fee Structure', {
             
             frm.dialog.show();
             
-            // Disparador inicial
+            // Disparador inicial si es mensual
             if(frm.dialog.get_value('fee_plan') == 'Monthly') {
                 frm.events.get_amount_distribution_based_on_fee_plan(frm);
             }
         };
 
-        // 2. Sobrescribir la función de cálculo de distribución
+        // 2. Cálculo de distribución y llamada a API
         frm.events.get_amount_distribution_based_on_fee_plan = function(frm) {
             let dialog = frm.dialog;
             let fee_plan = dialog.get_value('fee_plan');
-            
             let custom_installments = dialog.get_value('custom_installments');
-            let initial_payment_amount = dialog.get_value('initial_payment_amount');
 
-            // Visibilidad
+            // Visibilidad de campo de cuotas
             let is_monthly = (fee_plan === 'Monthly');
             dialog.set_df_property('custom_installments', 'hidden', !is_monthly);
-            dialog.set_df_property('initial_payment_amount', 'hidden', !is_monthly);
             
-            // Limpiamos visualmente antes de llamar
-            dialog.fields_dict.distribution.df.data = [];
-            dialog.fields_dict.distribution.grid.refresh();
-
             // LLAMADA A LA API
             frappe.call({
                 method: 'edtools_core.api.get_amount_distribution_based_on_fee_plan',
                 args: {
                     fee_plan: fee_plan,
                     total_amount: frm.doc.total_amount,
-                    components: frm.doc.components,
-                    academic_year: frm.doc.academic_year,
-                    custom_installments: custom_installments,
-                    initial_payment_amount: initial_payment_amount
+                    components: frm.doc.components, 
+                    custom_installments: custom_installments
                 },
                 callback: function (r) {
                     if (!r.message) return;
 
                     let distribution = r.message.distribution;
-                    frm.per_component_amount = r.message.per_component_amount;
-                    let dialog_grid = dialog.fields_dict.distribution.grid;
+                    let new_interest = r.message.new_total_interest;
 
-                    // Manejo de visibilidad de columna Term
-                    // Buscamos el campo 'term' dentro de los campos del grid
-                    let term_field = dialog_grid.docfields.find(f => f.fieldname === 'term');
-                    if(term_field) {
-                        term_field.hidden = (fee_plan === 'Term-Wise') ? 0 : 1;
-                    }
-
-                    // --- CORRECCIÓN AQUÍ ---
-                    // En lugar de usar add_new_row() en un bucle, asignamos los datos directamente.
-                    // Esto evita el error "Cannot set properties of undefined"
-                    
-                    let new_data = distribution.map(item => {
-                        return {
-                            term: item.term,
-                            due_date: item.due_date,
-                            amount: item.amount
-                        };
-                    });
-
-                    // Asignamos el array completo de datos
+                    // 1. PINTAR TABLA EN DIALOGO
+                    let new_data = distribution.map(item => ({
+                        due_date: item.due_date,
+                        amount: item.amount,
+                        term: item.term // Descripción de la cuota
+                    }));
                     dialog.fields_dict.distribution.df.data = new_data;
-                    
-                    // Refrescamos la tabla para que pinte los datos nuevos
                     dialog.fields_dict.distribution.grid.refresh();
+                    
+                    // 2. ACTUALIZAR INTERESES EN EL FORMULARIO PADRE
+                    if (is_monthly && new_interest !== undefined && new_interest !== null) {
+                        frm.update_interest_component(new_interest);
+                    }
                 },
             });
         };
 
-        // 3. Sobrescribir la función de guardar (Make Fee Schedule)
+        // 3. Guardar (Crear Fee Schedules)
         frm.events.make_fee_schedule = function(frm) {
             let { distribution, student_groups } = frm.dialog.get_values();
             
@@ -190,52 +145,34 @@ frappe.ui.form.on('Fee Structure', {
                 frappe.throw(__('Please select at least one Student Group'));
                 return;
             }
-            
-            student_groups.forEach((student_group) => {
-                if (!student_group.student_group) {
-                    frappe.throw(__('Student Group is mandatory'));
-                    return;
-                }
-            });
 
-            let total_amount_from_dialog = distribution.reduce(
-                (accumulated_value, current_value) => accumulated_value + current_value.amount, 0
-            );
+            // Validación de totales (con margen de error de 1.0 por redondeo)
+            let total_dist = distribution.reduce((acc, curr) => acc + flt(curr.amount), 0);
+            let total_doc = flt(frm.doc.total_amount || frm.doc.grand_total);
 
-            let diff = Math.abs(frm.doc.total_amount - total_amount_from_dialog);
-            if (diff > 1.0) { 
+            if (Math.abs(total_doc - total_dist) > 1.0) { 
                 frappe.throw(
-                    __('Total amount in the table ({0}) should be equal to the total amount from fee structure ({1})', 
-                    [total_amount_from_dialog, frm.doc.total_amount])
+                    __('El total de la tabla ({0}) no coincide con el total de la estructura ({1}). Espere a que se recalcule el interés o intente de nuevo.', 
+                    [total_dist.toFixed(2), total_doc.toFixed(2)])
                 );
                 return;
             }
 
-            // CORREGIDO: edtools_core.api
             frappe.call({
                 method: 'edtools_core.api.make_fee_schedule',
                 args: {
                     source_name: frm.doc.name,
                     dialog_values: frm.dialog.get_values(),
-                    total_amount: frm.doc.total_amount,
+                    total_amount: total_doc,
                     per_component_amount: frm.doc.components,
                 },
                 freeze: true,
                 callback: function (r) {
-                    let msg = r.message;
-                    if (msg) {
-                        frappe.msgprint(__('{0} Fee Schedule(s) created', [msg]));
+                    if (r.message) {
+                        frappe.msgprint(__('{0} Fee Schedule(s) created', [r.message]));
                         frm.dialog.hide();
                     }
                 },
-            });
-        };
-
-        // 4. Sobrescribir term-wise
-        frm.events.make_term_wise_fee_schedule = function(frm) {
-            frappe.model.open_mapped_doc({
-                method: 'edtools_core.api.make_term_wise_fee_schedule',
-                frm: frm,
             });
         };
     }
