@@ -1,31 +1,34 @@
-// apps/edtools_core/edtools_core/public/js/fee_structure_custom.js
-
 frappe.ui.form.on('Fee Structure', {
     refresh: function(frm) {
         
-        // Función auxiliar para actualizar el componente de intereses en la UI
-        // Esto es vital para que el "Total Amount" de la estructura coincida con la tabla de cuotas
+        // --- FUNCIÓN BLINDADA CONTRA ERRORES ---
         frm.update_interest_component = function(new_interest_total) {
             let components = frm.doc.components || [];
             let interest_row = components.find(c => c.fees_category === 'Intereses');
             
             if (interest_row) {
-                // Actualizamos valor en el modelo local
+                // 1. Actualizamos valor en el modelo de la tabla hija
                 frappe.model.set_value(interest_row.doctype, interest_row.name, 'amount', new_interest_total);
                 
-                // Recalcular el Gran Total de la Estructura (Suma de todos los componentes)
+                // 2. Recalcular suma
                 let new_total = components.reduce((sum, row) => sum + flt(row.amount), 0);
                 
-                frm.set_value('grand_total', new_total);
-                frm.set_value('total_amount', new_total);
+                // 3. INTENTO DE ESCRITURA SEGURA
+                // Verificamos qué campo existe en este formulario
+                if (frm.fields_dict['total_amount']) {
+                    frm.set_value('total_amount', new_total);
+                } else if (frm.fields_dict['grand_total']) {
+                    frm.set_value('grand_total', new_total);
+                } else {
+                    // Si no existe ninguno en la UI, actualizamos el modelo directamente (sin error visual)
+                    console.log('Actualizando modelo directamente (campos UI no detectados)');
+                    frm.doc.total_amount = new_total;
+                    frm.doc.grand_total = new_total;
+                }
                 
-                // Refrescar campos visuales
+                // Refrescamos todo por si acaso
                 frm.refresh_field('components');
-                frm.refresh_field('grand_total');
-                frm.refresh_field('total_amount');
-            } else {
-                // Si no existe la fila, avisamos (pero no bloqueamos)
-                console.warn('No se encontró la categoría "Intereses" para actualizar el cálculo.');
+                if (frm.fields_dict['total_amount']) frm.refresh_field('total_amount');
             }
         };
 
@@ -89,7 +92,6 @@ frappe.ui.form.on('Fee Structure', {
             
             frm.dialog.show();
             
-            // Disparador inicial si es mensual
             if(frm.dialog.get_value('fee_plan') == 'Monthly') {
                 frm.events.get_amount_distribution_based_on_fee_plan(frm);
             }
@@ -101,16 +103,14 @@ frappe.ui.form.on('Fee Structure', {
             let fee_plan = dialog.get_value('fee_plan');
             let custom_installments = dialog.get_value('custom_installments');
 
-            // Visibilidad de campo de cuotas
             let is_monthly = (fee_plan === 'Monthly');
             dialog.set_df_property('custom_installments', 'hidden', !is_monthly);
             
-            // LLAMADA A LA API
             frappe.call({
                 method: 'edtools_core.api.get_amount_distribution_based_on_fee_plan',
                 args: {
                     fee_plan: fee_plan,
-                    total_amount: frm.doc.total_amount,
+                    total_amount: frm.doc.total_amount || frm.doc.grand_total, // Fallback seguro
                     components: frm.doc.components, 
                     custom_installments: custom_installments
                 },
@@ -120,16 +120,14 @@ frappe.ui.form.on('Fee Structure', {
                     let distribution = r.message.distribution;
                     let new_interest = r.message.new_total_interest;
 
-                    // 1. PINTAR TABLA EN DIALOGO
                     let new_data = distribution.map(item => ({
                         due_date: item.due_date,
                         amount: item.amount,
-                        term: item.term // Descripción de la cuota
+                        term: item.term 
                     }));
                     dialog.fields_dict.distribution.df.data = new_data;
                     dialog.fields_dict.distribution.grid.refresh();
                     
-                    // 2. ACTUALIZAR INTERESES EN EL FORMULARIO PADRE
                     if (is_monthly && new_interest !== undefined && new_interest !== null) {
                         frm.update_interest_component(new_interest);
                     }
@@ -137,7 +135,7 @@ frappe.ui.form.on('Fee Structure', {
             });
         };
 
-        // 3. Guardar (Crear Fee Schedules)
+        // 3. Guardar
         frm.events.make_fee_schedule = function(frm) {
             let { distribution, student_groups } = frm.dialog.get_values();
             
@@ -146,7 +144,6 @@ frappe.ui.form.on('Fee Structure', {
                 return;
             }
 
-            // Validación de totales (con margen de error de 1.0 por redondeo)
             let total_dist = distribution.reduce((acc, curr) => acc + flt(curr.amount), 0);
             let total_doc = flt(frm.doc.total_amount || frm.doc.grand_total);
 
