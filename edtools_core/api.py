@@ -536,6 +536,10 @@ def make_fee_schedule(source_name, dialog_values, per_component_amount, total_am
     from frappe.model.mapper import get_mapped_doc
     
     if isinstance(dialog_values, str): dialog_values = json.loads(dialog_values)
+    
+    # 1. Obtener la lista de grupos seleccionados (CORRECCIÓN)
+    student_groups = dialog_values.get("student_groups", [])
+    
     dist_total = sum(d.get("amount") for d in dialog_values.get("distribution", []))
     created_count = 0
     
@@ -547,6 +551,11 @@ def make_fee_schedule(source_name, dialog_values, per_component_amount, total_am
         
         doc.due_date = dist.get("due_date")
         if dist.get("term"): doc.academic_term = dist.get("term")
+        
+        # AGREGAR GRUPOS (Esto faltaba y causaba el error 417)
+        for sg in student_groups:
+            row = doc.append("student_groups", {})
+            row.student_group = sg.get("student_group")
         
         quota_amount = flt(dist.get("amount"))
         current_quota_ratio = 0
