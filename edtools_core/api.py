@@ -385,6 +385,13 @@ def get_amount_distribution_based_on_fee_plan(
     custom_installments=12, 
     initial_payment_amount=None 
 ):
+    """
+    Calcula la distribución idéntica al Excel financiero:
+    Mes 1: Inscripción
+    Mes 2: Traducción
+    Mes 3..N: Amortización (Capital + Registro + Interés)
+    Mes N: + Graduación
+    """
     if isinstance(components, str):
         components = json.loads(components)
 
@@ -397,34 +404,46 @@ def get_amount_distribution_based_on_fee_plan(
     except:
         n_total_rows = 12
 
+    # Validación: Mínimo 3 meses (1 Insc + 1 Trad + 1 Financiero)
     if n_total_rows < 3: n_total_rows = 3 
 
-    # 1. CLASIFICAR
+    # 1. CLASIFICAR VALORES
     val_inscripcion = 0.0
     val_traduccion = 0.0
     val_graduacion = 0.0
-    val_registro = 0.0
-    val_capital = 0.0
+    val_capital = 0.0 # Principal (PV) -> Incluye Registro, Costo y Becas
     
     for c in components:
         cat = c.get("fees_category")
         amount = flt(c.get("amount") or 0)
         
-        if cat == CAT_INSCRIPCION: val_inscripcion += amount
-        elif cat == CAT_TRADUCCION: val_traduccion += amount
-        elif cat == CAT_GRADUACION: val_graduacion += amount
-        elif cat == CAT_REGISTRO: val_registro += amount
-        elif cat == CAT_INTERESES: pass
-        else: val_capital += amount
+        if cat == CAT_INSCRIPCION:
+            val_inscripcion += amount
+        elif cat == CAT_TRADUCCION:
+            val_traduccion += amount
+        elif cat == CAT_GRADUACION:
+            val_graduacion += amount
+        elif cat == CAT_INTERESES:
+            pass # Ignorar, se recalcula
+        else:
+            # AQUÍ ENTRA EL REGISTRO ($120) AHORA
+            # Todo lo demás se suma al capital para generar interés
+            val_capital += amount
 
-    # 2. CALCULAR
+    # 2. DEFINIR TIEMPOS
+    # Restamos los 2 primeros meses especiales
     n_financial_months = n_total_rows - 2 
+
+    # 3. CÁLCULO FINANCIERO (Fórmula PMT de Excel)
+    # Pago = Capital * (r * (1+r)^n) / ((1+r)^n - 1)
+    
     monthly_finance_quota = 0.0
     total_finance_paid = 0.0
     
     if val_capital > 0:
         r = INTEREST_RATE_MONTHLY
         n = n_financial_months
+        
         numerator = r * ((1 + r) ** n)
         denominator = ((1 + r) ** n) - 1
         
@@ -441,34 +460,36 @@ def get_amount_distribution_based_on_fee_plan(
     calculated_interest = total_finance_paid - val_capital
     if calculated_interest < 0: calculated_interest = 0
 
-    monthly_distributed_quota = val_registro / n_financial_months
-
-    # 3. GENERAR TABLA
+    # 4. GENERAR TABLA DE RESULTADOS
     final_month_list = []
     start_date = nowdate()
 
-    # Mes 1: Inscripción
+    # --- MES 1: INSCRIPCIÓN ---
     final_month_list.append({
         "due_date": add_months(start_date, 1),
         "amount": val_inscripcion,
         "term": "Pago Inicial 1 (Inscripción)"
     })
 
-    # Mes 2: Traducción
+    # --- MES 2: TRADUCCIÓN ---
     final_month_list.append({
         "due_date": add_months(start_date, 2),
         "amount": val_traduccion,
         "term": "Pago Inicial 2 (Traducción)"
     })
 
-    # Meses 3..N
-    combined_monthly_payment = monthly_finance_quota + monthly_distributed_quota
+    # --- MESES 3 a N: FINANCIAMIENTO ---
+    # La cuota 'monthly_finance_quota' ya incluye el interés sobre el Registro
     
     for i in range(1, n_financial_months + 1):
         real_month_idx = i + 2
         is_last = (i == n_financial_months)
-        this_amount = combined_monthly_payment
-        if is_last: this_amount += val_graduacion
+        
+        this_amount = monthly_finance_quota
+        
+        # Si es la última cuota absoluta, sumar Graduación
+        if is_last:
+            this_amount += val_graduacion
 
         final_month_list.append({
             "due_date": add_months(start_date, real_month_idx),
@@ -483,7 +504,6 @@ def get_amount_distribution_based_on_fee_plan(
     }
 
 def legacy_distribution(fee_plan, total_amount, components, academic_year):
-    # Lógica original simplificada para compatibilidad
     from frappe.utils import add_months, nowdate
     def get_future_dates(plan):
         today = nowdate()
