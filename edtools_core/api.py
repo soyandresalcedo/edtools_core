@@ -1288,3 +1288,16 @@ def get_student_report_card(student, academic_year=None, academic_term=None):
         Report card data
     """
     return get_report_card_data(student, academic_year, academic_term)
+
+@frappe.whitelist()
+def get_ordered_student_fees(student):
+    """Obtiene todas las Fees pendientes ordenadas por fecha de vencimiento"""
+    return frappe.db.get_list("Fees",
+        filters={
+            "student": student,
+            "docstatus": 1,
+            "outstanding_amount": [">", 0]
+        },
+        fields=["name", "outstanding_amount", "due_date"],
+        order_by="due_date asc, creation asc"
+    )
