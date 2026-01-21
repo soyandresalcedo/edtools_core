@@ -383,8 +383,12 @@ def get_amount_distribution_based_on_fee_plan(
     fee_plan="Monthly",
     academic_year=None,
     custom_installments=12, 
-    initial_payment_amount=None 
+    initial_payment_amount=None,
+    ignore_interest=False
 ):
+    if isinstance(ignore_interest, str):
+        ignore_interest = frappe.parse_json(ignore_interest)
+    
     if isinstance(components, str): components = json.loads(components)
 
     if fee_plan != "Monthly" or not custom_installments:
@@ -411,20 +415,32 @@ def get_amount_distribution_based_on_fee_plan(
         else: val_capital += amount # Registro va aqui
 
     # 2. CALCULAR
+    try: n_total_rows = int(custom_installments)
+    except: n_total_rows = 12
+    if n_total_rows < 3: n_total_rows = 3 
+
     n_financial_months = n_total_rows - 2 
     monthly_finance_quota = 0.0
     total_finance_paid = 0.0
     
     if val_capital > 0:
-        r = INTEREST_RATE_MONTHLY
-        n = n_financial_months
-        numerator = r * ((1 + r) ** n)
-        denominator = ((1 + r) ** n) - 1
-        if denominator != 0:
-            monthly_finance_quota = val_capital * (numerator / denominator)
+        # 3. MODIFICAR AQUÍ: Lógica para ignorar interés
+        if ignore_interest:
+            # División simple del capital entre los meses financieros
+            monthly_finance_quota = val_capital / n_financial_months
+            total_finance_paid = val_capital
         else:
-            monthly_finance_quota = val_capital
-        total_finance_paid = monthly_finance_quota * n
+            # Lógica original con interés compuesto
+            r = INTEREST_RATE_MONTHLY
+            n = n_financial_months
+            numerator = r * ((1 + r) ** n)
+            denominator = ((1 + r) ** n) - 1
+            if denominator != 0:
+                monthly_finance_quota = val_capital * (numerator / denominator)
+            else:
+                monthly_finance_quota = val_capital
+            total_finance_paid = monthly_finance_quota * n
+            
     elif val_capital < 0:
         monthly_finance_quota = val_capital / n_financial_months
         total_finance_paid = val_capital
@@ -1300,4 +1316,12 @@ def get_ordered_student_fees(student):
         },
         fields=["name", "outstanding_amount", "due_date"],
         order_by="due_date asc, creation asc"
+    )
+
+@frappe.whitelist()
+def get_students_by_group(student_group):
+    return frappe.db.get_list(
+        'Student Group Student',
+        filters={'parent': student_group},
+        pluck='student'
     )
