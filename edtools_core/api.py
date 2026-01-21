@@ -1335,16 +1335,19 @@ def get_structure_components(fee_structure):
     """Trae los componentes de la estructura seleccionada."""
     doc = frappe.get_doc("Fee Structure", fee_structure)
     
-    # SOLUCIÓN: Sumamos manualmente los montos de los componentes
-    # porque el campo 'grand_total' no existe en este DocType.
+    # 1. Calculamos el total manualmente (evita error grand_total)
     total_calculado = sum(flt(c.amount) for c in doc.components)
+
+    # 2. Obtenemos la moneda de forma segura (evita error currency)
+    # Si no tiene campo currency, asumimos "USD"
+    moneda = doc.get("currency") or "USD"
 
     return {
         "program": doc.program,
         "academic_year": doc.academic_year,
         "components": doc.components,
-        "grand_total": total_calculado, # Usamos la suma manual
-        "currency": doc.currency
+        "grand_total": total_calculado,
+        "currency": moneda
     }
 
 @frappe.whitelist()
