@@ -1325,3 +1325,236 @@ def get_students_by_group(student_group):
         filters={'parent': student_group},
         pluck='student'
     )
+
+# ------------------------------------------------------------------
+# STUDENT FINANCIAL TOOL - LÓGICA DE NEGOCIO
+# ------------------------------------------------------------------
+
+@frappe.whitelist()
+def get_structure_components(fee_structure):
+    """Trae los componentes de la estructura seleccionada."""
+    doc = frappe.get_doc("Fee Structure", fee_structure)
+    return {
+        "program": doc.program,
+        "academic_year": doc.academic_year,
+        "components": doc.components,
+        "grand_total": doc.grand_total,
+        "currency": doc.currency
+    }
+
+@frappe.whitelist()
+def calculate_special_plan(components, capital_installments, start_date, apply_interest=False):
+    """
+    Calcula el plan financiero personalizado:
+    1. Mes 1: Inscripción ($100)
+    2. Mes 2: Traducción ($200)
+    3. Mes 3..N: Capital amortizado
+    4. Último Mes: Capital + Graduación ($200)
+    """
+    from frappe.utils import getdate, add_months, flt
+    import json
+
+    if isinstance(components, str): components = json.loads(components)
+    capital_installments = int(capital_installments)
+    start_date = getdate(start_date)
+
+    # 1. Calcular el Total Real sumando los componentes de la tabla
+    total_amount = sum(flt(c.get('amount')) for c in components)
+    
+    # 2. Definir valores fijos (Regla de Negocio)
+    VALOR_INSCRIPCION = 100.0
+    VALOR_TRADUCCION = 200.0
+    VALOR_GRADUACION = 200.0
+    
+    # 3. Calcular el Capital Puro a financiar
+    # Capital = Total - (Pagos Fijos)
+    capital_principal = total_amount - VALOR_INSCRIPCION - VALOR_TRADUCCION - VALOR_GRADUACION
+    
+    schedule = []
+    
+    # --- CUOTA 1: INSCRIPCIÓN ---
+    schedule.append({
+        "term": "Pago Inicial 1 (Inscripción)",
+        "due_date": start_date,
+        "amount": VALOR_INSCRIPCION,
+        "type": "Inscripcion" # Marca interna para saber qué componente asignar luego
+    })
+    
+    # --- CUOTA 2: TRADUCCIÓN (1 mes después) ---
+    schedule.append({
+        "term": "Pago Inicial 2 (Traducción)",
+        "due_date": add_months(start_date, 1),
+        "amount": VALOR_TRADUCCION,
+        "type": "Traduccion"
+    })
+    
+    # --- CÁLCULO DE LA CUOTA DE CAPITAL ---
+    monthly_capital = 0.0
+    
+    if capital_principal > 0:
+        if apply_interest:
+            # Fórmula de Amortización con Interés Compuesto (1.03% mensual)
+            r = 0.0103
+            n = capital_installments
+            numerator = r * ((1 + r) ** n)
+            denominator = ((1 + r) ** n) - 1
+            
+            if denominator != 0:
+                monthly_capital = capital_principal * (numerator / denominator)
+            else:
+                monthly_capital = capital_principal
+        else:
+            # División Simple (Sin Interés)
+            monthly_capital = capital_principal / capital_installments
+
+    # --- GENERAR CUOTAS DE CAPITAL (Empiezan 2 meses después) ---
+    current_date = add_months(start_date, 2)
+    
+    for i in range(1, capital_installments + 1):
+        is_last = (i == capital_installments)
+        
+        amount = monthly_capital
+        term_name = f"Cuota {i}/{capital_installments}"
+        row_type = "Capital"
+        
+        if is_last:
+            # En la última cuota sumamos los $200 de Graduación
+            amount += VALOR_GRADUACION
+            row_type = "Capital+Graduacion"
+            term_name += " + Graduación"
+            
+        schedule.append({
+            "term": term_name,
+            "due_date": current_date,
+            "amount": flt(amount, 2),
+            "type": row_type
+        })
+        
+        current_date = add_months(current_date, 1)
+
+    return schedule
+
+@frappe.whitelist()
+def generate_batch_records(student_group, fee_structure, components, schedule_data):
+    """
+    Genera los registros para TODO el grupo de estudiantes:
+    1. Fee Schedule (Planilla General) usando los componentes personalizados.
+    2. Fees (Facturas Mensuales) desglosando los componentes según el tipo de cuota.
+    """
+    import json
+    if isinstance(components, str): components = json.loads(components)
+    if isinstance(schedule_data, str): schedule_data = json.loads(schedule_data)
+    
+    # 1. Obtener estudiantes activos del grupo
+    students = frappe.db.get_list("Student Group Student", 
+        filters={"parent": student_group, "active": 1}, 
+        fields=["student"]
+    )
+    
+    if not students:
+        frappe.throw("El grupo de estudiantes seleccionado está vacío.")
+
+    generated_count = 0
+    struct_doc = frappe.get_doc("Fee Structure", fee_structure)
+    
+    # Calcular totales para el Fee Schedule
+    total_schedule_amount = sum(flt(d.get("amount")) for d in schedule_data)
+
+    for stu in students:
+        try:
+            # --- A. CREAR FEE SCHEDULE (Planilla) ---
+            fs = frappe.new_doc("Fee Schedule")
+            fs.student = stu.student
+            fs.student_group = student_group
+            fs.program = struct_doc.program
+            fs.academic_year = struct_doc.academic_year
+            fs.fee_structure = fee_structure
+            fs.grand_total = total_schedule_amount
+            fs.outstanding_amount = total_schedule_amount
+            
+            # Copiamos los componentes EXACTOS de la herramienta (incluyendo manuales)
+            for c in components:
+                fs.append("components", {
+                    "fees_category": c.get("fees_category"),
+                    "description": c.get("description"),
+                    "amount": c.get("amount")
+                })
+            
+            fs.save(ignore_permissions=True)
+            fs.submit()
+            
+            # --- B. OBTENER ENROLLMENT ---
+            enrollment = frappe.db.get_value("Program Enrollment", 
+                {"student": stu.student, "docstatus": 1}, "name"
+            )
+            
+            if not enrollment:
+                frappe.log_error(f"Estudiante {stu.student} no tiene matrícula activa.")
+                continue
+
+            # --- C. CREAR FEES (Facturas) ---
+            for row in schedule_data:
+                fee = frappe.new_doc("Fees")
+                fee.student = stu.student
+                fee.program_enrollment = enrollment
+                fee.program = struct_doc.program
+                fee.academic_year = struct_doc.academic_year
+                fee.fee_structure = fee_structure
+                fee.fee_schedule = fs.name
+                fee.due_date = row.get("due_date")
+                fee.posting_date = row.get("due_date")
+                fee.currency = struct_doc.currency or "USD"
+                
+                # Asignación inteligente de componentes según el tipo de cuota
+                row_type = row.get("type")
+                row_amount = flt(row.get("amount"))
+                
+                if row_type == "Inscripcion":
+                    fee.append("components", {
+                        "fees_category": "Inscripción",
+                        "description": "Registration Fee",
+                        "amount": row_amount
+                    })
+                    
+                elif row_type == "Traduccion":
+                    fee.append("components", {
+                        "fees_category": "Traducción y equivalencia",
+                        "description": "Translation Fee",
+                        "amount": row_amount
+                    })
+                    
+                elif row_type == "Capital":
+                    fee.append("components", {
+                        "fees_category": "Costo de programa", # Tuition
+                        "description": row.get("term"),
+                        "amount": row_amount
+                    })
+                    
+                elif row_type == "Capital+Graduacion":
+                    val_grad = 200.0
+                    val_capital = row_amount - val_grad
+                    
+                    fee.append("components", {
+                        "fees_category": "Costo de programa",
+                        "description": row.get("term") + " (Capital)",
+                        "amount": val_capital
+                    })
+                    fee.append("components", {
+                        "fees_category": "Graduación",
+                        "description": "Graduation Fee",
+                        "amount": val_grad
+                    })
+
+                fee.grand_total = row_amount
+                fee.outstanding_amount = row_amount
+                
+                fee.save(ignore_permissions=True)
+                fee.submit()
+            
+            generated_count += 1
+            
+        except Exception as e:
+            frappe.log_error(f"Error generando plan para {stu.student}: {str(e)}")
+            continue
+            
+    return generated_count
