@@ -1466,7 +1466,8 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
     # 1. Obtener estudiantes activos del grupo
     students = frappe.db.get_list("Student Group Student", 
         filters={"parent": student_group, "active": 1}, 
-        fields=["student"]
+        fields=["student"],
+        ignore_permissions=True
     )
     
     if not students:
