@@ -1465,14 +1465,23 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
 def generate_batch_records(student_group, fee_structure, components, schedule_data):
     """
     Genera los registros para TODO el grupo.
-    VERSIÓN ROBUSTA: Incluye red de seguridad para evitar Fees vacías.
+    VERSIÓN BLINDADA: Verifica datos y previene errores de tablas vacías.
     """
     import json
-    # Conversión segura de JSON
-    if isinstance(components, str): components = json.loads(components)
-    if isinstance(schedule_data, str): schedule_data = json.loads(schedule_data)
     
-    # 1. Obtener estudiantes (ignore_permissions para evitar bloqueos)
+    # 1. DECODIFICAR Y VALIDAR DATOS DE ENTRADA
+    if isinstance(components, str): 
+        components = json.loads(components)
+    if isinstance(schedule_data, str): 
+        schedule_data = json.loads(schedule_data)
+        
+    if not components or len(components) == 0:
+        frappe.throw("❌ ERROR DE DATOS: La lista de componentes llegó vacía al servidor.")
+        
+    if not schedule_data or len(schedule_data) == 0:
+        frappe.throw("❌ ERROR DE DATOS: El plan de pagos (fechas) llegó vacío al servidor.")
+
+    # 2. OBTENER ESTUDIANTES
     students = frappe.db.get_list("Student Group Student", 
         filters={"parent": student_group, "active": 1}, 
         fields=["student"],
@@ -1480,44 +1489,40 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
     )
     
     if not students:
-        frappe.throw("El grupo de estudiantes seleccionado está vacío.")
+        frappe.throw(f"El grupo '{student_group}' no tiene estudiantes activos.")
 
     generated_count = 0
-    struct_doc = frappe.get_doc("Fee Structure", fee_structure)
     total_schedule_amount = sum(flt(d.get("amount")) for d in schedule_data)
     
-    # Fecha de vencimiento general (seguridad por si schedule está vacío)
+    # Fecha base (seguridad)
     first_due_date = schedule_data[0].get("due_date") if schedule_data else frappe.utils.today()
 
     for stu in students:
         try:
-            # --- A. CREAR FEE SCHEDULE ---
+            # --- A. CREAR FEE SCHEDULE (CON VERIFICACIÓN) ---
             fs = frappe.new_doc("Fee Schedule")
             fs.student = stu.student
             fs.student_group = student_group
-            fs.program = struct_doc.program
-            fs.academic_year = struct_doc.academic_year
+            fs.program = frappe.db.get_value("Fee Structure", fee_structure, "program")
+            fs.academic_year = frappe.db.get_value("Fee Structure", fee_structure, "academic_year")
             fs.fee_structure = fee_structure
             fs.grand_total = total_schedule_amount
             fs.outstanding_amount = total_schedule_amount
-            fs.due_date = first_due_date # Campo obligatorio
+            fs.due_date = first_due_date
             
-            # Agregar componentes
-            if not components:
-                # Si no hay componentes, agregamos uno dummy para evitar error
+            # Llenar componentes
+            for c in components:
                 fs.append("components", {
-                    "fees_category": "Costo de programa",
-                    "description": "General Fee",
-                    "amount": total_schedule_amount
+                    "fees_category": c.get("fees_category"),
+                    "description": c.get("description"),
+                    "amount": c.get("amount")
                 })
-            else:
-                for c in components:
-                    fs.append("components", {
-                        "fees_category": c.get("fees_category"),
-                        "description": c.get("description"),
-                        "amount": c.get("amount")
-                    })
             
+            # VERIFICACIÓN DE SEGURIDAD ANTES DE GUARDAR
+            if not fs.get("components"):
+                # Si por milagro sigue vacío, forzamos uno
+                fs.append("components", {"fees_category": "Costo de programa", "amount": total_schedule_amount})
+
             fs.save(ignore_permissions=True)
             fs.submit()
             
@@ -1526,60 +1531,35 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 {"student": stu.student, "docstatus": 1}, "name"
             )
             
-            # --- C. CREAR FEES ---
+            # --- C. CREAR FEES (FACTURAS) ---
             for row in schedule_data:
                 fee = frappe.new_doc("Fees")
                 fee.student = stu.student
                 fee.program_enrollment = enrollment
-                fee.program = struct_doc.program
-                fee.academic_year = struct_doc.academic_year
+                fee.program = fs.program
+                fee.academic_year = fs.academic_year
                 fee.fee_structure = fee_structure
                 fee.fee_schedule = fs.name
                 fee.due_date = row.get("due_date")
                 fee.posting_date = row.get("due_date")
-                fee.currency = struct_doc.currency or "USD"
+                fee.currency = "USD"
                 
                 row_type = row.get("type")
                 row_amount = flt(row.get("amount"))
                 
-                # LÓGICA DE ASIGNACIÓN CON FALLBACK (RED DE SEGURIDAD)
-                
+                # Asignación segura de componentes
                 if row_type == "Inscripcion":
-                    fee.append("components", {
-                        "fees_category": "Inscripción",
-                        "description": "Registration Fee",
-                        "amount": row_amount
-                    })
-                    
+                    fee.append("components", {"fees_category": "Inscripción", "description": "Registration Fee", "amount": row_amount})
                 elif row_type == "Traduccion":
-                    fee.append("components", {
-                        "fees_category": "Traducción y equivalencia",
-                        "description": "Translation Fee",
-                        "amount": row_amount
-                    })
-                    
+                    fee.append("components", {"fees_category": "Traducción y equivalencia", "description": "Translation Fee", "amount": row_amount})
                 elif row_type == "Capital+Graduacion":
                     val_grad = 200.0
-                    val_capital = row_amount - val_grad
-                    fee.append("components", {
-                        "fees_category": "Costo de programa",
-                        "description": f"{row.get('term')} (Capital)",
-                        "amount": val_capital
-                    })
-                    fee.append("components", {
-                        "fees_category": "Graduación",
-                        "description": "Graduation Fee",
-                        "amount": val_grad
-                    })
-                    
+                    val_cap = row_amount - val_grad
+                    fee.append("components", {"fees_category": "Costo de programa", "description": f"{row.get('term')} (Capital)", "amount": val_cap})
+                    fee.append("components", {"fees_category": "Graduación", "description": "Graduation Fee", "amount": val_grad})
                 else:
-                    # ELSE: CUALQUIER OTRO CASO (Capital, None, Vacio, Error)
-                    # Esto asegura que NUNCA se guarde una Fee vacía
-                    fee.append("components", {
-                        "fees_category": "Costo de programa",
-                        "description": row.get("term") or "Cuota",
-                        "amount": row_amount
-                    })
+                    # Fallback general
+                    fee.append("components", {"fees_category": "Costo de programa", "description": row.get("term"), "amount": row_amount})
 
                 fee.grand_total = row_amount
                 fee.outstanding_amount = row_amount
@@ -1590,7 +1570,9 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
             generated_count += 1
             
         except Exception as e:
-            frappe.log_error(f"Error generando plan para {stu.student}: {str(e)}")
+            # Registrar error detallado en el Log de Errores de Frappe
+            frappe.log_error(f"Fallo al generar para {stu.student}", str(e))
+            # No detener el proceso, seguir con los otros estudiantes
             continue
             
     return generated_count
