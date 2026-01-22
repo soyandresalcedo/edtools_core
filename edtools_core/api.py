@@ -1464,14 +1464,15 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
 @frappe.whitelist()
 def generate_batch_records(student_group, fee_structure, components, schedule_data):
     """
-    Genera los registros para TODO el grupo de estudiantes.
-    CORREGIDO: Asigna due_date al Fee Schedule para evitar error de validación.
+    Genera los registros para TODO el grupo.
+    VERSIÓN ROBUSTA: Incluye red de seguridad para evitar Fees vacías.
     """
     import json
+    # Conversión segura de JSON
     if isinstance(components, str): components = json.loads(components)
     if isinstance(schedule_data, str): schedule_data = json.loads(schedule_data)
     
-    # 1. Obtener estudiantes (con ignore_permissions para evitar bloqueo en tabla hija)
+    # 1. Obtener estudiantes (ignore_permissions para evitar bloqueos)
     students = frappe.db.get_list("Student Group Student", 
         filters={"parent": student_group, "active": 1}, 
         fields=["student"],
@@ -1483,11 +1484,9 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
 
     generated_count = 0
     struct_doc = frappe.get_doc("Fee Structure", fee_structure)
-    
-    # Calcular totales
     total_schedule_amount = sum(flt(d.get("amount")) for d in schedule_data)
-
-    # Determinar la fecha de vencimiento general (tomamos la de la primera cuota)
+    
+    # Fecha de vencimiento general (seguridad por si schedule está vacío)
     first_due_date = schedule_data[0].get("due_date") if schedule_data else frappe.utils.today()
 
     for stu in students:
@@ -1501,17 +1500,23 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
             fs.fee_structure = fee_structure
             fs.grand_total = total_schedule_amount
             fs.outstanding_amount = total_schedule_amount
+            fs.due_date = first_due_date # Campo obligatorio
             
-            # CORRECCIÓN: Asignar la fecha obligatoria
-            fs.due_date = first_due_date
-            
-            # Componentes custom
-            for c in components:
+            # Agregar componentes
+            if not components:
+                # Si no hay componentes, agregamos uno dummy para evitar error
                 fs.append("components", {
-                    "fees_category": c.get("fees_category"),
-                    "description": c.get("description"),
-                    "amount": c.get("amount")
+                    "fees_category": "Costo de programa",
+                    "description": "General Fee",
+                    "amount": total_schedule_amount
                 })
+            else:
+                for c in components:
+                    fs.append("components", {
+                        "fees_category": c.get("fees_category"),
+                        "description": c.get("description"),
+                        "amount": c.get("amount")
+                    })
             
             fs.save(ignore_permissions=True)
             fs.submit()
@@ -1534,9 +1539,10 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 fee.posting_date = row.get("due_date")
                 fee.currency = struct_doc.currency or "USD"
                 
-                # Asignación de componentes
                 row_type = row.get("type")
                 row_amount = flt(row.get("amount"))
+                
+                # LÓGICA DE ASIGNACIÓN CON FALLBACK (RED DE SEGURIDAD)
                 
                 if row_type == "Inscripcion":
                     fee.append("components", {
@@ -1544,30 +1550,35 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                         "description": "Registration Fee",
                         "amount": row_amount
                     })
+                    
                 elif row_type == "Traduccion":
                     fee.append("components", {
                         "fees_category": "Traducción y equivalencia",
                         "description": "Translation Fee",
                         "amount": row_amount
                     })
-                elif row_type == "Capital":
-                    fee.append("components", {
-                        "fees_category": "Costo de programa",
-                        "description": row.get("term"),
-                        "amount": row_amount
-                    })
+                    
                 elif row_type == "Capital+Graduacion":
                     val_grad = 200.0
                     val_capital = row_amount - val_grad
                     fee.append("components", {
                         "fees_category": "Costo de programa",
-                        "description": row.get("term") + " (Capital)",
+                        "description": f"{row.get('term')} (Capital)",
                         "amount": val_capital
                     })
                     fee.append("components", {
                         "fees_category": "Graduación",
                         "description": "Graduation Fee",
                         "amount": val_grad
+                    })
+                    
+                else:
+                    # ELSE: CUALQUIER OTRO CASO (Capital, None, Vacio, Error)
+                    # Esto asegura que NUNCA se guarde una Fee vacía
+                    fee.append("components", {
+                        "fees_category": "Costo de programa",
+                        "description": row.get("term") or "Cuota",
+                        "amount": row_amount
                     })
 
                 fee.grand_total = row_amount
