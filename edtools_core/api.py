@@ -1576,3 +1576,56 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
             continue
             
     return generated_count
+
+@frappe.whitelist()
+def get_program_duration_details(program, start_date):
+    """
+    Calcula la fecha de finalización buscando keywords en la ABREVIACIÓN del programa.
+    
+    Reglas:
+    - Master (MS/MBA/Maestría) -> 15 meses
+    - Bachelor (BS/Licenciatura) -> 41 meses
+    - Associate (AS/Técnico) -> 21 meses
+    """
+    from frappe.utils import add_months, getdate, cstr
+    
+    if not program or not start_date:
+        return {}
+
+    # 1. Obtener la Abreviación y el Nombre de la BD
+    prog_doc = frappe.db.get_value("Program", program, ["program_name", "program_abbreviation"], as_dict=True)
+    
+    if not prog_doc:
+        return {}
+
+    # Unimos nombre y abreviación y lo pasamos a minúsculas para buscar fácil
+    # Ej: "marketing master of science in marketing"
+    search_text = (cstr(prog_doc.program_name) + " " + cstr(prog_doc.program_abbreviation)).lower()
+    
+    months = 0
+    
+    # 2. Lógica de Detección (Jerarquía)
+    
+    # --- MAESTRÍAS (15 Meses) ---
+    if "master" in search_text or "ms " in search_text or "m.s." in search_text or "mba" in search_text or "maestría" in search_text:
+        months = 15
+        
+    # --- BACHELORS / PREGRADO (41 Meses) ---
+    elif "bachelor" in search_text or "bs " in search_text or "b.s." in search_text or "licenciatura" in search_text:
+        months = 41
+        
+    # --- ASSOCIATES / TÉCNICOS (21 Meses) ---
+    elif "associate" in search_text or "as " in search_text or "a.s." in search_text or "técnico" in search_text:
+        months = 21
+        
+    else:
+        # Default de seguridad si no encuentra nada (puedes cambiarlo a 0 si prefieres error)
+        months = 12 
+
+    # 3. Calcular Fecha
+    end_date = add_months(getdate(start_date), months)
+    
+    return {
+        "end_date": end_date,
+        "months": months
+    }
