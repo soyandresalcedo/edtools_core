@@ -1353,33 +1353,30 @@ def get_structure_components(fee_structure):
 @frappe.whitelist()
 def calculate_special_plan(components, capital_installments, start_date, apply_interest=0):
     """
-    Calcula el plan financiero personalizado.
-    Corregido para validar estrictamente el booleano de intereses.
+    Calcula el plan financiero y devuelve también el interés total generado.
     """
     from frappe.utils import getdate, add_months, flt, cint
     import json
 
-    # 1. LIMPIEZA DE DATOS (CRÍTICO)
+    # 1. LIMPIEZA DE DATOS
     if isinstance(components, str): components = json.loads(components)
     capital_installments = int(capital_installments)
     start_date = getdate(start_date)
 
-    # --- CORRECCIÓN AQUÍ ---
-    # Convertimos explícitamente a entero (0 o 1) y luego a booleano
-    # Esto maneja "0", 0, "1", 1, "true", "false" correctamente.
+    # Conversión de Checkbox
     if isinstance(apply_interest, str):
-        if apply_interest.lower() == 'true':
-            apply_interest = True
-        elif apply_interest.lower() == 'false':
-            apply_interest = False
-        else:
-            apply_interest = bool(cint(apply_interest))
+        if apply_interest.lower() == 'true': apply_interest = True
+        elif apply_interest.lower() == 'false': apply_interest = False
+        else: apply_interest = bool(cint(apply_interest))
     else:
         apply_interest = bool(apply_interest)
-    # -----------------------
 
-    # 2. Calcular el Total Real
-    total_amount = sum(flt(c.get('amount')) for c in components)
+    # 2. Calcular Totales (Excluyendo la fila de Intereses para no sumar recursivamente)
+    total_amount = 0.0
+    for c in components:
+        # No sumamos la fila de intereses porque esa es la que vamos a calcular
+        if c.get('fees_category') != 'Intereses':
+            total_amount += flt(c.get('amount'))
     
     # 3. Definir valores fijos
     VALOR_INSCRIPCION = 100.0
@@ -1390,6 +1387,7 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
     capital_principal = total_amount - VALOR_INSCRIPCION - VALOR_TRADUCCION - VALOR_GRADUACION
     
     schedule = []
+    total_interest_generated = 0.0
     
     # --- CUOTA 1: INSCRIPCIÓN ---
     schedule.append({
@@ -1407,7 +1405,7 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
         "type": "Traduccion"
     })
     
-    # --- CÁLCULO DE LA CUOTA DE CAPITAL ---
+    # --- CÁLCULO DE CAPITAL E INTERESES ---
     monthly_capital = 0.0
     
     if capital_principal > 0:
@@ -1422,16 +1420,24 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
                 monthly_capital = capital_principal * (numerator / denominator)
             else:
                 monthly_capital = capital_principal
+            
+            # Calcular cuánto interés se generó en total
+            total_pagado_capital = monthly_capital * n
+            total_interest_generated = total_pagado_capital - capital_principal
+            
         else:
-            # DIVISIÓN SIMPLE (SIN INTERÉS)
+            # SIN INTERÉS
             monthly_capital = capital_principal / capital_installments
+            total_interest_generated = 0.0
+
+    # Redondear interés para evitar decimales infinitos
+    total_interest_generated = flt(total_interest_generated, 2)
 
     # --- GENERAR CUOTAS DE CAPITAL ---
     current_date = add_months(start_date, 2)
     
     for i in range(1, capital_installments + 1):
         is_last = (i == capital_installments)
-        
         amount = monthly_capital
         term_name = f"Cuota {i}/{capital_installments}"
         row_type = "Capital"
@@ -1447,10 +1453,13 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
             "amount": flt(amount, 2),
             "type": row_type
         })
-        
         current_date = add_months(current_date, 1)
 
-    return schedule
+    # RETORNAMOS UN DICCIONARIO AHORA
+    return {
+        "schedule": schedule,
+        "total_interest": total_interest_generated
+    }
 
 @frappe.whitelist()
 def generate_batch_records(student_group, fee_structure, components, schedule_data):
