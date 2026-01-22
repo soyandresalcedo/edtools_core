@@ -1464,15 +1464,14 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
 @frappe.whitelist()
 def generate_batch_records(student_group, fee_structure, components, schedule_data):
     """
-    Genera los registros para TODO el grupo de estudiantes:
-    1. Fee Schedule (Planilla General) usando los componentes personalizados.
-    2. Fees (Facturas Mensuales) desglosando los componentes según el tipo de cuota.
+    Genera los registros para TODO el grupo de estudiantes.
+    CORREGIDO: Asigna due_date al Fee Schedule para evitar error de validación.
     """
     import json
     if isinstance(components, str): components = json.loads(components)
     if isinstance(schedule_data, str): schedule_data = json.loads(schedule_data)
     
-    # 1. Obtener estudiantes activos del grupo
+    # 1. Obtener estudiantes (con ignore_permissions para evitar bloqueo en tabla hija)
     students = frappe.db.get_list("Student Group Student", 
         filters={"parent": student_group, "active": 1}, 
         fields=["student"],
@@ -1485,12 +1484,15 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
     generated_count = 0
     struct_doc = frappe.get_doc("Fee Structure", fee_structure)
     
-    # Calcular totales para el Fee Schedule
+    # Calcular totales
     total_schedule_amount = sum(flt(d.get("amount")) for d in schedule_data)
+
+    # Determinar la fecha de vencimiento general (tomamos la de la primera cuota)
+    first_due_date = schedule_data[0].get("due_date") if schedule_data else frappe.utils.today()
 
     for stu in students:
         try:
-            # --- A. CREAR FEE SCHEDULE (Planilla) ---
+            # --- A. CREAR FEE SCHEDULE ---
             fs = frappe.new_doc("Fee Schedule")
             fs.student = stu.student
             fs.student_group = student_group
@@ -1500,7 +1502,10 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
             fs.grand_total = total_schedule_amount
             fs.outstanding_amount = total_schedule_amount
             
-            # Copiamos los componentes EXACTOS de la herramienta (incluyendo manuales)
+            # CORRECCIÓN: Asignar la fecha obligatoria
+            fs.due_date = first_due_date
+            
+            # Componentes custom
             for c in components:
                 fs.append("components", {
                     "fees_category": c.get("fees_category"),
@@ -1516,11 +1521,7 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 {"student": stu.student, "docstatus": 1}, "name"
             )
             
-            if not enrollment:
-                frappe.log_error(f"Estudiante {stu.student} no tiene matrícula activa.")
-                continue
-
-            # --- C. CREAR FEES (Facturas) ---
+            # --- C. CREAR FEES ---
             for row in schedule_data:
                 fee = frappe.new_doc("Fees")
                 fee.student = stu.student
@@ -1533,7 +1534,7 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 fee.posting_date = row.get("due_date")
                 fee.currency = struct_doc.currency or "USD"
                 
-                # Asignación inteligente de componentes según el tipo de cuota
+                # Asignación de componentes
                 row_type = row.get("type")
                 row_amount = flt(row.get("amount"))
                 
@@ -1543,25 +1544,21 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                         "description": "Registration Fee",
                         "amount": row_amount
                     })
-                    
                 elif row_type == "Traduccion":
                     fee.append("components", {
                         "fees_category": "Traducción y equivalencia",
                         "description": "Translation Fee",
                         "amount": row_amount
                     })
-                    
                 elif row_type == "Capital":
                     fee.append("components", {
-                        "fees_category": "Costo de programa", # Tuition
+                        "fees_category": "Costo de programa",
                         "description": row.get("term"),
                         "amount": row_amount
                     })
-                    
                 elif row_type == "Capital+Graduacion":
                     val_grad = 200.0
                     val_capital = row_amount - val_grad
-                    
                     fee.append("components", {
                         "fees_category": "Costo de programa",
                         "description": row.get("term") + " (Capital)",
