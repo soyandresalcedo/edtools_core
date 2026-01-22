@@ -1351,31 +1351,42 @@ def get_structure_components(fee_structure):
     }
 
 @frappe.whitelist()
-def calculate_special_plan(components, capital_installments, start_date, apply_interest=False):
+def calculate_special_plan(components, capital_installments, start_date, apply_interest=0):
     """
-    Calcula el plan financiero personalizado:
-    1. Mes 1: Inscripción ($100)
-    2. Mes 2: Traducción ($200)
-    3. Mes 3..N: Capital amortizado
-    4. Último Mes: Capital + Graduación ($200)
+    Calcula el plan financiero personalizado.
+    Corregido para validar estrictamente el booleano de intereses.
     """
-    from frappe.utils import getdate, add_months, flt
+    from frappe.utils import getdate, add_months, flt, cint
     import json
 
+    # 1. LIMPIEZA DE DATOS (CRÍTICO)
     if isinstance(components, str): components = json.loads(components)
     capital_installments = int(capital_installments)
     start_date = getdate(start_date)
 
-    # 1. Calcular el Total Real sumando los componentes de la tabla
+    # --- CORRECCIÓN AQUÍ ---
+    # Convertimos explícitamente a entero (0 o 1) y luego a booleano
+    # Esto maneja "0", 0, "1", 1, "true", "false" correctamente.
+    if isinstance(apply_interest, str):
+        if apply_interest.lower() == 'true':
+            apply_interest = True
+        elif apply_interest.lower() == 'false':
+            apply_interest = False
+        else:
+            apply_interest = bool(cint(apply_interest))
+    else:
+        apply_interest = bool(apply_interest)
+    # -----------------------
+
+    # 2. Calcular el Total Real
     total_amount = sum(flt(c.get('amount')) for c in components)
     
-    # 2. Definir valores fijos (Regla de Negocio)
+    # 3. Definir valores fijos
     VALOR_INSCRIPCION = 100.0
     VALOR_TRADUCCION = 200.0
     VALOR_GRADUACION = 200.0
     
-    # 3. Calcular el Capital Puro a financiar
-    # Capital = Total - (Pagos Fijos)
+    # 4. Calcular el Capital Puro
     capital_principal = total_amount - VALOR_INSCRIPCION - VALOR_TRADUCCION - VALOR_GRADUACION
     
     schedule = []
@@ -1385,10 +1396,10 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
         "term": "Pago Inicial 1 (Inscripción)",
         "due_date": start_date,
         "amount": VALOR_INSCRIPCION,
-        "type": "Inscripcion" # Marca interna para saber qué componente asignar luego
+        "type": "Inscripcion"
     })
     
-    # --- CUOTA 2: TRADUCCIÓN (1 mes después) ---
+    # --- CUOTA 2: TRADUCCIÓN ---
     schedule.append({
         "term": "Pago Inicial 2 (Traducción)",
         "due_date": add_months(start_date, 1),
@@ -1401,7 +1412,7 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
     
     if capital_principal > 0:
         if apply_interest:
-            # Fórmula de Amortización con Interés Compuesto (1.03% mensual)
+            # INTERÉS COMPUESTO (1.03%)
             r = 0.0103
             n = capital_installments
             numerator = r * ((1 + r) ** n)
@@ -1412,10 +1423,10 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
             else:
                 monthly_capital = capital_principal
         else:
-            # División Simple (Sin Interés)
+            # DIVISIÓN SIMPLE (SIN INTERÉS)
             monthly_capital = capital_principal / capital_installments
 
-    # --- GENERAR CUOTAS DE CAPITAL (Empiezan 2 meses después) ---
+    # --- GENERAR CUOTAS DE CAPITAL ---
     current_date = add_months(start_date, 2)
     
     for i in range(1, capital_installments + 1):
@@ -1426,7 +1437,6 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
         row_type = "Capital"
         
         if is_last:
-            # En la última cuota sumamos los $200 de Graduación
             amount += VALOR_GRADUACION
             row_type = "Capital+Graduacion"
             term_name += " + Graduación"
