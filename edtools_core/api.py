@@ -1623,3 +1623,62 @@ def get_program_duration_details(program, start_date):
         "end_date": end_date,
         "months": months
     }
+
+@frappe.whitelist()
+def get_students_for_group(group_name):
+    """
+    Devuelve todos los estudiantes que pertenecen al grupo seleccionado.
+    """
+    students = frappe.get_all(
+        "Student",
+        filters={"student_group": group_name},
+        fields=["name", "student_name", "program_enrollment"]
+    )
+    return students
+
+@frappe.whitelist()
+def get_academic_terms(academic_year):
+    """
+    Devuelve los términos académicos de un año académico.
+    """
+    return frappe.get_all(
+        "Academic Term",
+        filters={"academic_year": academic_year},
+        fields=["name"]
+    )
+
+@frappe.whitelist()
+def get_student_groups(academic_year):
+    """
+    Devuelve los grupos de estudiantes de un año académico.
+    """
+    return frappe.get_all(
+        "Student Group",
+        filters={"academic_year": academic_year},
+        fields=["name"]
+    )
+
+@frappe.whitelist()
+def enroll_students(docname):
+    """
+    Inscribe todos los estudiantes de la tabla en el curso.
+    """
+    doc = frappe.get_doc("Course Enrollment Tool", docname)
+    for student in doc.course_enrollment_tool_student:
+        try:
+            enrollment = frappe.get_doc({
+                "doctype": "Course Enrollment",
+                "student": student.student,
+                "program_enrollment": student.program_enrollment,
+                "course": doc.course
+            })
+            enrollment.insert(ignore_permissions=True)
+            student.status = "Enrolled"
+            student.error_log = ""
+        except Exception as e:
+            student.status = "Error"
+            student.error_log = str(e)
+    doc.save()
+    frappe.db.commit()
+    return {"message": "Enrollment process finished"}
+
