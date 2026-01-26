@@ -1715,13 +1715,17 @@ def get_students_for_group_with_enrollment(student_group):
             fields=["name"]
         )
 
+        frappe.msgprint(f"Estudiante: {s.student}, Program Enrollment encontrados: {enrollments}")  # DEBUG
+
         if enrollments and len(enrollments) > 0:
             students.append({
                 "student": s.student,
-                "student_full_name": frappe.get_value("Student", s.student, "student_name") or s.student,
+                "student_full_name": frappe.get_value("Student", s.student, "student_name"),
                 "program_enrollment": enrollments[0].name
             })
         else:
             missing_enrollment.append(s.student)
+
+    frappe.msgprint(f"Total students a enviar: {len(students)}, missing: {missing_enrollment}")  # DEBUG
 
     return {"students": students, "missing": missing_enrollment}
