@@ -1661,7 +1661,7 @@ def enroll_students(docname):
     Inscribe todos los estudiantes de la tabla en el curso.
     """
     doc = frappe.get_doc("Course Enrollment Tool", docname)
-    for student in doc.course_enrollment_tool_student:
+    for student in doc.students:
         try:
             enrollment = frappe.get_doc({
                 "doctype": "Course Enrollment",
