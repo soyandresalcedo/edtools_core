@@ -1632,7 +1632,7 @@ def get_students_for_group(group_name):
     students = frappe.get_all(
         "Student",
         filters={"student_group": group_name},
-        fields=["name", "student_name", "program_enrollment"]
+        fields=["name", "student_name"]  # Solo los campos que existen
     )
     return students
 
