@@ -1657,11 +1657,18 @@ def get_student_groups(academic_year):
 
 @frappe.whitelist()
 def enroll_students(docname):
-    """
-    Inscribe todos los estudiantes de la tabla en el curso.
-    """
     doc = frappe.get_doc("Course Enrollment Tool", docname)
+    inserted = 0
+    errors = []
+
     for student in doc.students:
+        # Validamos que tenga Program Enrollment
+        if not student.program_enrollment:
+            errors.append(f"{student.student_full_name} no tiene Program Enrollment")
+            student.status = "Error"
+            student.error_log = "Missing Program Enrollment"
+            continue
+
         try:
             enrollment = frappe.get_doc({
                 "doctype": "Course Enrollment",
@@ -1672,12 +1679,20 @@ def enroll_students(docname):
             enrollment.insert(ignore_permissions=True)
             student.status = "Enrolled"
             student.error_log = ""
+            inserted += 1
         except Exception as e:
             student.status = "Error"
             student.error_log = str(e)
+
     doc.save()
     frappe.db.commit()
-    return {"message": "Enrollment process finished"}
+
+    msg = f"{inserted} estudiantes inscritos."
+    if errors:
+        msg += "<br>Errores: <br>" + "<br>".join(errors)
+
+    return {"message": msg}
+
 
 @frappe.whitelist()
 def get_students_for_group_with_enrollment(student_group):
