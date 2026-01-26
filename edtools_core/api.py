@@ -1683,16 +1683,22 @@ def enroll_students(docname):
 def get_students_for_group_with_enrollment(student_group):
     group_doc = frappe.get_doc("Student Group", student_group)
     students = []
-
     missing_enrollment = []
 
     for s in group_doc.students:
-        student_doc = frappe.get_doc("Student", s.student)
-        if student_doc.program_enrollment:
+        # Obtenemos la lista de Program Enrollments del estudiante
+        enrollments = frappe.get_all(
+            "Program Enrollment",
+            filters={"student": s.student},
+            fields=["name"]
+        )
+
+        if enrollments and len(enrollments) > 0:
+            # Tomamos el primero (o puedes cambiar la lógica)
             students.append({
                 "student": s.student,
-                "student_full_name": student_doc.student_name,
-                "program_enrollment": student_doc.program_enrollment
+                "student_full_name": frappe.get_value("Student", s.student, "student_name"),
+                "program_enrollment": enrollments[0].name
             })
         else:
             missing_enrollment.append(s.student)
