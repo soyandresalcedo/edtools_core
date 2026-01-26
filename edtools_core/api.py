@@ -1657,26 +1657,24 @@ def get_student_groups(academic_year):
 
 @frappe.whitelist()
 def enroll_students(docname):
-    import frappe
-    frappe.msgprint(f"Iniciando enroll_students para: {docname}")  # DEBUG
-
     doc = frappe.get_doc("Course Enrollment Tool", docname)
+
+    # DEBUG: ver qué valor tiene el curso
+    frappe.msgprint(f"Valor de doc.course: {doc.course}")
 
     if not doc.course:
         frappe.throw("El curso no está definido en el formulario.")
-
+    
     enrolled_count = 0
-    for idx, student in enumerate(doc.students):
-        frappe.msgprint(f"[{idx+1}] Procesando estudiante: {student.student}")  # DEBUG
+    failed = []
 
+    for student in doc.students:
         if not student.program_enrollment:
             student.status = "Skipped"
             student.error_log = "No tiene Program Enrollment"
-            frappe.msgprint(f"  -> Se salta: {student.student} (sin Program Enrollment)")  # DEBUG
             continue
 
         try:
-            frappe.msgprint(f"  -> Intentando crear Course Enrollment para: {student.student}")  # DEBUG
             enrollment = frappe.get_doc({
                 "doctype": "Course Enrollment",
                 "student": student.student,
@@ -1687,17 +1685,20 @@ def enroll_students(docname):
             student.status = "Enrolled"
             student.error_log = ""
             enrolled_count += 1
-            frappe.msgprint(f"  -> Registro creado correctamente: {student.student}")  # DEBUG
         except Exception as e:
             student.status = "Error"
             student.error_log = str(e)
-            frappe.msgprint(f"  -> ERROR creando Course Enrollment: {student.student} -> {str(e)}")  # DEBUG
+            failed.append(f"{student.student}: {str(e)}")
 
     doc.save()
     frappe.db.commit()
-    frappe.msgprint(f"Proceso terminado. Total inscritos: {enrolled_count}")  # DEBUG
 
-    return {"message": f"{enrolled_count} estudiante(s) inscritos correctamente."}
+    message = f"{enrolled_count} estudiante(s) inscritos correctamente."
+    if failed:
+        message += f"\nFallaron: {len(failed)}\n" + "\n".join(failed)
+
+    return {"message": message}
+
 
 
 
