@@ -1679,3 +1679,22 @@ def enroll_students(docname):
     frappe.db.commit()
     return {"message": "Enrollment process finished"}
 
+@frappe.whitelist()
+def get_students_for_group_with_enrollment(student_group):
+    group_doc = frappe.get_doc("Student Group", student_group)
+    students = []
+
+    missing_enrollment = []
+
+    for s in group_doc.students:
+        student_doc = frappe.get_doc("Student", s.student)
+        if student_doc.program_enrollment:
+            students.append({
+                "student": s.student,
+                "student_full_name": student_doc.student_name,
+                "program_enrollment": student_doc.program_enrollment
+            })
+        else:
+            missing_enrollment.append(s.student)
+
+    return {"students": students, "missing": missing_enrollment}
