@@ -1658,17 +1658,11 @@ def get_student_groups(academic_year):
 @frappe.whitelist()
 def enroll_students(docname):
     doc = frappe.get_doc("Course Enrollment Tool", docname)
-    inserted = 0
-    errors = []
+    count = 0
 
     for student in doc.students:
-        # Validamos que tenga Program Enrollment
         if not student.program_enrollment:
-            errors.append(f"{student.student_full_name} no tiene Program Enrollment")
-            student.status = "Error"
-            student.error_log = "Missing Program Enrollment"
-            continue
-
+            continue  # saltar estudiantes sin Program Enrollment
         try:
             enrollment = frappe.get_doc({
                 "doctype": "Course Enrollment",
@@ -1679,19 +1673,14 @@ def enroll_students(docname):
             enrollment.insert(ignore_permissions=True)
             student.status = "Enrolled"
             student.error_log = ""
-            inserted += 1
+            count += 1
         except Exception as e:
             student.status = "Error"
             student.error_log = str(e)
 
     doc.save()
     frappe.db.commit()
-
-    msg = f"{inserted} estudiantes inscritos."
-    if errors:
-        msg += "<br>Errores: <br>" + "<br>".join(errors)
-
-    return {"message": msg}
+    return {"message": f"{count} estudiantes inscritos correctamente."}
 
 
 @frappe.whitelist()
@@ -1701,7 +1690,6 @@ def get_students_for_group_with_enrollment(student_group):
     missing_enrollment = []
 
     for s in group_doc.students:
-        # Obtenemos la lista de Program Enrollments del estudiante
         enrollments = frappe.get_all(
             "Program Enrollment",
             filters={"student": s.student},
@@ -1709,10 +1697,9 @@ def get_students_for_group_with_enrollment(student_group):
         )
 
         if enrollments and len(enrollments) > 0:
-            # Tomamos el primero (o puedes cambiar la lógica)
             students.append({
                 "student": s.student,
-                "student_full_name": frappe.get_value("Student", s.student, "student_name"),
+                "student_full_name": frappe.get_value("Student", s.student, "student_name") or s.student,
                 "program_enrollment": enrollments[0].name
             })
         else:
