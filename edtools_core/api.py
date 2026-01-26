@@ -1625,7 +1625,7 @@ def get_program_duration_details(program, start_date):
     }
 
 @frappe.whitelist()
-def fetch_students_for_group(student_group):
+def get_students_for_group(student_group):
     """ Devuelve los estudiantes vinculados al Student Group """
     doc = frappe.get_doc("Student Group", student_group)
     if not doc.students:
@@ -1680,7 +1680,7 @@ def enroll_students(docname):
     return {"message": "Enrollment process finished"}
 
 @frappe.whitelist()
-def fetch_students_for_group_with_enrollment(student_group):
+def get_students_for_group_with_enrollment(student_group):
     group_doc = frappe.get_doc("Student Group", student_group)
     students = []
     missing_enrollment = []
