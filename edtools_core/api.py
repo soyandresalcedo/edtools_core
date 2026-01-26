@@ -1625,16 +1625,13 @@ def get_program_duration_details(program, start_date):
     }
 
 @frappe.whitelist()
-def get_students_for_group(group_name):
-    """
-    Devuelve todos los estudiantes que pertenecen al grupo seleccionado.
-    """
-    students = frappe.get_all(
-        "Student",
-        filters={"student_group": group_name},
-        fields=["name", "student_name"]  # Solo los campos que existen
-    )
-    return students
+def get_students_for_group(student_group):
+    """ Devuelve los estudiantes vinculados al Student Group """
+    doc = frappe.get_doc("Student Group", student_group)
+    if not doc.students:
+        return []
+
+    return [d.student for d in doc.students]
 
 @frappe.whitelist()
 def get_academic_terms(academic_year):
