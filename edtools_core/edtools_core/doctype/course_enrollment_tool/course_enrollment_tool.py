@@ -127,6 +127,10 @@ class CourseEnrollmentTool(Document):
 					continue
 
 				# B. Crear el documento Course Enrollment
+				# Obtener el programa desde el Program Enrollment
+				program_enrollment_doc = frappe.get_doc("Program Enrollment", row.program_enrollment)
+				program = program_enrollment_doc.program
+				
 				frappe.msgprint(
 					f"    ↳ Creando Course Enrollment:\n"
 					f"      • Curso: {self.course}\n"
@@ -136,7 +140,7 @@ class CourseEnrollmentTool(Document):
 				enrollment = frappe.get_doc({
 					"doctype": "Course Enrollment",
 					"student": row.student,
-					"program": self.program,
+					"program": program,
 					"course": self.course,
 					"program_enrollment": row.program_enrollment,
 					"enrollment_date": enroll_date,
