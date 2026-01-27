@@ -10,12 +10,13 @@ frappe.ui.form.on('Course Enrollment Tool', {
         // Configurar filtros para Términos Académicos
         frm.set_query("academic_term", function() {
             if (!frm.doc.academic_year) {
-                return { "filters": { "docstatus": 1 } };
+                return {
+                    "filters": []
+                };
             }
             return {
                 "filters": {
-                    "academic_year": frm.doc.academic_year,
-                    "docstatus": 1
+                    "academic_year": frm.doc.academic_year
                 }
             };
         });
@@ -23,22 +24,21 @@ frappe.ui.form.on('Course Enrollment Tool', {
         // Configurar filtros para Grupos de Estudiantes
         frm.set_query("student_group", function() {
             if (!frm.doc.academic_year) {
-                return { "filters": { "docstatus": 1 } };
+                return {
+                    "filters": []
+                };
             }
             return {
                 "filters": {
-                    "academic_year": frm.doc.academic_year,
-                    "docstatus": 1
+                    "academic_year": frm.doc.academic_year
                 }
             };
         });
 
-        // Configurar filtros para Cursos
+        // Configurar filtros para Cursos (SIN filtro docstatus - mostrar todos)
         frm.set_query("course", function() {
             return {
-                "filters": {
-                    "docstatus": 1
-                }
+                "filters": []
             };
         });
     },
