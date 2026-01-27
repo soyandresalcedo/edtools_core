@@ -49,12 +49,6 @@ frappe.ui.form.on('Course Enrollment Tool', {
     academic_year: function(frm) {
         if (!frm.doc.academic_year) return;
 
-        frappe.msgprint(
-            __('✅ Año académico seleccionado: <b>{0}</b><br><br>Próximos pasos:<br>1️⃣ Selecciona un Término Académico<br>2️⃣ Selecciona un Grupo de Estudiantes<br>3️⃣ Haz clic en "Obtener Estudiantes"',
-                [frm.doc.academic_year]),
-            { indicator: 'blue', title: 'Configuración' }
-        );
-
         // Limpiar selecciones dependientes
         frm.set_value('academic_term', '');
         frm.set_value('student_group', '');
@@ -172,7 +166,8 @@ frappe.ui.form.on('Course Enrollment Tool', {
                 method: 'frappe.client.get_value',
                 args: {
                     doctype: 'Course',
-                    name: frm.doc.course  // usar name directamente, no filters
+                    name: frm.doc.course,
+                    fieldname: 'name'  // necesario para que funcione
                 },
                 callback: function(r) {
                     if (!r.message) {
