@@ -1816,10 +1816,10 @@ def get_students_for_group_with_enrollment(student_group):
         )
         
         if enrollments and len(enrollments) > 0:
-            student_record = frappe.get_value("Student", s.student, ["student_name", "program"])
+            student_name = frappe.get_value("Student", s.student, "student_name")
             students.append({
                 "student": s.student,
-                "student_full_name": student_record[0] if student_record else "",
+                "student_full_name": student_name or "",
                 "program_enrollment": enrollments[0].name,
                 "program": enrollments[0].program
             })
