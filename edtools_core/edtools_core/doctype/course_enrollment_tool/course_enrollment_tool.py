@@ -144,15 +144,27 @@ class CourseEnrollmentTool(Document):
 					"course": self.course,
 					"program_enrollment": row.program_enrollment,
 					"enrollment_date": enroll_date,
-				"custom_academic_year": self.academic_year,
-				"custom_academic_term": self.academic_term
-			})
-			
-			enrollment.insert(ignore_permissions=True)
-			enrollment.submit()
-			
-			row.status = "Enrolled"
-			row.error_log = f"Creado: {enrollment.name}"
+					"custom_academic_year": self.academic_year,
+					"custom_academic_term": self.academic_term
+				})
+				
+				enrollment.insert(ignore_permissions=True)
+				enrollment.submit()
+				
+				row.status = "Enrolled"
+				row.error_log = f"Creado: {enrollment.name}"
+				count += 1
+				results.append({
+					"student": row.student,
+					"status": "✅ Inscrito",
+					"message": enrollment.name
+				})
+
+			except frappe.DuplicateEntryError as e:
+				row.status = "Duplicate"
+				row.error_log = "Inscripción duplicada"
+				duplicates += 1
+				results.append({
 					"student": row.student,
 					"status": "⚠️ Duplicado",
 					"message": str(e)[:100]
