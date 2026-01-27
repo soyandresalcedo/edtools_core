@@ -1797,15 +1797,11 @@ def get_students_for_group_with_enrollment(student_group):
     Returns:
         dict con lista de estudiantes y los que están missing
     """
-    frappe.msgprint(f"🔍 Buscando estudiantes del grupo: {student_group}")
-    
     group_doc = frappe.get_doc("Student Group", student_group)
     students = []
     missing_enrollment = []
     
     for idx, s in enumerate(group_doc.students):
-        frappe.msgprint(f"\n  [{idx + 1}/{len(group_doc.students)}] Procesando: {s.student}")
-        
         # Buscar Program Enrollment del estudiante
         enrollments = frappe.get_all(
             "Program Enrollment",
@@ -1823,12 +1819,8 @@ def get_students_for_group_with_enrollment(student_group):
                 "program_enrollment": enrollments[0].name,
                 "program": enrollments[0].program
             })
-            frappe.msgprint(
-                f"    ✅ Encontrado: {enrollments[0].name} (Programa: {enrollments[0].program})"
-            )
         else:
             missing_enrollment.append(s.student)
-            frappe.msgprint(f"    ❌ Sin Program Enrollment")
     
     result = {
         "students": students,
@@ -1836,15 +1828,5 @@ def get_students_for_group_with_enrollment(student_group):
         "total_found": len(students),
         "total_missing": len(missing_enrollment)
     }
-    
-    frappe.msgprint(
-        f"\n{'='*50}\n"
-        f"📊 RESUMEN DE BÚSQUEDA\n"
-        f"{'='*50}\n"
-        f"Total en grupo: {len(group_doc.students)}\n"
-        f"✅ Con Program Enrollment: {len(students)}\n"
-        f"❌ Sin Program Enrollment: {len(missing_enrollment)}\n"
-        f"{'='*50}"
-    )
     
     return result

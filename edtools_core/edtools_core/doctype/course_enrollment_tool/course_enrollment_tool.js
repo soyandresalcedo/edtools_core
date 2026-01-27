@@ -172,7 +172,7 @@ frappe.ui.form.on('Course Enrollment Tool', {
                 method: 'frappe.client.get_value',
                 args: {
                     doctype: 'Course',
-                    filters: { name: frm.doc.course }
+                    name: frm.doc.course  // usar name directamente, no filters
                 },
                 callback: function(r) {
                     if (!r.message) {
@@ -197,36 +197,10 @@ frappe.ui.form.on('Course Enrollment Tool', {
         // Limpiar botones previos para evitar duplicados
         frm.page.clear_user_actions();
 
-        // ➊ BOTÓN 1: OBTENER ESTUDIANTES
-        frm.add_custom_button(
-            __('1️⃣ Obtener Estudiantes'),
-            function() {
-                // Validar campos requeridos
-                if (!frm.doc.student_group) {
-                    frappe.msgprint(
-                        __('❌ Por favor selecciona un Grupo de Estudiantes.'),
-                        { indicator: 'red' }
-                    );
-                    return;
-                }
-
-                if (!frm.doc.academic_year) {
-                    frappe.msgprint(
-                        __('❌ Por favor selecciona un Año Académico.'),
-                        { indicator: 'red' }
-                    );
-                    return;
-                }
-
-                // Dispara el evento student_group para obtener estudiantes
-                frm.script_manager.trigger('student_group', frm.doc.doctype, frm.doc.name);
-            }
-        ).addClass("btn-primary");
-
-        // ➋ BOTÓN 2: INSCRIBIR AL CURSO (solo si hay estudiantes)
+        // ➊ BOTÓN: INSCRIBIR AL CURSO (solo si hay estudiantes)
         if (frm.doc.students && frm.doc.students.length > 0) {
             frm.add_custom_button(
-                __('2️⃣ Inscribir al Curso'),
+                __('Inscribir al Curso'),
                 function() {
                     
                     // ✅ VALIDACIÓN 1: Verificar que el curso está seleccionado
@@ -250,7 +224,7 @@ frappe.ui.form.on('Course Enrollment Tool', {
                     // ✅ VALIDACIÓN 3: Verificar que hay estudiantes para inscribir
                     if (!frm.doc.students || frm.doc.students.length === 0) {
                         frappe.msgprint(
-                            __('❌ <b>No hay estudiantes para inscribir</b><br><br>Por favor primero ejecuta el paso "1️⃣ Obtener Estudiantes"'),
+                            __('❌ <b>No hay estudiantes para inscribir</b><br><br>Por favor primero selecciona un Grupo de Estudiantes'),
                             { indicator: 'orange', title: 'Sin datos' }
                         );
                         return;
@@ -276,12 +250,12 @@ frappe.ui.form.on('Course Enrollment Tool', {
                         }
                     );
                 }
-            ).addClass("btn-success");
+            ).addClass("btn-primary");
         }
 
-        // ➌ BOTÓN 3: LIMPIAR FORMULARIO
+        // ➋ BOTÓN: LIMPIAR FORMULARIO
         frm.add_custom_button(
-            __('🔄 Limpiar Formulario'),
+            __('Limpiar Formulario'),
             function() {
                 frappe.confirm(
                     __('¿Deseas limpiar todos los datos del formulario?'),
