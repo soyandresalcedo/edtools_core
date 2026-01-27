@@ -1657,24 +1657,73 @@ def get_student_groups(academic_year):
 
 @frappe.whitelist()
 def enroll_students(docname):
+    """
+    Método para inscribir estudiantes a un curso.
+    
+    Valida:
+    - Que el curso esté definido
+    - Que cada estudiante tenga un Program Enrollment válido
+    - Que el documento Course Enrollment se cree correctamente
+    """
     doc = frappe.get_doc("Course Enrollment Tool", docname)
-
-    # DEBUG: ver qué valor tiene el curso
-    frappe.msgprint(f"Valor de doc.course: {doc.course}")
-
-    if not doc.course:
-        frappe.throw("El curso no está definido en el formulario.")
+    
+    # VALIDACIÓN 1: Verificar que el curso está definido
+    frappe.msgprint(f"🔍 DEBUG - Validando curso: '{doc.course}'")
+    
+    if not doc.course or doc.course.strip() == "":
+        frappe.throw(
+            "❌ El curso no está definido en el formulario. "
+            "Por favor, selecciona un curso antes de inscribir estudiantes."
+        )
+    
+    # VALIDACIÓN 2: Verificar que existe el curso
+    if not frappe.db.exists("Course", doc.course):
+        frappe.throw(
+            f"❌ El curso '{doc.course}' no existe en el sistema. "
+            "Por favor, verifica que el curso es válido."
+        )
+    
+    # VALIDACIÓN 3: Verificar que hay estudiantes para inscribir
+    if not doc.students or len(doc.students) == 0:
+        frappe.throw("❌ No hay estudiantes en la tabla para inscribir.")
+    
+    frappe.msgprint(
+        f"✅ Validaciones pasadas. Inscribiendo {len(doc.students)} estudiante(s) al curso {doc.course}"
+    )
     
     enrolled_count = 0
     failed = []
-
-    for student in doc.students:
-        if not student.program_enrollment:
+    
+    for idx, student in enumerate(doc.students):
+        frappe.msgprint(
+            f"\n📚 Procesando estudiante {idx + 1}/{len(doc.students)}: {student.student}"
+        )
+        
+        # Validar que el estudiante tenga Program Enrollment
+        if not student.program_enrollment or student.program_enrollment.strip() == "":
             student.status = "Skipped"
-            student.error_log = "No tiene Program Enrollment"
+            student.error_log = "No tiene Program Enrollment asignado"
+            frappe.msgprint(f"⏭️  Estudiante saltado: sin Program Enrollment")
             continue
-
+        
+        # Validar que el Program Enrollment existe
+        if not frappe.db.exists("Program Enrollment", student.program_enrollment):
+            student.status = "Error"
+            student.error_log = f"Program Enrollment '{student.program_enrollment}' no existe"
+            failed.append(f"{student.student}: Program Enrollment no válido")
+            frappe.msgprint(f"❌ Program Enrollment no encontrado: {student.program_enrollment}")
+            continue
+        
         try:
+            # Logging de diagnóstico antes de crear
+            frappe.msgprint(
+                f"  ↳ Creando Course Enrollment:\n"
+                f"    - Estudiante: {student.student}\n"
+                f"    - Program Enrollment: {student.program_enrollment}\n"
+                f"    - Curso: {doc.course}"
+            )
+            
+            # Crear el Course Enrollment
             enrollment = frappe.get_doc({
                 "doctype": "Course Enrollment",
                 "student": student.student,
@@ -1682,22 +1731,56 @@ def enroll_students(docname):
                 "course": doc.course
             })
             enrollment.insert(ignore_permissions=True)
+            
             student.status = "Enrolled"
             student.error_log = ""
             enrolled_count += 1
+            frappe.msgprint(f"✅ Inscrito exitosamente")
+            
+        except frappe.DuplicateEntryError as e:
+            student.status = "Duplicate"
+            error_msg = "El estudiante ya está inscrito en este curso"
+            student.error_log = error_msg
+            frappe.msgprint(f"⚠️  Inscripción duplicada: {error_msg}")
+            
+        except frappe.ValidationError as e:
+            student.status = "Error"
+            error_msg = f"Error de validación: {str(e)}"
+            student.error_log = error_msg
+            failed.append(f"{student.student}: {error_msg}")
+            frappe.msgprint(f"❌ {error_msg}")
+            
         except Exception as e:
             student.status = "Error"
-            student.error_log = str(e)
-            failed.append(f"{student.student}: {str(e)}")
-
+            error_msg = f"Error al crear inscripción: {str(e)}"
+            student.error_log = error_msg
+            failed.append(f"{student.student}: {error_msg}")
+            frappe.msgprint(f"❌ {error_msg}")
+    
+    # Guardar cambios
     doc.save()
     frappe.db.commit()
-
-    message = f"{enrolled_count} estudiante(s) inscritos correctamente."
+    
+    # Construcción del mensaje final
+    message = f"\n{'='*50}\n"
+    message += f"📊 RESUMEN DE INSCRIPCIONES\n"
+    message += f"{'='*50}\n"
+    message += f"✅ Inscritos correctamente: {enrolled_count}/{len(doc.students)}\n"
+    
     if failed:
-        message += f"\nFallaron: {len(failed)}\n" + "\n".join(failed)
-
-    return {"message": message}
+        message += f"❌ Fallaron ({len(failed)}):\n"
+        message += "\n".join([f"  • {error}" for error in failed])
+    
+    message += f"\n{'='*50}"
+    
+    frappe.msgprint(message)
+    
+    return {
+        "message": message,
+        "enrolled_count": enrolled_count,
+        "failed_count": len(failed),
+        "total_processed": len(doc.students)
+    }
 
 
 
@@ -1705,28 +1788,63 @@ def enroll_students(docname):
 
 @frappe.whitelist()
 def get_students_for_group_with_enrollment(student_group):
+    """
+    Obtiene estudiantes de un grupo con su Program Enrollment.
+    
+    Args:
+        student_group: ID del Student Group
+    
+    Returns:
+        dict con lista de estudiantes y los que están missing
+    """
+    frappe.msgprint(f"🔍 Buscando estudiantes del grupo: {student_group}")
+    
     group_doc = frappe.get_doc("Student Group", student_group)
     students = []
     missing_enrollment = []
-
-    for s in group_doc.students:
+    
+    for idx, s in enumerate(group_doc.students):
+        frappe.msgprint(f"\n  [{idx + 1}/{len(group_doc.students)}] Procesando: {s.student}")
+        
+        # Buscar Program Enrollment del estudiante
         enrollments = frappe.get_all(
             "Program Enrollment",
             filters={"student": s.student},
-            fields=["name"]
+            fields=["name", "program"],
+            limit_page_length=1,
+            order_by="creation DESC"
         )
-
-        frappe.msgprint(f"Estudiante: {s.student}, Program Enrollment encontrados: {enrollments}")  # DEBUG
-
+        
         if enrollments and len(enrollments) > 0:
+            student_record = frappe.get_value("Student", s.student, ["student_name", "program"])
             students.append({
                 "student": s.student,
-                "student_full_name": frappe.get_value("Student", s.student, "student_name"),
-                "program_enrollment": enrollments[0].name
+                "student_full_name": student_record[0] if student_record else "",
+                "program_enrollment": enrollments[0].name,
+                "program": enrollments[0].program
             })
+            frappe.msgprint(
+                f"    ✅ Encontrado: {enrollments[0].name} (Programa: {enrollments[0].program})"
+            )
         else:
             missing_enrollment.append(s.student)
-
-    frappe.msgprint(f"Total students a enviar: {len(students)}, missing: {missing_enrollment}")  # DEBUG
-
-    return {"students": students, "missing": missing_enrollment}
+            frappe.msgprint(f"    ❌ Sin Program Enrollment")
+    
+    result = {
+        "students": students,
+        "missing": missing_enrollment,
+        "total_found": len(students),
+        "total_missing": len(missing_enrollment)
+    }
+    
+    frappe.msgprint(
+        f"\n{'='*50}\n"
+        f"📊 RESUMEN DE BÚSQUEDA\n"
+        f"{'='*50}\n"
+        f"Total en grupo: {len(group_doc.students)}\n"
+        f"✅ Con Program Enrollment: {len(students)}\n"
+        f"❌ Sin Program Enrollment: {len(missing_enrollment)}\n"
+        f"{'='*50}"
+    )
+    
+    return result
