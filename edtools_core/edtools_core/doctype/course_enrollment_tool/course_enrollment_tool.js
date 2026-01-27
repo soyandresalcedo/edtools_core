@@ -4,9 +4,17 @@
 frappe.ui.form.on('Course Enrollment Tool', {
     
     // ===================================================================
-    // SETUP: Configuración inicial y filtros dinámicos
+    // LOAD: Al cargar el formulario, limpiar todos los datos
     // ===================================================================
-    setup: function(frm) {
+    onload: function(frm) {
+        // Limpiar formulario al abrir
+        frm.set_value('academic_year', '');
+        frm.set_value('academic_term', '');
+        frm.set_value('student_group', '');
+        frm.set_value('course', '');
+        frm.clear_table('students');
+        frm.refresh_field('students');
+    },
         // Configurar filtros para Términos Académicos
         frm.set_query("academic_term", function() {
             if (!frm.doc.academic_year) {

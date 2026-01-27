@@ -197,14 +197,15 @@ class CourseEnrollmentTool(Document):
 		# Guardamos el estado final (quién quedó inscrito y quién dio error)
 		self.save()
 		
-		# Construcción de la tabla HTML
+		# Construcción de la tabla HTML adaptable al tema
 		html_table = f"""
-		<table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
-			<thead style="background-color: #f5f5f5;">
+		<table style="width: 100%; border-collapse: collapse; margin-top: 15px; 
+		              background-color: var(--bg-color); color: var(--text-color);">
+			<thead style="background-color: var(--border-color); border-bottom: 2px solid var(--border-color);">
 				<tr>
-					<th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Estudiante</th>
-					<th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Estado</th>
-					<th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Detalle</th>
+					<th style="border: 1px solid var(--border-color); padding: 12px; text-align: left; font-weight: 600;">Estudiante</th>
+					<th style="border: 1px solid var(--border-color); padding: 12px; text-align: left; font-weight: 600;">Estado</th>
+					<th style="border: 1px solid var(--border-color); padding: 12px; text-align: left; font-weight: 600;">Detalle</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -212,10 +213,10 @@ class CourseEnrollmentTool(Document):
 		
 		for result in results:
 			html_table += f"""
-				<tr>
-					<td style="border: 1px solid #ddd; padding: 10px;">{result['student']}</td>
-					<td style="border: 1px solid #ddd; padding: 10px;">{result['status']}</td>
-					<td style="border: 1px solid #ddd; padding: 10px;">{result['message']}</td>
+				<tr style="border-bottom: 1px solid var(--border-color);">
+					<td style="border: 1px solid var(--border-color); padding: 10px;">{result['student']}</td>
+					<td style="border: 1px solid var(--border-color); padding: 10px;">{result['status']}</td>
+					<td style="border: 1px solid var(--border-color); padding: 10px;">{result['message']}</td>
 				</tr>
 			"""
 		
@@ -224,10 +225,11 @@ class CourseEnrollmentTool(Document):
 		</table>
 		"""
 		
-		# Mensaje final con resumen
+		# Mensaje final con resumen adaptable al tema
 		message = f"""
-		<h4 style="margin-top: 15px;">📊 RESUMEN FINAL DE INSCRIPCIONES</h4>
-		<div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+		<h4 style="margin-top: 15px; color: var(--text-color);">📊 RESUMEN FINAL DE INSCRIPCIONES</h4>
+		<div style="background-color: var(--fg-color); padding: 15px; border-radius: 5px; margin-bottom: 15px;
+		            border: 1px solid var(--border-color); color: var(--text-color);">
 			<p><strong>✅ Inscritos correctamente:</strong> {count}/{len(self.students)}</p>
 			<p><strong>⚠️ Duplicados encontrados:</strong> {duplicates}</p>
 			<p><strong>❌ Errores:</strong> {errors}</p>
