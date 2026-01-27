@@ -144,15 +144,8 @@ class CourseEnrollmentTool(Document):
 					"course": self.course,
 					"program_enrollment": row.program_enrollment,
 					"enrollment_date": enroll_date,
-					"academic_year": self.academic_year,
-					"academic_term": self.academic_term
-				})
-				
-				enrollment.insert(ignore_permissions=True)
-				enrollment.submit() # Validar inmediatamente
-				
-				row.status = "Enrolled"
-				row.error_log = f"Creado: {enrollment.name}"
+				"custom_academic_year": self.academic_year,
+				"custom_academic_term": self.academic_term
 				count += 1
 				results.append({
 					"student": row.student,
