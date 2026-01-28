@@ -1955,9 +1955,15 @@ def webhook_create_moodle_categories(academic_year=None):
     year_response = r_year.json()
 
     if "exception" in year_response:
-        if "Duplicate idnumber" not in year_response.get("message", ""):
-            frappe.log_error(year_response, "Moodle AY creation failed")
-            frappe.throw("Error creando Año Académico")
+        if "Duplicate idnumber" in year_response.get("message", ""):
+            return {"status": "exists", "year": f"AY_{year}"}
+
+        # Solo log, NO throw
+        frappe.log_error(
+            message=str(year_response),
+            title="Moodle AY creation failed"
+        )
+        return {"status": "error", "detail": "Moodle error creating academic year"}
 
     year_category_id = year_response[0]["id"]
 
