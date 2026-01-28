@@ -1837,15 +1837,36 @@ def create_moodle_categories(doc=None, method=None):
     """
     Webhook handler: crea categorías básicas en Moodle
     """
+    import requests
+    import json
 
     MOODLE_URL = "https://data.ced.com.co/webservice/rest/server.php"
     TOKEN = "8b43b06089f16a584ad68810ecd67a68"
 
     # -------------------------
+    # 0. Normalizar doc
+    # -------------------------
+    if isinstance(doc, str):
+        doc = json.loads(doc)
+
+    # Dependiendo del DocType, ajusta el campo
+    year = doc.get("year") or doc.get("name")
+
+    if not year:
+        frappe.throw("No se pudo determinar el año académico")
+
+    year = str(year)
+
+    frappe.log_error(
+        message=f"Webhook Academic Year recibido: {year}",
+        title="Moodle Webhook DEBUG"
+    )
+
+    # -------------------------
     # 1. Crear Año Académico
     # -------------------------
-    academic_year_name = "2026"
-    academic_year_idnumber = "AY_2026"
+    academic_year_name = year
+    academic_year_idnumber = f"AY_{year}"
 
     payload_year = {
         "wstoken": TOKEN,
@@ -1860,16 +1881,24 @@ def create_moodle_categories(doc=None, method=None):
     year_response = r_year.json()
 
     if "exception" in year_response:
-        frappe.log_error(year_response, "Moodle AY creation failed")
-        frappe.throw("Error creando Año Académico en Moodle")
+        # Si ya existe, no es error fatal
+        if "Duplicate idnumber" in year_response.get("message", ""):
+            frappe.log_error(
+                year_response,
+                "Moodle AY ya existe"
+            )
+            return {"status": "exists", "year": academic_year_idnumber}
+        else:
+            frappe.log_error(year_response, "Moodle AY creation failed")
+            frappe.throw("Error creando Año Académico en Moodle")
 
     year_category_id = year_response[0]["id"]
 
     # -------------------------
     # 2. Crear Término Académico
     # -------------------------
-    term_name = "2026 (Spring A)"
-    term_idnumber = "TERM_2026_SPRING_A"
+    term_name = f"{year} (Spring A)"
+    term_idnumber = f"TERM_{year}_SPRING_A"
 
     payload_term = {
         "wstoken": TOKEN,
@@ -1884,10 +1913,14 @@ def create_moodle_categories(doc=None, method=None):
     term_response = r_term.json()
 
     if "exception" in term_response:
-        frappe.log_error(term_response, "Moodle Term creation failed")
-        frappe.throw("Error creando Término Académico en Moodle")
+        if "Duplicate idnumber" in term_response.get("message", ""):
+            frappe.log_error(term_response, "Moodle Term ya existe")
+        else:
+            frappe.log_error(term_response, "Moodle Term creation failed")
+            frappe.throw("Error creando Término Académico en Moodle")
 
     return {
-        "academic_year": year_response,
-        "term": term_response
+        "status": "created",
+        "academic_year": academic_year_idnumber,
+        "term": term_idnumber
     }
