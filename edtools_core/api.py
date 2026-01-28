@@ -1924,3 +1924,52 @@ def create_moodle_categories(doc=None, method=None):
         "academic_year": academic_year_idnumber,
         "term": term_idnumber
     }
+
+@frappe.whitelist(allow_guest=True)
+def webhook_create_moodle_categories(academic_year=None):
+    if not academic_year:
+        frappe.throw("academic_year is required")
+
+    year = str(academic_year)
+
+    frappe.log_error(
+        f"Webhook Academic Year recibido: {year}",
+        "Moodle Webhook DEBUG"
+    )
+
+    MOODLE_URL = "https://data.ced.com.co/webservice/rest/server.php"
+    TOKEN = "8b43b06089f16a584ad68810ecd67a68"
+
+    # 1. Crear Año Académico
+    payload_year = {
+        "wstoken": TOKEN,
+        "wsfunction": "core_course_create_categories",
+        "moodlewsrestformat": "json",
+        "categories[0][name]": year,
+        "categories[0][idnumber]": f"AY_{year}",
+        "categories[0][parent]": 0
+    }
+
+    r_year = requests.post(MOODLE_URL, data=payload_year, timeout=10)
+    year_response = r_year.json()
+
+    if "exception" in year_response:
+        if "Duplicate idnumber" not in year_response.get("message", ""):
+            frappe.log_error(year_response, "Moodle AY creation failed")
+            frappe.throw("Error creando Año Académico")
+
+    year_category_id = year_response[0]["id"]
+
+    # 2. Crear Term
+    payload_term = {
+        "wstoken": TOKEN,
+        "wsfunction": "core_course_create_categories",
+        "moodlewsrestformat": "json",
+        "categories[0][name]": f"{year} (Spring A)",
+        "categories[0][idnumber]": f"TERM_{year}_SPRING_A",
+        "categories[0][parent]": year_category_id
+    }
+
+    requests.post(MOODLE_URL, data=payload_term, timeout=10)
+
+    return {"status": "ok"}
