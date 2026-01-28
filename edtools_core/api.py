@@ -1830,3 +1830,64 @@ def get_students_for_group_with_enrollment(student_group):
     }
     
     return result
+
+
+@frappe.whitelist()
+def create_moodle_categories(doc=None, method=None):
+    """
+    Webhook handler: crea categorías básicas en Moodle
+    """
+
+    MOODLE_URL = "https://data.ced.com.co/webservice/rest/server.php"
+    TOKEN = "8b43b06089f16a584ad68810ecd67a68"
+
+    # -------------------------
+    # 1. Crear Año Académico
+    # -------------------------
+    academic_year_name = "2026"
+    academic_year_idnumber = "AY_2026"
+
+    payload_year = {
+        "wstoken": TOKEN,
+        "wsfunction": "core_course_create_categories",
+        "moodlewsrestformat": "json",
+        "categories[0][name]": academic_year_name,
+        "categories[0][idnumber]": academic_year_idnumber,
+        "categories[0][parent]": 0
+    }
+
+    r_year = requests.post(MOODLE_URL, data=payload_year, timeout=10)
+    year_response = r_year.json()
+
+    if "exception" in year_response:
+        frappe.log_error(year_response, "Moodle AY creation failed")
+        frappe.throw("Error creando Año Académico en Moodle")
+
+    year_category_id = year_response[0]["id"]
+
+    # -------------------------
+    # 2. Crear Término Académico
+    # -------------------------
+    term_name = "2026 (Spring A)"
+    term_idnumber = "TERM_2026_SPRING_A"
+
+    payload_term = {
+        "wstoken": TOKEN,
+        "wsfunction": "core_course_create_categories",
+        "moodlewsrestformat": "json",
+        "categories[0][name]": term_name,
+        "categories[0][idnumber]": term_idnumber,
+        "categories[0][parent]": year_category_id
+    }
+
+    r_term = requests.post(MOODLE_URL, data=payload_term, timeout=10)
+    term_response = r_term.json()
+
+    if "exception" in term_response:
+        frappe.log_error(term_response, "Moodle Term creation failed")
+        frappe.throw("Error creando Término Académico en Moodle")
+
+    return {
+        "academic_year": year_response,
+        "term": term_response
+    }
