@@ -1928,6 +1928,8 @@ def create_moodle_categories(doc=None, method=None):
 
 @frappe.whitelist(allow_guest=True)
 def webhook_create_moodle_categories(academic_year=None):
+    import requests
+
     if not academic_year:
         frappe.throw("academic_year is required")
 
@@ -1977,6 +1979,21 @@ def webhook_create_moodle_categories(academic_year=None):
         "categories[0][parent]": year_category_id
     }
 
-    requests.post(MOODLE_URL, data=payload_term, timeout=10)
+    r_term = requests.post(MOODLE_URL, data=payload_term, timeout=10)
+    term_response = r_term.json()
 
-    return {"status": "ok"}
+    if "exception" in term_response:
+        if "Duplicate idnumber" in term_response.get("message", ""):
+            frappe.log_error(term_response, "Moodle Term ya existe")
+        else:
+            frappe.log_error(term_response, "Moodle Term creation failed")
+            return {
+                "status": "error",
+                "detail": "Moodle error creating term"
+            }
+
+    return {
+        "status": "ok",
+        "academic_year": f"AY_{year}",
+        "term": f"TERM_{year}_SPRING_A"
+    }
