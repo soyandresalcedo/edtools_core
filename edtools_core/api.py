@@ -1842,7 +1842,7 @@ def create_moodle_categories(doc=None, method=None):
     import json
 
     MOODLE_URL = "https://data.ced.com.co/webservice/rest/server.php"
-    TOKEN = "8b43b06089f16a584ad68810ecd67a68"
+    TOKEN = "7116702d4ee8a118ef3ba881351197b8"
 
     # -------------------------
     # 0. Normalizar doc
@@ -1939,7 +1939,7 @@ def webhook_create_moodle_categories(academic_year=None):
     )
 
     MOODLE_URL = "https://data.ced.com.co/webservice/rest/server.php"
-    TOKEN = "8b43b06089f16a584ad68810ecd67a68"
+    TOKEN = "7116702d4ee8a118ef3ba881351197b8"
 
     # 1. Crear Año Académico
     payload_year = {
