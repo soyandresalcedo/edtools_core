@@ -65,6 +65,25 @@ class CourseEnrollmentTool(Document):
 		- Cada estudiante debe tener un Program Enrollment válido
 		- Se evitan duplicados
 		"""
+		# ------------------------------------------------------------------
+		# MOODLE: asegurar categoría padre del Academic Year (fase 1)
+		# ------------------------------------------------------------------
+		# Requisito: evitar duplicados por idnumber. Aquí: idnumber == name == academic_year.
+		if not self.academic_year:
+			frappe.throw("❌ Academic Year es obligatorio para sincronizar con Moodle")
+		try:
+			from edtools_core.moodle_integration import ensure_academic_year_category
+
+			moodle_year_category_id = ensure_academic_year_category(str(self.academic_year))
+			frappe.msgprint(
+				f"🎓 Moodle OK: categoría Academic Year '{self.academic_year}' (id={moodle_year_category_id})",
+				indicator="blue",
+			)
+		except Exception as e:
+			frappe.throw(
+				f"❌ Error validando/creando la categoría de Academic Year en Moodle: {str(e)}"
+			)
+
 		# ✅ VALIDACIÓN 1: Curso obligatorio
 		if not self.course or self.course.strip() == "":
 			frappe.throw(

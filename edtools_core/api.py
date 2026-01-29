@@ -1667,7 +1667,7 @@ def enroll_students(docname):
     - Que el documento Course Enrollment se cree correctamente
     """
     doc = frappe.get_doc("Course Enrollment Tool", docname)
-    
+
     # VALIDACIÓN 1: Verificar que el curso está definido
     frappe.msgprint(f"🔍 DEBUG - Validando curso: '{doc.course}'")
     
