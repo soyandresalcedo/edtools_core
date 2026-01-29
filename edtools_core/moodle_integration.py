@@ -10,6 +10,7 @@ por lo que se consulta el listado completo de categorías y se filtra localmente
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict, List
 
 import frappe
@@ -143,3 +144,107 @@ def ensure_academic_year_category(academic_year_name: str) -> int:
     frappe.log_error(message=str(resp), title="Moodle create_categories unexpected response")
     frappe.throw("Respuesta inesperada de Moodle en core_course_create_categories")
 
+
+_TERM_CODE_BY_LABEL = {
+    "Spring A": "01",
+    "Spring B": "02",
+    "Summer A": "03",
+    "Summer B": "04",
+    "Fall A": "05",
+    "Fall B": "06",
+}
+
+
+def _parse_academic_term(term_label: str) -> tuple[str, str]:
+    """Parsea `YYYY (Spring A)` y retorna `(year, code)`.
+
+    Regla de código:
+    - Spring A=01, Spring B=02, Summer A=03, Summer B=04, Fall A=05, Fall B=06
+    - nombre Moodle para categoría hija = YYYY + code (ej: 202601)
+    """
+
+    raw = (term_label or "").strip()
+    m = re.fullmatch(r"(\d{4})\s*\((Spring A|Spring B|Summer A|Summer B|Fall A|Fall B)\)", raw)
+    if not m:
+        frappe.throw(
+            "Academic Term debe tener formato 'YYYY (Spring A|Spring B|Summer A|Summer B|Fall A|Fall B)'. "
+            f"Recibido: {raw}"
+        )
+
+    year = m.group(1)
+    season = m.group(2)
+    return year, _TERM_CODE_BY_LABEL[season]
+
+
+def ensure_academic_term_category(
+    *,
+    academic_term_label: str,
+    parent_year_category_id: int,
+) -> int:
+    """Asegura (idempotente) la categoría hija del Academic Term en Moodle.
+
+    Reglas solicitadas:
+    - Deduplicación por `idnumber` = academic_term_label
+    - Debe ser hija del Academic Year (parent = parent_year_category_id)
+    - `name` Moodle debe ser el código YYYYMM: ej 202601
+    - `idnumber` Moodle debe ser el texto: ej `2026 (Spring A)`
+    """
+
+    term_label = (academic_term_label or "").strip()
+    if not term_label:
+        frappe.throw("Academic Term vacío: no se puede sincronizar con Moodle")
+
+    year, code = _parse_academic_term(term_label)
+    moodle_name = f"{year}{code}"
+
+    try:
+        parent_id = int(parent_year_category_id)
+    except Exception:
+        frappe.throw("parent_year_category_id inválido")
+
+    categories = get_all_categories()
+
+    same_idnumber = [c for c in categories if str(c.get("idnumber") or "") == term_label]
+    for c in same_idnumber:
+        try:
+            if int(c.get("parent") or 0) == parent_id:
+                return int(c["id"])
+        except Exception:
+            continue
+
+    # Si el idnumber existe pero en otro parent, es conflicto (evitamos duplicar con idnumber igual).
+    if same_idnumber:
+        frappe.log_error(message=str(same_idnumber[:5]), title="Moodle term idnumber conflict")
+        frappe.throw(
+            "El idnumber del Academic Term ya existe en Moodle pero no está bajo el Academic Year esperado. "
+            "No se puede crear sin resolver el conflicto."
+        )
+
+    resp = _moodle_post(
+        "core_course_create_categories",
+        {
+            "categories[0][name]": moodle_name,
+            "categories[0][idnumber]": term_label,
+            "categories[0][parent]": parent_id,
+        },
+    )
+
+    if isinstance(resp, dict) and resp.get("exception"):
+        msg = resp.get("message") or ""
+
+        # Idempotencia: si Moodle respondió "Duplicate idnumber" reconsultamos.
+        if "Duplicate idnumber" in msg:
+            categories = get_all_categories()
+            for c in categories:
+                if str(c.get("idnumber") or "") == term_label and int(c.get("parent") or 0) == parent_id:
+                    return int(c["id"])
+            frappe.throw("Moodle reportó Duplicate idnumber pero no se pudo ubicar la categoría hija")
+
+        frappe.log_error(message=str(resp), title="Moodle create_term error")
+        frappe.throw(f"Moodle error (create term): {msg or resp.get('errorcode')}")
+
+    if isinstance(resp, list) and resp and isinstance(resp[0], dict) and resp[0].get("id"):
+        return int(resp[0]["id"])
+
+    frappe.log_error(message=str(resp), title="Moodle create_term unexpected response")
+    frappe.throw("Respuesta inesperada de Moodle en core_course_create_categories (term)")

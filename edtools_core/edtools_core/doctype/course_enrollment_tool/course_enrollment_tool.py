@@ -68,15 +68,31 @@ class CourseEnrollmentTool(Document):
 		# ------------------------------------------------------------------
 		# MOODLE: asegurar categoría padre del Academic Year (fase 1)
 		# ------------------------------------------------------------------
-		# Requisito: evitar duplicados por idnumber. Aquí: idnumber == name == academic_year.
+		# Requisito: evitar duplicados por idnumber.
+		# - Academic Year (padre): idnumber == name == academic_year, parent == 0
+		# - Academic Term (hija): idnumber == academic_term_label, name == YYYYMM, parent == moodle_year_category_id
 		if not self.academic_year:
 			frappe.throw("❌ Academic Year es obligatorio para sincronizar con Moodle")
+		if not self.academic_term:
+			frappe.throw("❌ Academic Term es obligatorio para sincronizar con Moodle")
 		try:
-			from edtools_core.moodle_integration import ensure_academic_year_category
+			from edtools_core.moodle_integration import (
+				ensure_academic_term_category,
+				ensure_academic_year_category,
+			)
 
 			moodle_year_category_id = ensure_academic_year_category(str(self.academic_year))
 			frappe.msgprint(
 				f"🎓 Moodle OK: categoría Academic Year '{self.academic_year}' (id={moodle_year_category_id})",
+				indicator="blue",
+			)
+
+			moodle_term_category_id = ensure_academic_term_category(
+				academic_term_label=str(self.academic_term),
+				parent_year_category_id=moodle_year_category_id,
+			)
+			frappe.msgprint(
+				f"📚 Moodle OK: categoría Academic Term '{self.academic_term}' (id={moodle_term_category_id})",
 				indicator="blue",
 			)
 		except Exception as e:
