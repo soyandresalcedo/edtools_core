@@ -43,7 +43,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Pending\nEnrolled\nError"
+   "options": "Pending\nEnrolled\nDuplicate\nSkipped\nError"
   },
   {
    "fieldname": "error_log",
