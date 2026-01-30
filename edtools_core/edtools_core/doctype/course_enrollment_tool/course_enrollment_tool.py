@@ -2,8 +2,9 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe.utils import getdate
 from frappe.model.document import Document
-from frappe.utils import getdate, nowdate
+from frappe.utils import nowdate
 
 class CourseEnrollmentTool(Document):
 	
@@ -77,8 +78,10 @@ class CourseEnrollmentTool(Document):
 			frappe.throw("❌ Academic Term es obligatorio para sincronizar con Moodle")
 		try:
 			from edtools_core.moodle_integration import (
+				ensure_course,
 				ensure_academic_term_category,
 				ensure_academic_year_category,
+				get_term_category_name,
 			)
 
 			moodle_year_category_id = ensure_academic_year_category(str(self.academic_year))
@@ -95,9 +98,54 @@ class CourseEnrollmentTool(Document):
 				f"📚 Moodle OK: categoría Academic Term '{self.academic_term}' (id={moodle_term_category_id})",
 				indicator="blue",
 			)
+
+			# ------------------------------------------------------------------
+			# MOODLE: asegurar Course dentro de la categoría hija (fase 2)
+			# ------------------------------------------------------------------
+			# Validación por idnumber (único): Course.course_name
+			course_doc = frappe.get_doc("Course", self.course)
+			course_name = (course_doc.course_name or self.course or "").strip()
+			course_shortname = (getattr(course_doc, "short_name", None) or "").strip()
+			if not course_shortname:
+				# Fallback: derivar de la parte izquierda de " - "
+				course_shortname = course_name.split(" - ", 1)[0].strip()
+
+			# Título (parte derecha) para el fullname en Moodle
+			course_title = course_name.split(" - ", 1)[1].strip() if " - " in course_name else course_name
+
+			term_start_date = frappe.db.get_value("Academic Term", self.academic_term, "term_start_date")
+			if not term_start_date:
+				frappe.throw("No se encontró term_start_date para el Academic Term seleccionado")
+			term_start_date = getdate(term_start_date)
+			term_start_date_str = f"{term_start_date.month}/{term_start_date.day}/{str(term_start_date.year)[2:]}"
+
+			term_category_name = get_term_category_name(str(self.academic_term))
+			term_idnumber = str(self.academic_term)
+
+			# Idnumber debe ser único por PERIODO para permitir el mismo curso en distintos términos.
+			# Mantiene el course_name (como pediste) pero lo hace único al prefijar con el código YYYYMM.
+			moodle_course_idnumber = f"{term_category_name}::{course_name}"
+
+			# Formato solicitado:
+			# <term_category_name>,<shortname>, 1,<TITLE> <term_idnumber> <term_start_date>
+			moodle_fullname = f"{term_category_name},{course_shortname}, 1,{course_title} {term_idnumber} {term_start_date_str}"
+
+			moodle_course_id = ensure_course(
+				category_id=moodle_term_category_id,
+				term_category_name=term_category_name,
+				term_idnumber=term_idnumber,
+				term_start_date_str=term_start_date_str,
+				course_fullname=moodle_fullname,
+				course_shortname=course_shortname,
+				course_idnumber=moodle_course_idnumber,
+			)
+			frappe.msgprint(
+				f"🎯 Moodle OK: Course '{course_name}' (id={moodle_course_id})",
+				indicator="blue",
+			)
 		except Exception as e:
 			frappe.throw(
-				f"❌ Error validando/creando la categoría de Academic Year en Moodle: {str(e)}"
+				f"❌ Error sincronizando Moodle (categorías/curso): {str(e)}"
 			)
 
 		# ✅ VALIDACIÓN 1: Curso obligatorio

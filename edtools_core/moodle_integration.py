@@ -155,6 +155,17 @@ _TERM_CODE_BY_LABEL = {
 }
 
 
+def get_term_category_name(term_label: str) -> str:
+    """Retorna el `name` esperado para la categoría hija en Moodle (YYYYMM).
+
+    Ej:
+    - `2026 (Spring A)` -> `202601`
+    """
+
+    year, code = _parse_academic_term(term_label)
+    return f"{year}{code}"
+
+
 def _parse_academic_term(term_label: str) -> tuple[str, str]:
     """Parsea `YYYY (Spring A)` y retorna `(year, code)`.
 
@@ -248,3 +259,120 @@ def ensure_academic_term_category(
 
     frappe.log_error(message=str(resp), title="Moodle create_term unexpected response")
     frappe.throw("Respuesta inesperada de Moodle en core_course_create_categories (term)")
+
+
+def get_courses_by_field(*, field: str, value: str) -> List[Dict[str, Any]]:
+    """Wrapper para `core_course_get_courses_by_field`.
+
+    Moodle típicamente retorna un dict con key `courses`.
+    """
+
+    resp = _moodle_post(
+        "core_course_get_courses_by_field",
+        {
+            "field": field,
+            "value": value,
+        },
+        timeout=30,
+    )
+
+    if isinstance(resp, dict) and resp.get("exception"):
+        frappe.log_error(message=str(resp), title="Moodle get_courses_by_field error")
+        frappe.throw(f"Moodle error (get_courses_by_field): {resp.get('message') or resp.get('errorcode')}")
+
+    # Moodle: {"courses": [...], "warnings": [...]}
+    if isinstance(resp, dict) and isinstance(resp.get("courses"), list):
+        return resp.get("courses")
+
+    # Fallback defensivo
+    if isinstance(resp, list):
+        return resp
+
+    frappe.log_error(message=str(resp), title="Moodle get_courses_by_field unexpected response")
+    frappe.throw("Respuesta inesperada de Moodle en core_course_get_courses_by_field")
+
+
+def ensure_course(
+    *,
+    category_id: int,
+    term_category_name: str,
+    term_idnumber: str,
+    term_start_date_str: str,
+    course_fullname: str,
+    course_shortname: str,
+    course_idnumber: str,
+) -> int:
+    """Asegura (idempotente) un Course en Moodle.
+
+    Reglas:
+    - Validar existencia por `idnumber` (único): **debe ser único por PERIODO**.
+      Recomendado: prefijar con el `term_category_name` (YYYYMM) para permitir el mismo
+      curso en diferentes periodos.
+    - Crear si no existe:
+      - categoryid = category_id (id de categoría hija)
+      - shortname = course_shortname (ej "MAR 500")
+      - idnumber = course_idnumber
+      - fullname = "{term_category_name},{course_shortname}, 1,{TITLE} {term_idnumber} {term_start_date_str}"
+    """
+
+    if not course_idnumber or not course_idnumber.strip():
+        frappe.throw("course_idnumber vacío (se usa para validar en Moodle)")
+
+    courses = get_courses_by_field(field="idnumber", value=course_idnumber)
+    if courses:
+        # Si existe, asegurar que esté en la categoría correcta.
+        c = courses[0]
+        try:
+            existing_category = int(c.get("categoryid") or c.get("category") or 0)
+        except Exception:
+            existing_category = 0
+
+        if existing_category and int(category_id) != existing_category:
+            frappe.throw(
+                f"El curso ya existe en Moodle (idnumber='{course_idnumber}') pero está en otra categoría "
+                f"(categoryid={existing_category}). Esperado: {int(category_id)}."
+            )
+
+        return int(c.get("id"))
+
+    # Crear
+    resp = _moodle_post(
+        "core_course_create_courses",
+        {
+            "courses[0][fullname]": course_fullname,
+            "courses[0][shortname]": course_shortname,
+            "courses[0][categoryid]": int(category_id),
+            "courses[0][idnumber]": course_idnumber,
+            "courses[0][summaryformat]": 1,
+            "courses[0][format]": "topics",
+            "courses[0][showgrades]": 1,
+            "courses[0][newsitems]": 5,
+            "courses[0][maxbytes]": 0,
+            "courses[0][showreports]": 0,
+            "courses[0][visible]": 1,
+            "courses[0][groupmode]": 0,
+            "courses[0][groupmodeforce]": 0,
+            "courses[0][defaultgroupingid]": 0,
+        },
+        timeout=60,
+    )
+
+    if isinstance(resp, dict) and resp.get("exception"):
+        msg = resp.get("message") or ""
+
+        # Idempotencia: si Moodle respondió "Duplicate idnumber" reconsultamos.
+        if "Duplicate idnumber" in msg:
+            courses = get_courses_by_field(field="idnumber", value=course_idnumber)
+            if courses:
+                return int(courses[0].get("id"))
+            frappe.throw("Moodle reportó Duplicate idnumber pero no se pudo ubicar el curso")
+
+        frappe.log_error(message=str(resp), title="Moodle create_courses error")
+        frappe.throw(f"Moodle error (create_courses): {msg or resp.get('errorcode')}")
+
+    # Moodle retorna lista de cursos creados
+    if isinstance(resp, list) and resp and isinstance(resp[0], dict) and resp[0].get("id"):
+        return int(resp[0]["id"])
+
+    frappe.log_error(message=str(resp), title="Moodle create_courses unexpected response")
+    frappe.throw("Respuesta inesperada de Moodle en core_course_create_courses")
