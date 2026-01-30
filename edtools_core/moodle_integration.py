@@ -301,6 +301,8 @@ def ensure_course(
     course_fullname: str,
     course_shortname: str,
     course_idnumber: str,
+    startdate: int | None = None,
+    enddate: int | None = None,
 ) -> int:
     """Asegura (idempotente) un Course en Moodle.
 
@@ -353,6 +355,8 @@ def ensure_course(
             "courses[0][groupmode]": 0,
             "courses[0][groupmodeforce]": 0,
             "courses[0][defaultgroupingid]": 0,
+            **({"courses[0][startdate]": int(startdate)} if startdate is not None else {}),
+            **({"courses[0][enddate]": int(enddate)} if enddate is not None else {}),
         },
         timeout=60,
     )

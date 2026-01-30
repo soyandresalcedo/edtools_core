@@ -119,6 +119,16 @@ class CourseEnrollmentTool(Document):
 			term_start_date = getdate(term_start_date)
 			term_start_date_str = f"{term_start_date.month}/{term_start_date.day}/{str(term_start_date.year)[2:]}"
 
+			term_end_date = frappe.db.get_value("Academic Term", self.academic_term, "term_end_date")
+			if not term_end_date:
+				frappe.throw("No se encontró term_end_date para el Academic Term seleccionado")
+			term_end_date = getdate(term_end_date)
+
+			# Convertir a Unix timestamp para Moodle
+			import time
+			startdate_timestamp = int(time.mktime(term_start_date.timetuple()))
+			enddate_timestamp = int(time.mktime(term_end_date.timetuple()))
+
 			term_category_name = get_term_category_name(str(self.academic_term))
 			term_idnumber = str(self.academic_term)
 
@@ -138,6 +148,8 @@ class CourseEnrollmentTool(Document):
 				course_fullname=moodle_fullname,
 				course_shortname=course_shortname,
 				course_idnumber=moodle_course_idnumber,
+				startdate=startdate_timestamp,
+				enddate=enddate_timestamp,
 			)
 			frappe.msgprint(
 				f"🎯 Moodle OK: Course '{course_name}' (id={moodle_course_id})",
