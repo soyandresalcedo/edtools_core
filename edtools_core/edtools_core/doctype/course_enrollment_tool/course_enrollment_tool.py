@@ -124,10 +124,13 @@ class CourseEnrollmentTool(Document):
 				frappe.throw("No se encontró term_end_date para el Academic Term seleccionado")
 			term_end_date = getdate(term_end_date)
 
-			# Convertir a Unix timestamp para Moodle
-			import time
-			startdate_timestamp = int(time.mktime(term_start_date.timetuple()))
-			enddate_timestamp = int(time.mktime(term_end_date.timetuple()))
+			# Convertir a Unix timestamp para Moodle (sumar 12h para evitar desfase de zona horaria)
+			import datetime
+			import calendar
+			term_start_date_noon = datetime.datetime.combine(term_start_date, datetime.time(12, 0))
+			term_end_date_noon = datetime.datetime.combine(term_end_date, datetime.time(12, 0))
+			startdate_timestamp = int(calendar.timegm(term_start_date_noon.timetuple()))
+			enddate_timestamp = int(calendar.timegm(term_end_date_noon.timetuple()))
 
 			term_category_name = get_term_category_name(str(self.academic_term))
 			term_idnumber = str(self.academic_term)
