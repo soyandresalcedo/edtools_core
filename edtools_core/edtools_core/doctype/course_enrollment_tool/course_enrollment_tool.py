@@ -54,6 +54,23 @@ class CourseEnrollmentTool(Document):
 		self.save()
 		
 		return students_found
+	
+	@frappe.whitelist()
+	def reset_tool(self):
+		"""
+		Borra todos los campos y guarda el Single DocType vacío,
+		ignorando la restricción de campos obligatorios.
+		"""
+		self.academic_year = None
+		self.academic_term = None
+		self.student_group = None
+		self.course = None
+		self.enrollment_date = None
+		self.set("students", [])
+		
+		# ¡ESTA ES LA CLAVE! ignore_mandatory=True permite guardar campos vacíos
+		self.save(ignore_permissions=True, ignore_mandatory=True)
+
 
 	@frappe.whitelist()
 	def enroll_students(self):
@@ -339,22 +356,16 @@ class CourseEnrollmentTool(Document):
 		
 		# LIMPIEZA FINAL (Solución Single DocType)
 		# ------------------------------------------------------------------
-		# Vaciamos la tabla para que la próxima vez el formulario esté limpio.
-		# Esto evita el problema de integridad referencial al borrar Program Enrollments externos.
-		self.set("students", [])
+		
 		# 1. Vaciar la tabla de estudiantes (lo que ya tenías)
 		self.set("students", [])
-
-		# 2. Vaciar los campos del formulario principal
-		# Al establecerlos en None, se borran de la base de datos al guardar
 		self.program = None
 		self.academic_year = None
 		self.academic_term = None
 		self.student_group = None
 		self.course = None
-		self.enrollment_date = None  # Opcional, si quieres borrar la fecha también
-		
-		self.save(ignore_permissions=True)
+
+		self.save(ignore_permissions=True, ignore_mandatory=True)
 		# ------------------------------------------------------------------
 		return {
 			"count": count,

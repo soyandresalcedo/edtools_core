@@ -109,17 +109,20 @@ frappe.ui.form.on('Course Enrollment Tool', {
                 frappe.confirm(
                     __('¿Deseas limpiar todos los datos del formulario?'),
                     function() {
-                         // Limpieza visual inmediata
-                        frm.set_value('academic_year', '');
-                        frm.set_value('academic_term', '');
-                        frm.set_value('student_group', '');
-                        frm.set_value('course', '');
-                        frm.clear_table('students');
-                        frm.refresh();
-                        
-                        // IMPORTANTE: Guardar el estado vacío en BD para que persista
-                        frm.save(null, function() {
-                            frappe.msgprint(__('Formulario reiniciado'), {indicator: 'blue'});
+                        // Llamamos al método Python que fuerza el borrado
+                        frm.call({
+                            method: 'reset_tool',
+                            doc: frm.doc,
+                            freeze: true,
+                            freeze_message: __('Limpiando formulario...'),
+                            callback: function() {
+                                // Recargamos el documento para ver los cambios
+                                frm.reload_doc();
+                                frappe.msgprint(
+                                    __('✅ Formulario limpio.'),
+                                    { indicator: 'blue' }
+                                );
+                            }
                         });
                     }
                 );
