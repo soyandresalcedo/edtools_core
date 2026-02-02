@@ -36,20 +36,17 @@ frappe.ui.form.on('Course Enrollment Tool', {
             return { "filters": [] };
         });
     },
-
+    onload: function(frm) {
+        // Opcional: Si quieres asegurarte que no se editen campos mientras se procesa
+        if (frm.doc.students && frm.doc.students.length > 0) {
+            // Puedes poner lógica aquí si detectas que quedó una sesión a medias
+        }
+    },
     // ===================================================================
     // REFRESH: Al cargar o refrescar, limpiar formulario si es nuevo
     // ===================================================================
     refresh: function(frm) {
-        // Limpiar formulario solo si es un registro nuevo
-        if (frm.is_new()) {
-            frm.set_value('academic_year', '');
-            frm.set_value('academic_term', '');
-            frm.set_value('student_group', '');
-            frm.set_value('course', '');
-            frm.clear_table('students');
-            frm.refresh_field('students');
-        }
+        
 
         // Desactivar el botón de guardado estándar
         frm.disable_save();
@@ -64,20 +61,12 @@ frappe.ui.form.on('Course Enrollment Tool', {
                 function() {
                     
                     // ✅ VALIDACIÓN 1: Verificar que el curso está seleccionado
-                    if (!frm.doc.course || frm.doc.course.trim() === '') {
-                        frappe.msgprint(
-                            __('❌ <b>El curso no está definido</b><br><br>Por favor selecciona un curso antes de inscribir estudiantes.'),
-                            { indicator: 'red', title: 'Campo obligatorio' }
-                        );
+                    if (!frm.doc.course) {
+                        frappe.msgprint(__('❌ Selecciona un curso.'), { indicator: 'red' });
                         return;
                     }
-                    
-                    // ✅ VALIDACIÓN 2: Verificar campos académicos
                     if (!frm.doc.academic_year || !frm.doc.academic_term) {
-                        frappe.msgprint(
-                            __('❌ <b>Faltan campos académicos</b><br><br>Por favor completa:<br>• Año académico<br>• Término académico'),
-                            { indicator: 'red', title: 'Validación requerida' }
-                        );
+                        frappe.msgprint(__('❌ Faltan datos académicos.'), { indicator: 'red' });
                         return;
                     }
                     
@@ -120,16 +109,18 @@ frappe.ui.form.on('Course Enrollment Tool', {
                 frappe.confirm(
                     __('¿Deseas limpiar todos los datos del formulario?'),
                     function() {
+                         // Limpieza visual inmediata
                         frm.set_value('academic_year', '');
                         frm.set_value('academic_term', '');
                         frm.set_value('student_group', '');
                         frm.set_value('course', '');
                         frm.clear_table('students');
-                        frm.refresh_field('students');
-                        frappe.msgprint(
-                            __('✅ Formulario limpio. Listo para una nueva inscripción.'),
-                            { indicator: 'blue' }
-                        );
+                        frm.refresh();
+                        
+                        // IMPORTANTE: Guardar el estado vacío en BD para que persista
+                        frm.save(null, function() {
+                            frappe.msgprint(__('Formulario reiniciado'), {indicator: 'blue'});
+                        });
                     }
                 );
             }

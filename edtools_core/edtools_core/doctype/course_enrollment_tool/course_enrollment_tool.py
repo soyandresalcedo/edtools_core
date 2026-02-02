@@ -337,6 +337,25 @@ class CourseEnrollmentTool(Document):
 		
 		frappe.msgprint(message, indicator="green" if errors == 0 else "orange")
 		
+		# LIMPIEZA FINAL (Solución Single DocType)
+		# ------------------------------------------------------------------
+		# Vaciamos la tabla para que la próxima vez el formulario esté limpio.
+		# Esto evita el problema de integridad referencial al borrar Program Enrollments externos.
+		self.set("students", [])
+		# 1. Vaciar la tabla de estudiantes (lo que ya tenías)
+		self.set("students", [])
+
+		# 2. Vaciar los campos del formulario principal
+		# Al establecerlos en None, se borran de la base de datos al guardar
+		self.program = None
+		self.academic_year = None
+		self.academic_term = None
+		self.student_group = None
+		self.course = None
+		self.enrollment_date = None  # Opcional, si quieres borrar la fecha también
+		
+		self.save(ignore_permissions=True)
+		# ------------------------------------------------------------------
 		return {
 			"count": count,
 			"errors": errors,
