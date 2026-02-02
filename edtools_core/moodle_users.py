@@ -1,8 +1,9 @@
 # edtools_core/moodle_users.py
 
 from typing import Optional, Dict
-from edtools_core.moodle_integration import _moodle_post
+import frappe
 
+from edtools_core.moodle_integration import _moodle_post
 
 # ------------------------------------------------------------
 # Helpers
@@ -17,10 +18,35 @@ def _build_firstname(first_name: str, middle_name: Optional[str]) -> str:
         return f"{first_name} {middle_name}".strip()
     return first_name.strip()
 
+def _get_student_idnumber(student) -> str:
+    """
+    ID externo para Moodle.
+    Usamos el name del Student (ej: EDU-STU-2026-00001)
+    """
+    return student.name
 
 # ------------------------------------------------------------
 # Moodle API – Users
 # ------------------------------------------------------------
+
+def _get_student_email(student) -> str:
+    """
+    Obtiene el email REAL del estudiante a través del User asociado.
+    Student.user -> User.email
+    """
+    if not student.user:
+        frappe.throw(
+            f"El estudiante {student.name} no tiene un User asociado"
+        )
+
+    user = frappe.get_doc("User", student.user)
+
+    if not user.email:
+        frappe.throw(
+            f"El usuario {user.name} no tiene email configurado"
+        )
+
+    return _normalize_email(user.email)
 
 def get_user_by_email(email: str) -> Optional[Dict]:
     """
@@ -34,11 +60,15 @@ def get_user_by_email(email: str) -> Optional[Dict]:
         "criteria[0][value]": email
     }
 
-    response = moodle_post(
+    response = _moodle_post(
         wsfunction="core_user_get_users",
         data=payload
     )
-
+    if isinstance(response, dict) and response.get("exception"):
+        frappe.throw(
+            f"Moodle error (get_user_by_email): {response.get('message')}"
+        )
+    
     users = response.get("users", [])
     return users[0] if users else None
 
@@ -49,7 +79,7 @@ def create_moodle_user(student) -> Dict:
     El username se genera desde el email (antes del @).
     El password se genera automáticamente y se envía por correo.
     """
-    email = _normalize_email(student.email)
+    email = _get_student_email(student)
     username = email.split("@")[0]
 
     firstname = _build_firstname(
@@ -68,7 +98,7 @@ def create_moodle_user(student) -> Dict:
         "users[0][email]": email,
 
         # Campo "Número de ID" (sección Opcional en Moodle)
-        "users[0][idnumber]": student.institutional_id,
+        "users[0][idnumber]": _get_student_idnumber(student),
 
         # Configuración estándar institucional
         "users[0][lang]": "es",
@@ -79,11 +109,14 @@ def create_moodle_user(student) -> Dict:
         "users[0][createpassword]": 1,
     }
 
-    response = moodle_post(
+    response = _moodle_post(
         wsfunction="core_user_create_users",
         data=payload
     )
-
+    if isinstance(response, dict) and response.get("exception"):
+        frappe.throw(
+            f"Moodle error (create_user): {response.get('message')}"
+        )
     # Moodle retorna una lista de usuarios creados
     return response[0]
 
@@ -98,10 +131,14 @@ def update_user_idnumber(user_id: int, new_idnumber: str) -> None:
         "users[0][idnumber]": new_idnumber
     }
 
-    moodle_post(
+    response = _moodle_post(
         wsfunction="core_user_update_users",
         data=payload
     )
+    if isinstance(response, dict) and response.get("exception"):
+        frappe.throw(
+            f"Moodle error (update_user): {response.get('message')}"
+        )
 
 
 def ensure_moodle_user(student) -> Dict:
@@ -114,15 +151,25 @@ def ensure_moodle_user(student) -> Dict:
     - Si existe y el idnumber es distinto → actualiza idnumber
     - Retorna el usuario de Moodle
     """
-    user = get_user_by_email(student.email)
+
+    email = _get_student_email(student)
+    frappe.log_error(
+        title="DEBUG ensure_moodle_user",
+        message=f"Procesando estudiante {student.name} - {email}"
+    )
+    user = get_user_by_email(email)
 
     # Caso 1: no existe → crear
     if not user:
+        frappe.log_error(
+            title="DEBUG ensure_moodle_user",
+            message=f"Usuario no existe en Moodle, creando: {email}"
+        )
         return create_moodle_user(student)
 
     # Caso 2: existe → validar idnumber
     current_idnumber = (user.get("idnumber") or "").strip()
-    expected_idnumber = student.institutional_id.strip()
+    expected_idnumber = _get_student_idnumber(student)
 
     if current_idnumber != expected_idnumber:
         update_user_idnumber(
