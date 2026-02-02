@@ -55,52 +55,51 @@ frappe.ui.form.on('Course Enrollment Tool', {
         frm.page.clear_user_actions();
 
         // ➊ BOTÓN: INSCRIBIR AL CURSO (solo si hay estudiantes)
-        if (frm.doc.students && frm.doc.students.length > 0) {
-            frm.add_custom_button(
-                __('Inscribir al Curso'),
-                function() {
-                    
-                    // ✅ VALIDACIÓN 1: Verificar que el curso está seleccionado
-                    if (!frm.doc.course) {
-                        frappe.msgprint(__('❌ Selecciona un curso.'), { indicator: 'red' });
-                        return;
-                    }
-                    if (!frm.doc.academic_year || !frm.doc.academic_term) {
-                        frappe.msgprint(__('❌ Faltan datos académicos.'), { indicator: 'red' });
-                        return;
-                    }
-                    
-                    // ✅ VALIDACIÓN 3: Verificar que hay estudiantes para inscribir
-                    if (!frm.doc.students || frm.doc.students.length === 0) {
-                        frappe.msgprint(
-                            __('❌ <b>No hay estudiantes para inscribir</b><br><br>Por favor primero selecciona un Grupo de Estudiantes'),
-                            { indicator: 'orange', title: 'Sin datos' }
-                        );
-                        return;
-                    }
-
-                    // Si todas las validaciones pasaron, pedir confirmación
-                    frappe.confirm(
-                        __('¿Estás seguro de inscribir a <b>{0} estudiante(s)</b> al curso <b>{1}</b>?', 
-                            [frm.doc.students.length, frm.doc.course]),
-                        function() {
-                            frm.call({
-                                method: 'enroll_students',
-                                doc: frm.doc,
-                                freeze: true,
-                                freeze_message: __('Creando inscripciones (Course Enrollment)...'),
-                                callback: function(r) {
-                                    if (r.message) {
-                                        frappe.msgprint(r.message.message, {indicator: 'green'});
-                                    }
-                                    frm.reload_doc();
-                                }
-                            });
-                        }
-                    );
+        frm.add_custom_button(
+            __('Inscribir al Curso'),
+            function() {
+                
+                // ✅ VALIDACIÓN 1: Verificar que el curso está seleccionado
+                if (!frm.doc.course) {
+                    frappe.msgprint(__('❌ Selecciona un curso.'), { indicator: 'red' });
+                    return;
                 }
-            ).addClass("btn-primary");
-        }
+                if (!frm.doc.academic_year || !frm.doc.academic_term) {
+                    frappe.msgprint(__('❌ Faltan datos académicos.'), { indicator: 'red' });
+                    return;
+                }
+                
+                // ✅ VALIDACIÓN 3: Verificar que hay estudiantes para inscribir
+                if (!frm.doc.students || frm.doc.students.length === 0) {
+                    frappe.msgprint(
+                        __('❌ <b>No hay estudiantes para inscribir</b><br><br>Por favor primero selecciona un Grupo de Estudiantes'),
+                        { indicator: 'orange', title: 'Sin datos' }
+                    );
+                    return;
+                }
+
+                // Si todas las validaciones pasaron, pedir confirmación
+                frappe.confirm(
+                    __('¿Estás seguro de inscribir a <b>{0} estudiante(s)</b> al curso <b>{1}</b>?', 
+                        [frm.doc.students.length, frm.doc.course]),
+                    function() {
+                        frm.call({
+                            method: 'enroll_students',
+                            doc: frm.doc,
+                            freeze: true,
+                            freeze_message: __('Creando inscripciones (Course Enrollment)...'),
+                            callback: function(r) {
+                                if (r.message) {
+                                    frappe.msgprint(r.message.message, {indicator: 'green'});
+                                }
+                                frm.reload_doc();
+                            }
+                        });
+                    }
+                );
+            }
+        ).addClass("btn-primary");
+        
 
         // ➋ BOTÓN: LIMPIAR FORMULARIO
         frm.add_custom_button(
