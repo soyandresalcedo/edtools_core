@@ -69,7 +69,8 @@ class CourseEnrollmentTool(Document):
 		self.set("students", [])
 		
 		# ¡ESTA ES LA CLAVE! ignore_mandatory=True permite guardar campos vacíos
-		self.save(ignore_permissions=True, ignore_mandatory=True)
+		self.flags.ignore_mandatory = True 
+		self.save(ignore_permissions=True)
 
 
 	@frappe.whitelist()
@@ -365,7 +366,8 @@ class CourseEnrollmentTool(Document):
 		self.student_group = None
 		self.course = None
 
-		self.save(ignore_permissions=True, ignore_mandatory=True)
+		self.flags.ignore_mandatory = True
+		self.save(ignore_permissions=True)
 		# ------------------------------------------------------------------
 		return {
 			"count": count,
