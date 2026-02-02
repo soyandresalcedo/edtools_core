@@ -12,13 +12,13 @@ NO contiene lógica de UI ni validaciones de formulario.
 
 import frappe
 
-from edtools_core.moodle.moodle_users import ensure_moodle_user
-from edtools_core.moodle.moodle_categories import (
+from edtools_core.moodle_users import ensure_moodle_user
+from edtools_core.moodle_integration import (
     ensure_academic_year_category,
     ensure_academic_term_category,
+    ensure_course,
 )
-from edtools_core.moodle.moodle_courses import ensure_course
-from edtools_core.moodle.moodle_enrollments import enrol_student
+
 
 
 def sync_student_enrollment_to_moodle(
