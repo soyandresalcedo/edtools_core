@@ -1,7 +1,7 @@
 # edtools_core/moodle_users.py
 
 from typing import Optional, Dict
-from edtools_core.moodle_integration import moodle_post
+from edtools_core.moodle_integration import _moodle_post
 
 
 # ------------------------------------------------------------
