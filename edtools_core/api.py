@@ -4,6 +4,7 @@
 import json
 import frappe
 import requests
+from edtools_core.moodle_sync import sync_student_enrollment_to_moodle
 from frappe import _
 from frappe.utils import cstr, flt, getdate, today, add_months, nowdate
 from frappe.utils.dateutils import get_dates_from_timegrain
@@ -1724,6 +1725,14 @@ def enroll_students(docname):
                 f"    - Curso: {doc.course}"
             )
             
+            # 🔥 1️⃣ Sincronizar con Moodle
+            sync_student_enrollment_to_moodle(
+                student=student.student,
+                academic_year=doc.academic_year,
+                academic_term=doc.academic_term,
+                course=doc.course
+            )
+
             # Crear el Course Enrollment
             enrollment = frappe.get_doc({
                 "doctype": "Course Enrollment",
@@ -1736,7 +1745,7 @@ def enroll_students(docname):
             student.status = "Enrolled"
             student.error_log = ""
             enrolled_count += 1
-            frappe.msgprint(f"✅ Inscrito exitosamente")
+            frappe.msgprint(f"✅ Inscrito exitosamente en Cucuniversity y Moodle.")
             
         except frappe.DuplicateEntryError as e:
             student.status = "Duplicate"
