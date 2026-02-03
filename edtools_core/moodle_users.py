@@ -66,7 +66,8 @@ def get_user_by_email(email: str) -> Optional[Dict]:
     )
     if isinstance(response, dict) and response.get("exception"):
         frappe.throw(
-            f"Moodle error (get_user_by_email): {response.get('message')}"
+            f"Error de API Moodle en 'core_user_get_users' para email '{email}': "
+            f"{response.get('message')} ({response.get('errorcode')})"
         )
     
     users = response.get("users", [])
@@ -180,3 +181,16 @@ def ensure_moodle_user(student) -> Dict:
         user["idnumber"] = expected_idnumber
 
     return user
+
+
+@frappe.whitelist()
+def manual_sync_student(student_id: str):
+    """
+    Endpoint para probar la sincronización de un estudiante a Moodle desde Postman.
+    """
+    if not frappe.db.exists("Student", student_id):
+        frappe.throw(f"Estudiante {student_id} no encontrado")
+
+    student = frappe.get_doc("Student", student_id)
+    moodle_user = ensure_moodle_user(student)
+    return moodle_user

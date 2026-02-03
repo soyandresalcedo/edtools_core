@@ -48,9 +48,11 @@ def sync_student_enrollment_to_moodle(
     student_doc = frappe.get_doc("Student", student)
     course_doc = frappe.get_doc("Course", course)
 
-    if not student_doc.email_id:
+    # Para crear usuario en Moodle, moodle_users usa student.user → User.email
+    if not student_doc.user or not str(student_doc.user).strip():
         raise ValueError(
-            f"El estudiante {student} no tiene correo electrónico"
+            f"El estudiante {student} no tiene User vinculado. "
+            "En Moodle el usuario se crea con el email del User; vincula el campo 'User ID' en el Student."
         )
 
     # ===============================
