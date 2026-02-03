@@ -79,13 +79,22 @@ def sync_student_enrollment_to_moodle(
     # 4️⃣ Curso Moodle
     # ===============================
 
+    # Course en Education no tiene 'course_code'; derivar shortname como en Course Enrollment Tool
+    course_shortname = (
+        getattr(course_doc, "course_code", None) or getattr(course_doc, "short_name", None) or ""
+    )
+    if isinstance(course_shortname, str):
+        course_shortname = course_shortname.strip()
+    if not course_shortname and course_doc.course_name:
+        course_shortname = course_doc.course_name.split(" - ", 1)[0].strip()
+
     moodle_course_id = ensure_course(
         category_id=term_category_id,
         term_category_name=academic_term,
         term_idnumber=academic_term,
         term_start_date_str=_get_term_start_date(academic_term),
         course_fullname=course_doc.course_name,
-        course_shortname=course_doc.course_code,
+        course_shortname=course_shortname or course_doc.course_name,
         course_idnumber=course_doc.name,
     )
 
