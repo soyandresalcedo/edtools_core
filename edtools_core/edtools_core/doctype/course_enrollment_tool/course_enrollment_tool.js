@@ -78,25 +78,50 @@ frappe.ui.form.on('Course Enrollment Tool', {
                     return;
                 }
 
-                // Si todas las validaciones pasaron, pedir confirmación
-                frappe.confirm(
-                    __('¿Estás seguro de inscribir a <b>{0} estudiante(s)</b> al curso <b>{1}</b>?', 
-                        [frm.doc.students.length, frm.doc.course]),
-                    function() {
-                        frm.call({
-                            method: 'enroll_students',
-                            doc: frm.doc,
-                            freeze: true,
-                            freeze_message: __('Creando inscripciones (Course Enrollment)...'),
-                            callback: function(r) {
-                                if (r.message) {
-                                    frappe.msgprint(r.message.message, {indicator: 'green'});
+                // Función que pide confirmación de inscripción y ejecuta enroll_students
+                var do_enroll = function() {
+                    frappe.confirm(
+                        __('¿Estás seguro de inscribir a <b>{0} estudiante(s)</b> al curso <b>{1}</b>?',
+                            [frm.doc.students.length, frm.doc.course]),
+                        function() {
+                            frm.call({
+                                method: 'enroll_students',
+                                doc: frm.doc,
+                                freeze: true,
+                                freeze_message: __('Creando inscripciones (Course Enrollment)...'),
+                                callback: function(r) {
+                                    if (r.message) {
+                                        frappe.msgprint(r.message.message, {indicator: 'green'});
+                                    }
+                                    frm.reload_doc();
                                 }
-                                frm.reload_doc();
+                            });
+                        }
+                    );
+                };
+
+                // Si hay Student Group, verificar si tiene instructores; si no, aviso de confirmación
+                if (frm.doc.student_group) {
+                    frm.call({
+                        method: 'check_student_group_has_instructors',
+                        doc: frm.doc,
+                        args: { student_group: frm.doc.student_group },
+                        callback: function(r) {
+                            if (r.message && !r.message.has_instructors) {
+                                frappe.confirm(
+                                    __('⚠️ <b>No hay instructor registrado en este grupo.</b><br><br>¿Deseas continuar con la operación e inscribir a los estudiantes de todos modos?'),
+                                    function() {
+                                        do_enroll();
+                                    }
+                                );
+                            } else {
+                                do_enroll();
                             }
-                        });
-                    }
-                );
+                        }
+                    });
+                } else {
+                    do_enroll();
+                }
             }
         ).addClass("btn-primary");
         

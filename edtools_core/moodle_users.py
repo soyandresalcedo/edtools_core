@@ -25,6 +25,28 @@ def _get_student_idnumber(student) -> str:
     """
     return student.name
 
+
+def _parse_instructor_name(instructor_name: str) -> tuple:
+    """Divide nombre completo en firstname y lastname (para Moodle)."""
+    parts = (instructor_name or "").strip().split()
+    if not parts:
+        return "Instructor", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    # 3 o más: primeras 2 = nombre, resto = apellido (como create_instructor_users)
+    if len(parts) == 3:
+        return parts[0], f"{parts[1]} {parts[2]}"
+    if len(parts) == 4:
+        return f"{parts[0]} {parts[1]}", f"{parts[2]} {parts[3]}"
+    return f"{parts[0]} {parts[1]}", " ".join(parts[2:])
+
+
+def _get_instructor_idnumber(instructor) -> str:
+    """ID externo para Moodle. Usamos el name del Instructor (ej: EDU-INS-2026-00001)."""
+    return instructor.name
+
 # ------------------------------------------------------------
 # Moodle API – Users
 # ------------------------------------------------------------
@@ -47,6 +69,31 @@ def _get_student_email(student) -> str:
         )
 
     return _normalize_email(user.email)
+
+
+def _get_instructor_email(instructor) -> str:
+    """
+    Obtiene el email del instructor a través del Employee asociado.
+    Instructor.employee -> Employee.user_id -> User.email
+    """
+    if not getattr(instructor, "employee", None) or not instructor.employee:
+        frappe.throw(
+            f"El instructor {instructor.name} no tiene un Employee asociado. "
+            "Asigna un Employee al Instructor para poder crear su usuario en Moodle."
+        )
+    user_id = frappe.db.get_value("Employee", instructor.employee, "user_id")
+    if not user_id:
+        frappe.throw(
+            f"El Employee {instructor.employee} no tiene un User asociado. "
+            "Configura el campo 'User ID' en el Employee para poder crear el usuario en Moodle."
+        )
+    user = frappe.get_doc("User", user_id)
+    if not user.email:
+        frappe.throw(
+            f"El usuario {user.name} no tiene email configurado"
+        )
+    return _normalize_email(user.email)
+
 
 def get_user_by_email(email: str) -> Optional[Dict]:
     """
@@ -187,6 +234,69 @@ def ensure_moodle_user(student) -> Dict:
     return user
 
 
+# ------------------------------------------------------------
+# Instructores (profesores) en Moodle
+# ------------------------------------------------------------
+
+def create_moodle_user_instructor(instructor) -> Dict:
+    """
+    Crea un usuario en Moodle para un instructor (core_user_create_users).
+    Username desde el email; password se genera y envía por correo.
+    """
+    email = _get_instructor_email(instructor)
+    username = email.split("@")[0]
+    firstname, lastname = _parse_instructor_name(
+        getattr(instructor, "instructor_name", None) or ""
+    )
+
+    payload = {
+        "users[0][username]": username,
+        "users[0][auth]": "manual",
+        "users[0][firstname]": firstname,
+        "users[0][lastname]": lastname,
+        "users[0][email]": email,
+        "users[0][idnumber]": _get_instructor_idnumber(instructor),
+        "users[0][lang]": "es",
+        "users[0][timezone]": "99",
+        "users[0][mailformat]": 1,
+        "users[0][createpassword]": 1,
+    }
+
+    response = _moodle_post(
+        wsfunction="core_user_create_users",
+        data=payload,
+    )
+    if isinstance(response, dict) and response.get("exception"):
+        frappe.throw(
+            f"Moodle error (create_user instructor): {response.get('message')}"
+        )
+    return response[0]
+
+
+def ensure_moodle_user_instructor(instructor) -> Dict:
+    """
+    Garantiza que el instructor tenga usuario en Moodle.
+    Si no existe por email → crea; si existe → actualiza idnumber si aplica.
+    Retorna el usuario de Moodle.
+    """
+    email = _get_instructor_email(instructor)
+    user = get_user_by_email(email)
+
+    if not user:
+        frappe.logger().info(
+            f"Moodle: Instructor {instructor.name} | Email {email} no existe en Moodle → creando usuario."
+        )
+        return create_moodle_user_instructor(instructor)
+
+    expected_idnumber = _get_instructor_idnumber(instructor)
+    current_idnumber = (user.get("idnumber") or "").strip()
+    if current_idnumber != expected_idnumber:
+        update_user_idnumber(user_id=user["id"], new_idnumber=expected_idnumber)
+        user["idnumber"] = expected_idnumber
+
+    return user
+
+
 @frappe.whitelist()
 def manual_sync_student(student_id: str):
     """
@@ -197,4 +307,36 @@ def manual_sync_student(student_id: str):
 
     student = frappe.get_doc("Student", student_id)
     moodle_user = ensure_moodle_user(student)
+    return moodle_user
+
+
+def ensure_moodle_users_for_student_group_instructors(doc, method=None):
+    """
+    Hook: al guardar un Student Group, verifica/crea usuario en Moodle para cada instructor asignado.
+    Si Moodle falla (red, etc.), se registra el error pero no se bloquea el guardado del grupo.
+    """
+    if not doc.get("instructors"):
+        return
+    for row in doc.instructors:
+        if not row.get("instructor"):
+            continue
+        try:
+            instructor = frappe.get_doc("Instructor", row.instructor)
+            ensure_moodle_user_instructor(instructor)
+        except Exception as e:
+            frappe.log_error(
+                title="Moodle: error al asegurar usuario de instructor",
+                message=f"Student Group {doc.name} | Instructor {row.instructor}: {e}",
+            )
+
+
+@frappe.whitelist()
+def manual_sync_instructor(instructor_id: str):
+    """
+    Endpoint para probar la sincronización de un instructor a Moodle (Postman, etc.).
+    """
+    if not frappe.db.exists("Instructor", instructor_id):
+        frappe.throw(f"Instructor {instructor_id} no encontrado")
+    instructor = frappe.get_doc("Instructor", instructor_id)
+    moodle_user = ensure_moodle_user_instructor(instructor)
     return moodle_user

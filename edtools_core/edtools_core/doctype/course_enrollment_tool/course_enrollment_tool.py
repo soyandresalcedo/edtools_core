@@ -56,6 +56,20 @@ class CourseEnrollmentTool(Document):
 		return students_found
 	
 	@frappe.whitelist()
+	def check_student_group_has_instructors(self, student_group=None):
+		"""
+		Retorna si el Student Group tiene al menos un instructor.
+		Usado en el cliente para mostrar aviso de confirmación al inscribir.
+		"""
+		sg = student_group or getattr(self, "student_group", None)
+		if not sg:
+			return {"has_instructors": False, "count": 0}
+		group = frappe.get_doc("Student Group", sg)
+		instructors = group.get("instructors") or []
+		count = sum(1 for r in instructors if r.get("instructor"))
+		return {"has_instructors": count > 0, "count": count}
+
+	@frappe.whitelist()
 	def reset_tool(self):
 		"""
 		Borra todos los campos y guarda el Single DocType vacío,
@@ -182,6 +196,31 @@ class CourseEnrollmentTool(Document):
 			frappe.throw(
 				f"❌ Error sincronizando Moodle (categorías/curso): {str(e)}"
 			)
+
+		# ------------------------------------------------------------------
+		# MOODLE: asegurar usuarios de los instructores del Student Group
+		# ------------------------------------------------------------------
+		if self.student_group:
+			try:
+				from edtools_core.moodle_users import ensure_moodle_user_instructor
+				group_doc = frappe.get_doc("Student Group", self.student_group)
+				if group_doc.get("instructors"):
+					for row in group_doc.instructors:
+						if not row.get("instructor"):
+							continue
+						try:
+							instructor = frappe.get_doc("Instructor", row.instructor)
+							ensure_moodle_user_instructor(instructor)
+						except Exception as instr_err:
+							frappe.log_error(
+								title="Moodle: error al asegurar usuario de instructor",
+								message=f"Course Enrollment Tool | Student Group {self.student_group} | Instructor {row.instructor}: {instr_err}",
+							)
+			except Exception as e:
+				frappe.log_error(
+					title="Moodle: error al cargar instructores del Student Group",
+					message=f"Course Enrollment Tool | Student Group {self.student_group}: {e}",
+				)
 
 		# ✅ VALIDACIÓN 1: Curso obligatorio
 		if not self.course or self.course.strip() == "":
