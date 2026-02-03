@@ -156,11 +156,12 @@ class CourseEnrollmentTool(Document):
 			# Idnumber debe ser único por PERIODO para permitir el mismo curso en distintos términos.
 			moodle_course_idnumber = f"{term_category_name}::{course_name}"
 
-			# Formato cliente: fullname = "202601::STA 530 - RESEARCH"
-			moodle_fullname = f"{term_category_name}::{course_name}"
+			# Formato cliente (core_course_create_courses): fullname = nombre categoría hija, short_name, 1, nombre del curso, idnumber categoría hija, fecha inicio término
+			# Ej: "202601,STA 530, 1, RESEARCH 2026 (Spring A) 1/5/26"
+			moodle_fullname = f"{term_category_name},{course_shortname}, 1, {course_title} {term_idnumber} {term_start_date_str}"
 
-			# Formato cliente: shortname = "202601,STA 530, 1, RESEARCH 2026 (Spring A) 1/5/26" (único por periodo)
-			moodle_course_shortname = f"{term_category_name},{course_shortname}, 1, {course_title} {term_idnumber} {term_start_date_str}"
+			# Shortname mismo formato (único por periodo para evitar "nombre corto ya utilizado" en Moodle)
+			moodle_course_shortname = moodle_fullname
 
 			moodle_course_id = ensure_course(
 				category_id=moodle_term_category_id,

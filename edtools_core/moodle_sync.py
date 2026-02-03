@@ -95,13 +95,14 @@ def sync_student_enrollment_to_moodle(
         else (course_doc.course_name or "")
     )
 
-    # Formato cliente (igual que Course Enrollment Tool)
+    # Formato cliente: fullname = nombre categoría hija, short_name, 1, nombre del curso, idnumber categoría hija, fecha inicio término
+    # Ej: "202601,STA 530, 1, RESEARCH 2026 (Spring A) 1/5/26"
     term_category_name_ym = get_term_category_name(academic_term)
     term_start_date_str = _get_term_start_date_mdy(academic_term)
-    moodle_fullname = f"{term_category_name_ym}::{course_doc.course_name}"
-    moodle_course_shortname = (
+    moodle_fullname = (
         f"{term_category_name_ym},{course_shortname}, 1, {course_title} {academic_term} {term_start_date_str}"
     )
+    moodle_course_shortname = moodle_fullname  # mismo formato, único por periodo
 
     moodle_course_id = ensure_course(
         category_id=term_category_id,
