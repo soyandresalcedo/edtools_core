@@ -248,6 +248,31 @@ class CourseEnrollmentTool(Document):
 					})
 					continue
 
+				# A.1 Sincronizar con Moodle: usuario (crear si no existe) y matrícula en el curso
+				try:
+					from edtools_core.moodle_sync import sync_student_enrollment_to_moodle
+					sync_student_enrollment_to_moodle(
+						student=row.student,
+						academic_year=self.academic_year,
+						academic_term=self.academic_term,
+						course=self.course,
+					)
+				except Exception as moodle_err:
+					row.status = "Error"
+					error_msg = str(moodle_err)[:140]
+					row.error_log = error_msg
+					errors += 1
+					results.append({
+						"student": row.student,
+						"status": "❌ Error Moodle",
+						"message": error_msg
+					})
+					frappe.log_error(
+						f"Moodle sync failed for {row.student}: {moodle_err}",
+						"Course Enrollment Tool - Moodle",
+					)
+					continue
+
 				# B. Crear el documento Course Enrollment
 				# Obtener el programa desde el Program Enrollment
 				program_enrollment_doc = frappe.get_doc("Program Enrollment", row.program_enrollment)
