@@ -157,9 +157,12 @@ class CourseEnrollmentTool(Document):
 			# Mantiene el course_name (como pediste) pero lo hace único al prefijar con el código YYYYMM.
 			moodle_course_idnumber = f"{term_category_name}::{course_name}"
 
+			# Shortname único por periodo para evitar "El nombre corto ya ha sido utilizado" en Moodle.
+			moodle_course_shortname = f"{course_shortname} - {term_category_name}"
+
 			# Formato solicitado:
 			# <term_category_name>,<shortname>, 1,<TITLE> <term_idnumber> <term_start_date>
-			moodle_fullname = f"{term_category_name},{course_shortname}, 1,{course_title} {term_idnumber} {term_start_date_str}"
+			moodle_fullname = f"{term_category_name},{moodle_course_shortname}, 1,{course_title} {term_idnumber} {term_start_date_str}"
 
 			moodle_course_id = ensure_course(
 				category_id=moodle_term_category_id,
@@ -167,7 +170,7 @@ class CourseEnrollmentTool(Document):
 				term_idnumber=term_idnumber,
 				term_start_date_str=term_start_date_str,
 				course_fullname=moodle_fullname,
-				course_shortname=course_shortname,
+				course_shortname=moodle_course_shortname,
 				course_idnumber=moodle_course_idnumber,
 				startdate=startdate_timestamp,
 				enddate=enddate_timestamp,

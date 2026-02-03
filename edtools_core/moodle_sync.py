@@ -17,6 +17,7 @@ from edtools_core.moodle_integration import (
     ensure_academic_year_category,
     ensure_academic_term_category,
     ensure_course,
+    get_term_category_name,
 )
 
 
@@ -87,6 +88,11 @@ def sync_student_enrollment_to_moodle(
         course_shortname = course_shortname.strip()
     if not course_shortname and course_doc.course_name:
         course_shortname = course_doc.course_name.split(" - ", 1)[0].strip()
+    course_shortname = course_shortname or course_doc.course_name
+
+    # Shortname único por periodo para evitar "El nombre corto ya ha sido utilizado" en Moodle.
+    term_category_name_ym = get_term_category_name(academic_term)
+    moodle_course_shortname = f"{course_shortname} - {term_category_name_ym}"
 
     moodle_course_id = ensure_course(
         category_id=term_category_id,
@@ -94,7 +100,7 @@ def sync_student_enrollment_to_moodle(
         term_idnumber=academic_term,
         term_start_date_str=_get_term_start_date(academic_term),
         course_fullname=course_doc.course_name,
-        course_shortname=course_shortname or course_doc.course_name,
+        course_shortname=moodle_course_shortname,
         course_idnumber=course_doc.name,
     )
 

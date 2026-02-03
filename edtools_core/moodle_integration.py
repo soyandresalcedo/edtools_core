@@ -337,6 +337,14 @@ def ensure_course(
 
         return int(c.get("id"))
 
+    # No encontrado por idnumber: buscar por shortname para reutilizar curso existente en Moodle.
+    # Evita "El nombre corto (X) ya ha sido utilizado" cuando el curso fue creado con otro idnumber.
+    if course_shortname and course_shortname.strip():
+        courses_by_shortname = get_courses_by_field(field="shortname", value=course_shortname.strip())
+        if courses_by_shortname:
+            c = courses_by_shortname[0]
+            return int(c.get("id"))
+
     # Crear
     resp = _moodle_post(
         "core_course_create_courses",
@@ -370,6 +378,13 @@ def ensure_course(
             if courses:
                 return int(courses[0].get("id"))
             frappe.throw("Moodle reportó Duplicate idnumber pero no se pudo ubicar el curso")
+
+        # Si el shortname ya existe, reutilizar ese curso en lugar de fallar.
+        if "shortname" in msg.lower() and "ya ha sido utilizado" in msg:
+            if course_shortname and course_shortname.strip():
+                courses_by_shortname = get_courses_by_field(field="shortname", value=course_shortname.strip())
+                if courses_by_shortname:
+                    return int(courses_by_shortname[0].get("id"))
 
         frappe.log_error(message=str(resp), title="Moodle create_courses error")
         frappe.throw(f"Moodle error (create_courses): {msg or resp.get('errorcode')}")
