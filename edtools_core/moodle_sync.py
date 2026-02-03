@@ -89,17 +89,26 @@ def sync_student_enrollment_to_moodle(
     if not course_shortname and course_doc.course_name:
         course_shortname = course_doc.course_name.split(" - ", 1)[0].strip()
     course_shortname = course_shortname or course_doc.course_name
+    course_title = (
+        course_doc.course_name.split(" - ", 1)[1].strip()
+        if " - " in (course_doc.course_name or "")
+        else (course_doc.course_name or "")
+    )
 
-    # Shortname único por periodo para evitar "El nombre corto ya ha sido utilizado" en Moodle.
+    # Formato cliente (igual que Course Enrollment Tool)
     term_category_name_ym = get_term_category_name(academic_term)
-    moodle_course_shortname = f"{course_shortname} - {term_category_name_ym}"
+    term_start_date_str = _get_term_start_date_mdy(academic_term)
+    moodle_fullname = f"{term_category_name_ym}::{course_doc.course_name}"
+    moodle_course_shortname = (
+        f"{term_category_name_ym},{course_shortname}, 1, {course_title} {academic_term} {term_start_date_str}"
+    )
 
     moodle_course_id = ensure_course(
         category_id=term_category_id,
         term_category_name=academic_term,
         term_idnumber=academic_term,
         term_start_date_str=_get_term_start_date(academic_term),
-        course_fullname=course_doc.course_name,
+        course_fullname=moodle_fullname,
         course_shortname=moodle_course_shortname,
         course_idnumber=course_doc.name,
     )
@@ -132,12 +141,23 @@ def _get_term_start_date(academic_term: str) -> str:
     Obtiene la fecha de inicio del periodo académico.
     Devuelve string YYYY-MM-DD (requerido por Moodle)
     """
-
     term = frappe.get_doc("Academic Term", academic_term)
-
     if not term.term_start_date:
         raise ValueError(
             f"El Academic Term {academic_term} no tiene fecha de inicio"
         )
-
     return term.term_start_date.strftime("%Y-%m-%d")
+
+
+def _get_term_start_date_mdy(academic_term: str) -> str:
+    """
+    Fecha de inicio en formato M/D/YY para el shortname del curso (formato cliente).
+    Ej: 1/5/26
+    """
+    term = frappe.get_doc("Academic Term", academic_term)
+    if not term.term_start_date:
+        raise ValueError(
+            f"El Academic Term {academic_term} no tiene fecha de inicio"
+        )
+    d = term.term_start_date
+    return f"{d.month}/{d.day}/{str(d.year)[2:]}"
