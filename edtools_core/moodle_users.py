@@ -154,21 +154,25 @@ def ensure_moodle_user(student) -> Dict:
     """
 
     email = _get_student_email(student)
-    frappe.log_error(
-        title="DEBUG ensure_moodle_user",
-        message=f"Procesando estudiante {student.name} - {email}"
-    )
     user = get_user_by_email(email)
 
     # Caso 1: no existe → crear
     if not user:
         frappe.log_error(
-            title="DEBUG ensure_moodle_user",
-            message=f"Usuario no existe en Moodle, creando: {email}"
+            title="Moodle: crear usuario",
+            message=f"Estudiante {student.name} | Email {email} no existe en Moodle → creando usuario."
         )
         return create_moodle_user(student)
 
-    # Caso 2: existe → validar idnumber
+    # Caso 2: existe en Moodle (mismo email) → reutilizar, no se crea uno nuevo
+    frappe.log_error(
+        title="Moodle: reutilizar usuario",
+        message=(
+            f"Estudiante {student.name} | Email {email} ya existe en Moodle (id={user.get('id')}). "
+            "No se crea usuario nuevo; se usa el existente. Si esperabas uno nuevo, verifica que el User del estudiante tenga un email distinto a los ya registrados en Moodle."
+        ),
+    )
+    # Caso 2: validar idnumber
     current_idnumber = (user.get("idnumber") or "").strip()
     expected_idnumber = _get_student_idnumber(student)
 
