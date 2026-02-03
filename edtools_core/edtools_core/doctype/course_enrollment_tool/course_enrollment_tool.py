@@ -198,8 +198,16 @@ class CourseEnrollmentTool(Document):
 			)
 
 		# ------------------------------------------------------------------
-		# MOODLE: asegurar usuarios de los instructores del Student Group
+		# MOODLE: usuarios de instructores + matrícula en el curso (rol 3 = profesor)
 		# ------------------------------------------------------------------
+		from edtools_core.moodle_integration import (
+			get_enrolled_user_ids,
+			enrol_user_in_course,
+			MOODLE_ROLE_EDITING_TEACHER,
+		)
+		enrolled_ids = set(get_enrolled_user_ids(moodle_course_id))
+		already_enrolled_instructors = []
+
 		if self.student_group:
 			try:
 				from edtools_core.moodle_users import ensure_moodle_user_instructor
@@ -210,7 +218,21 @@ class CourseEnrollmentTool(Document):
 							continue
 						try:
 							instructor = frappe.get_doc("Instructor", row.instructor)
-							ensure_moodle_user_instructor(instructor)
+							moodle_user = ensure_moodle_user_instructor(instructor)
+							uid = moodle_user["id"]
+							instructor_label = getattr(row, "instructor_name", None) or row.instructor
+							if uid in enrolled_ids:
+								already_enrolled_instructors.append(instructor_label)
+							else:
+								result = enrol_user_in_course(
+									user_id=uid,
+									course_id=moodle_course_id,
+									roleid=MOODLE_ROLE_EDITING_TEACHER,
+								)
+								if result.get("already_enrolled"):
+									already_enrolled_instructors.append(instructor_label)
+								else:
+									enrolled_ids.add(uid)
 						except Exception as instr_err:
 							frappe.log_error(
 								title="Moodle: error al asegurar usuario de instructor",
@@ -249,7 +271,8 @@ class CourseEnrollmentTool(Document):
 		errors = 0
 		duplicates = 0
 		results = []  # Para almacenar resultados
-		
+		already_enrolled_students = []  # Usuarios que ya estaban matriculados en Moodle
+
 		# Asegurar que tenemos fecha, si no, usar hoy
 		enroll_date = self.enrollment_date or nowdate()
 
@@ -292,12 +315,16 @@ class CourseEnrollmentTool(Document):
 				# A.1 Sincronizar con Moodle: usuario (crear si no existe) y matrícula en el curso
 				try:
 					from edtools_core.moodle_sync import sync_student_enrollment_to_moodle
-					sync_student_enrollment_to_moodle(
+					sync_result = sync_student_enrollment_to_moodle(
 						student=row.student,
 						academic_year=self.academic_year,
 						academic_term=self.academic_term,
 						course=self.course,
 					)
+					if sync_result.get("already_enrolled"):
+						already_enrolled_students.append(
+							getattr(row, "student_full_name", None) or row.student
+						)
 				except Exception as moodle_err:
 					row.status = "Error"
 					error_msg = str(moodle_err)[:140]
@@ -406,7 +433,23 @@ class CourseEnrollmentTool(Document):
 			</tbody>
 		</table>
 		"""
-		
+
+		# Bloque: usuarios que ya estaban matriculados en Moodle
+		already_block = ""
+		if already_enrolled_instructors or already_enrolled_students:
+			lines = []
+			if already_enrolled_instructors:
+				lines.append("<strong>Instructores:</strong> " + ", ".join(already_enrolled_instructors))
+			if already_enrolled_students:
+				lines.append("<strong>Estudiantes:</strong> " + ", ".join(already_enrolled_students))
+			already_block = f"""
+		<div style="background-color: var(--fg-color); padding: 12px; border-radius: 5px; margin-bottom: 15px;
+		            border: 1px solid var(--border-color); color: var(--text-color);">
+			<p><strong>ℹ️ Ya estaban matriculados en Moodle:</strong></p>
+			<p>{'<br>'.join(lines)}</p>
+		</div>
+			"""
+
 		# Mensaje final con resumen adaptable al tema
 		message = f"""
 		<h4 style="margin-top: 15px; color: var(--text-color);">📊 RESUMEN FINAL DE INSCRIPCIONES</h4>
@@ -416,6 +459,7 @@ class CourseEnrollmentTool(Document):
 			<p><strong>⚠️ Duplicados encontrados:</strong> {duplicates}</p>
 			<p><strong>❌ Errores:</strong> {errors}</p>
 		</div>
+		{already_block}
 		{html_table}
 		"""
 		

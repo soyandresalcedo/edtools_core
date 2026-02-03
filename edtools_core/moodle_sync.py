@@ -18,6 +18,8 @@ from edtools_core.moodle_integration import (
     ensure_academic_term_category,
     ensure_course,
     get_term_category_name,
+    enrol_user_in_course,
+    MOODLE_ROLE_STUDENT,
 )
 
 
@@ -115,21 +117,20 @@ def sync_student_enrollment_to_moodle(
     )
 
     # ===============================
-    # 5️⃣ Matrícula
+    # 5️⃣ Matrícula en el curso Moodle
     # ===============================
 
-    #enrol_student(
-    #    user_id=moodle_user_id,
-    #    course_id=moodle_course_id,
-    #)
-    frappe.logger().info(
-        f"[MOODLE DRY-RUN] Usuario {moodle_user_id} "
-        f"NO matriculado en curso {moodle_course_id}"
+    enrol_result = enrol_user_in_course(
+        user_id=moodle_user_id,
+        course_id=moodle_course_id,
+        roleid=MOODLE_ROLE_STUDENT,
     )
+    already_enrolled = enrol_result.get("already_enrolled", False)
 
     return {
         "moodle_user_id": moodle_user_id,
         "moodle_course_id": moodle_course_id,
+        "already_enrolled": already_enrolled,
     }
 
 

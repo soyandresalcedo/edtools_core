@@ -395,3 +395,59 @@ def ensure_course(
 
     frappe.log_error(message=str(resp), title="Moodle create_courses unexpected response")
     frappe.throw("Respuesta inesperada de Moodle en core_course_create_courses")
+
+
+# ------------------------------------------------------------
+# Matrícula (enrolment) en cursos Moodle
+# Role IDs estándar: 5 = Student, 3 = Editing teacher
+# ------------------------------------------------------------
+
+MOODLE_ROLE_STUDENT = 5
+MOODLE_ROLE_EDITING_TEACHER = 3
+
+
+def get_enrolled_user_ids(course_id: int) -> set:
+    """
+    Devuelve los userid de Moodle que ya están matriculados en el curso.
+    Sirve para detectar "ya matriculados" y no duplicar o para mostrar mensaje.
+    """
+    resp = _moodle_post(
+        "core_enrol_get_enrolled_users",
+        {"courseid": course_id},
+        timeout=30,
+    )
+    if isinstance(resp, dict) and resp.get("exception"):
+        frappe.log_error(message=str(resp), title="Moodle get_enrolled_users error")
+        frappe.throw(
+            f"Moodle error (get_enrolled_users): {resp.get('message') or resp.get('errorcode')}"
+        )
+    if not isinstance(resp, list):
+        return set()
+    return {int(u["id"]) for u in resp if u.get("id") is not None}
+
+
+def enrol_user_in_course(
+    user_id: int,
+    course_id: int,
+    roleid: int = MOODLE_ROLE_STUDENT,
+) -> Dict[str, Any]:
+    """
+    Matricula un usuario en un curso Moodle (enrol_manual_enrol_users).
+    roleid: 5 = Student, 3 = Editing teacher.
+
+    Retorna {"enrolled": True} si se matriculó, {"already_enrolled": True} si ya estaba.
+    """
+    payload = {
+        "enrolments[0][userid]": user_id,
+        "enrolments[0][courseid]": course_id,
+        "enrolments[0][roleid]": roleid,
+    }
+    resp = _moodle_post("enrol_manual_enrol_users", data=payload, timeout=20)
+    if isinstance(resp, dict) and resp.get("exception"):
+        msg = (resp.get("message") or "").lower()
+        if "already" in msg or "enrolled" in msg or "duplicate" in msg:
+            return {"already_enrolled": True}
+        frappe.log_error(message=str(resp), title="Moodle enrol_user error")
+        frappe.throw(f"Moodle error (enrol_user): {resp.get('message') or resp.get('errorcode')}")
+    # Moodle puede devolver lista vacía o de resultados; sin exception = éxito
+    return {"enrolled": True}
