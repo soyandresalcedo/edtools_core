@@ -7,10 +7,15 @@ import frappe
 from frappe import _
 from frappe.utils import get_link_to_form
 
-# Importar la clase base del módulo Education
-from education.education.doctype.course_enrollment.course_enrollment import (
-    CourseEnrollment as EducationCourseEnrollment,
-)
+# Importar la clase base del módulo Education (ruta con 3 niveles: education/education/education/doctype)
+try:
+    from education.education.education.doctype.course_enrollment.course_enrollment import (
+        CourseEnrollment as EducationCourseEnrollment,
+    )
+except ImportError:
+    from education.education.doctype.course_enrollment.course_enrollment import (
+        CourseEnrollment as EducationCourseEnrollment,
+    )
 
 
 class CourseEnrollment(EducationCourseEnrollment):

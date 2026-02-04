@@ -343,8 +343,8 @@ class CourseEnrollmentTool(Document):
 						"message": error_msg
 					})
 				frappe.log_error(
-					message=f"Moodle sync failed for {row.student}: {moodle_err}",
-					title="Course Enrollment Tool - Moodle",
+					"CET Moodle Sync",
+					f"Moodle sync failed for {row.student}: {moodle_err}",
 				)
 					continue
 
@@ -397,8 +397,8 @@ class CourseEnrollmentTool(Document):
 					"message": error_msg
 				})
 				frappe.log_error(
-					message=f"Validation error enrolling {row.student}: {str(e)}",
-					title="CET Enroll Error",
+					"CET Enroll Error",
+					f"Validation error enrolling {row.student}: {str(e)}",
 				)
 				
 			except Exception as e:
@@ -412,8 +412,8 @@ class CourseEnrollmentTool(Document):
 					"message": error_msg
 				})
 				frappe.log_error(
-					message=f"Error enrolling {row.student}: {str(e)}",
-					title="CET Enroll Error",
+					"CET Enroll Error",
+					f"Error enrolling {row.student}: {str(e)}",
 				)
 
 		# Guardamos el estado final (quién quedó inscrito y quién dio error)
