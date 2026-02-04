@@ -293,17 +293,24 @@ class CourseEnrollmentTool(Document):
 					})
 					continue
 				
-				# A. Verificar si ya existe la inscripción (Evitar duplicados)
-				exists = frappe.db.exists("Course Enrollment", {
+				# A. Verificar si ya existe la inscripción en el MISMO periodo (evitar duplicados)
+				# Permite el mismo curso en distintos periodos (como en Moodle): duplicado solo si
+				# mismo estudiante + mismo curso + mismo academic_term.
+				filters = {
 					"student": row.student,
 					"course": self.course,
-					"program_enrollment": row.program_enrollment,
-					"docstatus": 1 # Solo si está validado
-				})
+					"docstatus": 1,
+				}
+				ce_meta = frappe.get_meta("Course Enrollment")
+				if self.academic_term and ce_meta.has_field("custom_academic_term"):
+					filters["custom_academic_term"] = self.academic_term
+				else:
+					filters["program_enrollment"] = row.program_enrollment
+				exists = frappe.db.exists("Course Enrollment", filters)
 
 				if exists:
 					row.status = "Duplicate"
-					row.error_log = f"Ya inscrito: {exists}"
+					row.error_log = f"Ya inscrito en este periodo: {exists}"
 					duplicates += 1
 					results.append({
 						"student": row.student,
