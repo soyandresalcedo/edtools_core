@@ -342,10 +342,10 @@ class CourseEnrollmentTool(Document):
 						"status": "❌ Error Moodle",
 						"message": error_msg
 					})
-					frappe.log_error(
-						f"Moodle sync failed for {row.student}: {moodle_err}",
-						"Course Enrollment Tool - Moodle",
-					)
+				frappe.log_error(
+					message=f"Moodle sync failed for {row.student}: {moodle_err}",
+					title="Course Enrollment Tool - Moodle",
+				)
 					continue
 
 				# B. Crear el documento Course Enrollment
@@ -396,7 +396,10 @@ class CourseEnrollmentTool(Document):
 					"status": "❌ Error",
 					"message": error_msg
 				})
-				frappe.log_error(f"Validation error enrolling {row.student}: {str(e)}", "Course Enrollment Tool")
+				frappe.log_error(
+					message=f"Validation error enrolling {row.student}: {str(e)}",
+					title="CET Enroll Error",
+				)
 				
 			except Exception as e:
 				row.status = "Error"
@@ -408,7 +411,10 @@ class CourseEnrollmentTool(Document):
 					"status": "❌ Error",
 					"message": error_msg
 				})
-				frappe.log_error(f"Error enrolling {row.student}: {str(e)}", "Course Enrollment Tool")
+				frappe.log_error(
+					message=f"Error enrolling {row.student}: {str(e)}",
+					title="CET Enroll Error",
+				)
 
 		# Guardamos el estado final (quién quedó inscrito y quién dio error)
 		self.save()

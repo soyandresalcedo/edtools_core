@@ -98,11 +98,10 @@ doctype_js = {
 
 # DocType Class
 # ---------------
-# Override standard doctype classes
-
-# override_doctype_class = {
-# 	"ToDo": "custom_app.overrides.CustomToDo"
-# }
+# Override standard doctype classes (permite mismo curso en distintos periodos)
+override_doctype_class = {
+	"Course Enrollment": "edtools_core.overrides.course_enrollment.CourseEnrollment"
+}
 
 # Document Events
 # ---------------
