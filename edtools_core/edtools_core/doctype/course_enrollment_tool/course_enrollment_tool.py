@@ -342,10 +342,10 @@ class CourseEnrollmentTool(Document):
 						"status": "❌ Error Moodle",
 						"message": error_msg
 					})
-				frappe.log_error(
-					"CET Moodle Sync",
-					f"Moodle sync failed for {row.student}: {moodle_err}",
-				)
+					frappe.log_error(
+						"CET Moodle Sync",
+						f"Moodle sync failed for {row.student}: {moodle_err}",
+					)
 					continue
 
 				# B. Crear el documento Course Enrollment
