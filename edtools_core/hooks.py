@@ -100,7 +100,8 @@ doctype_js = {
 # ---------------
 # Override standard doctype classes (permite mismo curso en distintos periodos)
 override_doctype_class = {
-	"Course Enrollment": "edtools_core.overrides.course_enrollment.CourseEnrollment"
+	"Course Enrollment": "edtools_core.overrides.course_enrollment.CourseEnrollment",
+	"Program Enrollment": "edtools_core.overrides.program_enrollment.ProgramEnrollment",
 }
 
 # Document Events
