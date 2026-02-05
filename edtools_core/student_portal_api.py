@@ -61,15 +61,36 @@ def get_school_abbr_logo():
 
 @frappe.whitelist()
 def get_student_programs(student):
-	"""Compat con Student Portal Vue (Grades). Education v15 puede no tenerlo."""
+	"""Compat con Student Portal Vue (Grades). Education v15 puede no tenerlo.
+	Usa ignore_permissions para que el rol Student pueda ver sus enrollments aunque el DocPerm falle."""
 	if not student:
+		return []
+	# Solo devolver programas del estudiante vinculado al usuario actual
+	my_student = _get_current_user_student_name()
+	if not my_student or my_student != student:
 		return []
 	programs = frappe.db.get_list(
 		"Program Enrollment",
 		fields=["program", "name"],
 		filters={"docstatus": 1, "student": student},
+		ignore_permissions=True,
 	)
 	return programs or []
+
+
+def _get_current_user_student_name():
+	"""Nombre del Student vinculado al usuario actual (user), o None."""
+	email = frappe.session.user
+	if not email or email == "Guest":
+		return None
+	students = frappe.db.get_list(
+		"Student",
+		fields=["name"],
+		filters={"user": email},
+		limit=1,
+		ignore_permissions=True,
+	)
+	return students[0]["name"] if students else None
 
 
 @frappe.whitelist()

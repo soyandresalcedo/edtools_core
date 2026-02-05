@@ -1,1 +1,1 @@
-
+edtools_core.patches.student_portal_read_permissions
