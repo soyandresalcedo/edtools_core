@@ -19,5 +19,15 @@ def _patch_student_portal_csrf():
 		pass
 
 
+def _patch_education_api():
+	"""Inyecta get_user_info en education.education.api (v15 no lo tiene; el Vue develop sí lo llama)."""
+	try:
+		from edtools_core.student_portal_api import patch_education_api
+		patch_education_api()
+	except Exception:
+		pass
+
+
 _patch_portal_redirect()
 _patch_student_portal_csrf()
+_patch_education_api()
