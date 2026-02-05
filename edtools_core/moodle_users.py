@@ -124,11 +124,12 @@ def get_user_by_email(email: str) -> Optional[Dict]:
 def create_moodle_user(student) -> Dict:
     """
     Crea un usuario en Moodle usando core_user_create_users.
-    El username se genera desde el email (antes del @).
-    El password se genera automáticamente y se envía por correo.
+    - auth: oidc (autenticación por OpenID Connect, no manual).
+    - username: correo electrónico completo (no solo la parte antes del @).
+    Con OIDC no se crea contraseña local; el usuario inicia sesión por el IdP.
     """
     email = _get_student_email(student)
-    username = email.split("@")[0]
+    username = email  # Usar el correo completo como nombre de usuario
 
     firstname = _build_firstname(
         student.first_name,
@@ -136,9 +137,9 @@ def create_moodle_user(student) -> Dict:
     )
 
     payload = {
-        # Identidad
+        # Identidad: OIDC + username = email completo
         "users[0][username]": username,
-        "users[0][auth]": "manual",
+        "users[0][auth]": "oidc",
 
         # Datos personales
         "users[0][firstname]": firstname,
@@ -152,9 +153,6 @@ def create_moodle_user(student) -> Dict:
         "users[0][lang]": "es",
         "users[0][timezone]": "99",
         "users[0][mailformat]": 1,
-
-        # Moodle crea password y envía correo
-        "users[0][createpassword]": 1,
     }
 
     response = _moodle_post(
@@ -241,17 +239,19 @@ def ensure_moodle_user(student) -> Dict:
 def create_moodle_user_instructor(instructor) -> Dict:
     """
     Crea un usuario en Moodle para un instructor (core_user_create_users).
-    Username desde el email; password se genera y envía por correo.
+    - auth: oidc (autenticación por OpenID Connect, no manual).
+    - username: correo electrónico completo (no solo la parte antes del @).
+    Con OIDC no se crea contraseña local; el usuario inicia sesión por el IdP.
     """
     email = _get_instructor_email(instructor)
-    username = email.split("@")[0]
+    username = email  # Usar el correo completo como nombre de usuario
     firstname, lastname = _parse_instructor_name(
         getattr(instructor, "instructor_name", None) or ""
     )
 
     payload = {
         "users[0][username]": username,
-        "users[0][auth]": "manual",
+        "users[0][auth]": "oidc",
         "users[0][firstname]": firstname,
         "users[0][lastname]": lastname,
         "users[0][email]": email,
@@ -259,7 +259,6 @@ def create_moodle_user_instructor(instructor) -> Dict:
         "users[0][lang]": "es",
         "users[0][timezone]": "99",
         "users[0][mailformat]": 1,
-        "users[0][createpassword]": 1,
     }
 
     response = _moodle_post(
