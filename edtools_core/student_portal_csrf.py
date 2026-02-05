@@ -48,9 +48,10 @@ def _patch_template_render():
 				token = frappe.sessions.get_csrf_token()
 				if token:
 					safe_token = token.replace("\\", "\\\\").replace("'", "\\'")
-					# Sustituir valores inválidos: 'None', "", o placeholder Jinja sin renderizar
+					# Sustituir cualquier valor inválido o literal Jinja por el token real
 					html = html.replace("window.csrf_token = 'None'", f"window.csrf_token = '{safe_token}'", 1)
 					html = html.replace('window.csrf_token = "None"', f'window.csrf_token = "{safe_token}"', 1)
+					html = html.replace("window.csrf_token = '{{ csrf_token }}'", f"window.csrf_token = '{safe_token}'", 1)
 					html = re.sub(r"window\.csrf_token\s*=\s*''\s*", f"window.csrf_token = '{safe_token}' ", html, count=1)
 					html = re.sub(
 						r"window\.csrf_token\s*=\s*'\{\{\s*frappe\.session\.csrf_token\s*\}\}'\s*",

@@ -41,11 +41,17 @@ def patch_education_api():
 
 @frappe.whitelist()
 def get_school_abbr_logo():
-	"""Compat con Student Portal Vue (education develop). Education v15 puede no tenerlo."""
-	abbr = frappe.db.get_single_value(
-		"Education Settings", "school_college_name_abbreviation"
-	)
-	logo = frappe.db.get_single_value("Education Settings", "school_college_logo")
+	"""Compat con Student Portal Vue (education develop). Education v15 puede no tener estos campos."""
+	abbr = None
+	logo = None
+	try:
+		# Education develop tiene school_college_name_abbreviation / school_college_logo; v15 puede no tenerlos
+		abbr = frappe.db.get_single_value(
+			"Education Settings", "school_college_name_abbreviation"
+		)
+		logo = frappe.db.get_single_value("Education Settings", "school_college_logo")
+	except Exception:
+		pass
 	return {"name": abbr or "Edtools Education", "logo": logo or "/favicon.png"}
 
 
