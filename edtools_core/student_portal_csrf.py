@@ -10,13 +10,18 @@ def patch_student_portal_csrf():
 	_patch_template_render()
 
 
+# Logo por defecto que existe en Frappe (evita 404 en /favicon.png)
+DEFAULT_LOGO = "/assets/frappe/images/frappe-favicon.svg"
+DEFAULT_ABBR = "Edtools Education"
+
+
 def _patch_get_context():
 	try:
 		import education.education.www.student_portal as student_portal
 		original_get_context = student_portal.get_context
 
 		def get_context(context):
-			# 1) Token para que {{ frappe.session.csrf_token }} no sea None (evita 417)
+			# 1) Token CSRF
 			token = frappe.sessions.get_csrf_token()
 			if token and hasattr(frappe.local, "session") and frappe.local.session is not None:
 				frappe.local.session["csrf_token"] = token
@@ -24,7 +29,14 @@ def _patch_get_context():
 					frappe.local.session.data["csrf_token"] = token
 			context["csrf_token"] = token or ""
 			context["no_cache"] = 1
-			return original_get_context(context)
+			try:
+				original_get_context(context)
+			except Exception:
+				pass
+			# 2) Título y logo por defecto (Education v15 puede no tener los campos en Education Settings)
+			context["abbr"] = context.get("abbr") or DEFAULT_ABBR
+			context["logo"] = context.get("logo") or DEFAULT_LOGO
+			return context
 
 		student_portal.get_context = get_context
 	except Exception:
@@ -46,6 +58,9 @@ def _patch_template_render():
 			path = getattr(self, "path", "") or ""
 			if path == "student-portal" or (isinstance(path, str) and path.startswith("student-portal/")):
 				token = frappe.sessions.get_csrf_token()
+				abbr = (getattr(self, "context", None) or {}).get("abbr") or DEFAULT_ABBR
+				logo = (getattr(self, "context", None) or {}).get("logo") or DEFAULT_LOGO
+				abbr_safe = abbr.replace("\\", "\\\\").replace("'", "\\'")
 				if token:
 					safe_token = token.replace("\\", "\\\\").replace("'", "\\'")
 					# Sustituir cualquier valor inválido o literal Jinja por el token real
@@ -59,6 +74,28 @@ def _patch_template_render():
 						html,
 						count=1,
 					)
+				# Título de pestaña: sustituir literal {{ abbr }} o vacío
+				html = re.sub(
+					r"window\.document\.title\s*=\s*'\{\{\s*abbr\s*\}\}'",
+					f"window.document.title = '{abbr_safe}'",
+					html,
+					count=1,
+				)
+				html = html.replace("window.document.title = ''", f"window.document.title = '{abbr_safe}'", 1)
+				# Logo/favicon: evitar 404 usando ruta que existe en Frappe
+				html = html.replace("link.href = '{{ logo }}'", f"link.href = '{logo}'", 1)
+				html = html.replace("link.href = '/favicon.png'", f"link.href = '{logo}'", 1)
+				# Sustituir también el <link> estático del head para que el navegador no pida /favicon.png
+				html = html.replace(
+					'<link rel="icon" href="/favicon.png" />',
+					f'<link rel="icon" href="{logo}" />',
+					1,
+				)
+				html = html.replace(
+					'<link rel="icon" href="/favicon.png"/>',
+					f'<link rel="icon" href="{logo}"/>',
+					1,
+				)
 			return self.build_response(html)
 
 		TemplatePage.render = render
