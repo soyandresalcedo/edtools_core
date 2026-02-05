@@ -1,9 +1,27 @@
 # edtools_core/moodle_users.py
 
+import os
 from typing import Optional, Dict
 import frappe
 
 from edtools_core.moodle_integration import _moodle_post
+
+
+def _get_moodle_user_auth() -> str:
+    """
+    Método de autenticación para usuarios creados en Moodle.
+    - "oidc" = OpenID Connect (requiere plugin auth_oidc instalado y habilitado en Moodle).
+    - "manual" = autenticación manual (funciona en cualquier Moodle; se crea contraseña y se envía por correo).
+
+    Origen: variable de entorno MOODLE_USER_AUTH o site config moodle_user_auth.
+    Por defecto: "manual" para evitar "valor de parámetro no válido" si OIDC no está disponible.
+    """
+    auth = (
+        os.getenv("MOODLE_USER_AUTH")
+        or (frappe.conf.get("moodle_user_auth") if frappe.conf else None)
+        or "manual"
+    )
+    return str(auth).strip().lower()
 
 # ------------------------------------------------------------
 # Helpers
@@ -124,12 +142,13 @@ def get_user_by_email(email: str) -> Optional[Dict]:
 def create_moodle_user(student) -> Dict:
     """
     Crea un usuario en Moodle usando core_user_create_users.
-    - auth: oidc (autenticación por OpenID Connect, no manual).
+    - auth: según configuración (moodle_user_auth / MOODLE_USER_AUTH). "oidc" si está disponible en Moodle, si no "manual".
     - username: correo electrónico completo (no solo la parte antes del @).
-    Con OIDC no se crea contraseña local; el usuario inicia sesión por el IdP.
+    Con auth=manual se crea contraseña y se envía por correo; con oidc el usuario inicia sesión por el IdP.
     """
     email = _get_student_email(student)
     username = email  # Usar el correo completo como nombre de usuario
+    auth = _get_moodle_user_auth()
 
     firstname = _build_firstname(
         student.first_name,
@@ -137,23 +156,18 @@ def create_moodle_user(student) -> Dict:
     )
 
     payload = {
-        # Identidad: OIDC + username = email completo
         "users[0][username]": username,
-        "users[0][auth]": "oidc",
-
-        # Datos personales
+        "users[0][auth]": auth,
         "users[0][firstname]": firstname,
         "users[0][lastname]": student.last_name,
         "users[0][email]": email,
-
-        # Campo "Número de ID" (sección Opcional en Moodle)
         "users[0][idnumber]": _get_student_idnumber(student),
-
-        # Configuración estándar institucional
         "users[0][lang]": "es",
         "users[0][timezone]": "99",
         "users[0][mailformat]": 1,
     }
+    if auth == "manual":
+        payload["users[0][createpassword]"] = 1
 
     response = _moodle_post(
         wsfunction="core_user_create_users",
@@ -239,19 +253,20 @@ def ensure_moodle_user(student) -> Dict:
 def create_moodle_user_instructor(instructor) -> Dict:
     """
     Crea un usuario en Moodle para un instructor (core_user_create_users).
-    - auth: oidc (autenticación por OpenID Connect, no manual).
+    - auth: según configuración (moodle_user_auth / MOODLE_USER_AUTH). "oidc" o "manual".
     - username: correo electrónico completo (no solo la parte antes del @).
-    Con OIDC no se crea contraseña local; el usuario inicia sesión por el IdP.
+    Con auth=manual se crea contraseña y se envía por correo; con oidc el usuario inicia sesión por el IdP.
     """
     email = _get_instructor_email(instructor)
     username = email  # Usar el correo completo como nombre de usuario
+    auth = _get_moodle_user_auth()
     firstname, lastname = _parse_instructor_name(
         getattr(instructor, "instructor_name", None) or ""
     )
 
     payload = {
         "users[0][username]": username,
-        "users[0][auth]": "oidc",
+        "users[0][auth]": auth,
         "users[0][firstname]": firstname,
         "users[0][lastname]": lastname,
         "users[0][email]": email,
@@ -260,6 +275,8 @@ def create_moodle_user_instructor(instructor) -> Dict:
         "users[0][timezone]": "99",
         "users[0][mailformat]": 1,
     }
+    if auth == "manual":
+        payload["users[0][createpassword]"] = 1
 
     response = _moodle_post(
         wsfunction="core_user_create_users",
