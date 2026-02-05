@@ -15,7 +15,12 @@ def patch_student_portal_csrf():
 			token = frappe.sessions.get_csrf_token()
 			if token and hasattr(frappe.local, "session") and frappe.local.session is not None:
 				frappe.local.session["csrf_token"] = token
-			# 2) Sin caché: cada request renderiza de nuevo con sesión actual (evita servir HTML con {{ abbr }}, {{ logo }} crudos)
+				# Por si la plantilla accede vía session.data
+				if getattr(frappe.local.session, "data", None) is not None:
+					frappe.local.session.data["csrf_token"] = token
+			# 2) Fallback: contexto por si la plantilla usara {{ csrf_token }}
+			context["csrf_token"] = token or ""
+			# 3) Sin caché: cada request renderiza de nuevo con sesión actual (evita servir HTML con {{ abbr }}, {{ logo }} crudos)
 			context["no_cache"] = 1
 			return original_get_context(context)
 
