@@ -37,6 +37,8 @@ def patch_education_api():
 			edu_api.get_course_schedule_for_student = get_course_schedule_for_student
 		if not hasattr(edu_api, "get_student_programs"):
 			edu_api.get_student_programs = get_student_programs
+		if not hasattr(edu_api, "get_student_invoices"):
+			edu_api.get_student_invoices = get_student_invoices
 	except Exception:
 		pass
 
@@ -91,6 +93,107 @@ def _get_current_user_student_name():
 		ignore_permissions=True,
 	)
 	return students[0]["name"] if students else None
+
+
+@frappe.whitelist()
+def get_student_invoices(student):
+	"""Compat con Student Portal Vue (Fees). Education v15 puede no tenerlo.
+	Devuelve facturas (Sales Invoice) del estudiante con programa, estado, fechas y monto."""
+	if not student:
+		return {"invoices": [], "print_format": "Standard"}
+	my_student = _get_current_user_student_name()
+	if not my_student or my_student != student:
+		return {"invoices": [], "print_format": "Standard"}
+	try:
+		sales_invoice_list = frappe.db.get_list(
+			"Sales Invoice",
+			filters={
+				"student": student,
+				"status": ["in", ["Paid", "Unpaid", "Overdue", "Partly Paid"]],
+				"docstatus": 1,
+			},
+			fields=[
+				"name",
+				"status",
+				"student",
+				"due_date",
+				"fee_schedule",
+				"outstanding_amount",
+				"currency",
+				"grand_total",
+			],
+			order_by="status desc",
+			ignore_permissions=True,
+		)
+	except Exception:
+		return {"invoices": [], "print_format": "Standard"}
+	student_sales_invoices = []
+	for si in sales_invoice_list:
+		row = {
+			"status": si.get("status", ""),
+			"program": _get_program_from_fee_schedule(si.get("fee_schedule")),
+			"invoice": si.get("name"),
+		}
+		symbol = _get_currency_symbol(si.get("currency") or "USD")
+		row["amount"] = symbol + " " + str(si.get("outstanding_amount") or 0)
+		if si.get("status") == "Paid":
+			row["amount"] = symbol + " " + str(si.get("grand_total") or 0)
+			row["payment_date"] = _get_posting_date_from_payment_entry(si.get("name"))
+			row["due_date"] = "-"
+		else:
+			row["due_date"] = si.get("due_date") or "-"
+			row["payment_date"] = "-"
+		student_sales_invoices.append(row)
+	print_format = _get_fees_print_format() or "Standard"
+	return {"invoices": student_sales_invoices, "print_format": print_format}
+
+
+def _get_currency_symbol(currency):
+	if not currency:
+		return "$"
+	return frappe.db.get_value("Currency", currency, "symbol") or currency
+
+
+def _get_posting_date_from_payment_entry(sales_invoice):
+	try:
+		ref = frappe.qb.DocType("Payment Entry Reference")
+		pe = frappe.qb.DocType("Payment Entry")
+		q = (
+			frappe.qb.from_(pe)
+			.inner_join(ref)
+			.on(pe.name == ref.parent)
+			.select(pe.posting_date)
+			.where(ref.reference_doctype == "Sales Invoice")
+			.where(ref.reference_name == sales_invoice)
+		)
+		rows = q.run(as_dict=True)
+		if rows:
+			return rows[0].get("posting_date")
+	except Exception:
+		pass
+	return None
+
+
+def _get_fees_print_format():
+	try:
+		return frappe.db.get_value(
+			"Property Setter",
+			{"property": "default_print_format", "doc_type": "Sales Invoice"},
+			"value",
+		)
+	except Exception:
+		pass
+	return None
+
+
+def _get_program_from_fee_schedule(fee_schedule):
+	if not fee_schedule:
+		return None
+	try:
+		return frappe.db.get_value("Fee Schedule", fee_schedule, "program")
+	except Exception:
+		pass
+	return None
 
 
 @frappe.whitelist()
