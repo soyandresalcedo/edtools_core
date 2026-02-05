@@ -52,6 +52,9 @@ role_home_page = {
 	"Student": "student-portal",
 }
 
+# Resolver: /student-portal y /student-portal/schedule (etc.) sirven el mismo HTML para que F5 no dé 404
+website_path_resolver = ["edtools_core.website_resolver.resolve"]
+
 # Ítems del menú lateral del portal web para el rol Student (se suman a los estándar)
 standard_portal_menu_items = [
 	{
