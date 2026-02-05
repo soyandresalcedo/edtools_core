@@ -47,9 +47,19 @@ doctype_js = {
 # home_page = "login"
 
 # website user home page (by Role)
-# role_home_page = {
-#	"Role": "home_page"
-# }
+# Estudiantes van a /student-portal (Education Vue app: horario, notas, cuotas, asistencia)
+role_home_page = {
+	"Student": "student-portal",
+}
+
+# Ítems del menú lateral del portal web para el rol Student (se suman a los estándar)
+standard_portal_menu_items = [
+	{
+		"title": "Portal del Estudiante",
+		"route": "/student-portal",
+		"role": "Student",
+	},
+]
 
 # Generators
 # ----------
