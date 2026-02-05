@@ -35,6 +35,8 @@ def patch_education_api():
 			edu_api.get_school_abbr_logo = get_school_abbr_logo
 		if not hasattr(edu_api, "get_course_schedule_for_student"):
 			edu_api.get_course_schedule_for_student = get_course_schedule_for_student
+		if not hasattr(edu_api, "get_student_programs"):
+			edu_api.get_student_programs = get_student_programs
 	except Exception:
 		pass
 
@@ -55,6 +57,19 @@ def get_school_abbr_logo():
 	# Si no hay logo en Education Settings, devolver None: el frontend muestra el icono School (Lucide)
 	# en lugar de la "F" de Frappe, que es lo que el usuario espera ver en el sidebar.
 	return {"name": abbr or "Edtools Education", "logo": logo}
+
+
+@frappe.whitelist()
+def get_student_programs(student):
+	"""Compat con Student Portal Vue (Grades). Education v15 puede no tenerlo."""
+	if not student:
+		return []
+	programs = frappe.db.get_list(
+		"Program Enrollment",
+		fields=["program", "name"],
+		filters={"docstatus": 1, "student": student},
+	)
+	return programs or []
 
 
 @frappe.whitelist()
@@ -122,6 +137,8 @@ def _get_student_info():
 	if not students:
 		return
 	student_info = students[0]
+	student_info.setdefault("student_groups", [])
+	student_info.setdefault("current_program", {})
 	# current_program y student_groups si existen en education
 	try:
 		import education.education.api as edu_api
