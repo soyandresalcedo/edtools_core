@@ -55,6 +55,11 @@ role_home_page = {
 # Resolver: /student-portal y /student-portal/schedule (etc.) sirven el mismo HTML para que F5 no dé 404
 website_path_resolver = ["edtools_core.website_resolver.resolve"]
 
+# Favicon: /favicon.png no existe → redirigir al que sí existe (evita 404 en student-portal y resto del sitio)
+website_redirects = [
+	{"source": "favicon.png", "target": "/assets/frappe/images/frappe-favicon.svg", "redirect_http_status": 302},
+]
+
 # Ítems del menú lateral del portal web para el rol Student (se suman a los estándar)
 standard_portal_menu_items = [
 	{

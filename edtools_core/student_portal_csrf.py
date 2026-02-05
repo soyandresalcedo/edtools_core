@@ -85,17 +85,8 @@ def _patch_template_render():
 				# Logo/favicon: evitar 404 usando ruta que existe en Frappe
 				html = html.replace("link.href = '{{ logo }}'", f"link.href = '{logo}'", 1)
 				html = html.replace("link.href = '/favicon.png'", f"link.href = '{logo}'", 1)
-				# Sustituir también el <link> estático del head para que el navegador no pida /favicon.png
-				html = html.replace(
-					'<link rel="icon" href="/favicon.png" />',
-					f'<link rel="icon" href="{logo}" />',
-					1,
-				)
-				html = html.replace(
-					'<link rel="icon" href="/favicon.png"/>',
-					f'<link rel="icon" href="{logo}"/>',
-					1,
-				)
+				# Cualquier referencia a /favicon.png (link del head, script, etc.) → logo que existe
+				html = re.sub(r'href\s*=\s*["\']/favicon\.png["\']', f'href="{logo}"', html)
 			return self.build_response(html)
 
 		TemplatePage.render = render
