@@ -22,7 +22,7 @@ def get_user_info():
 
 
 def patch_education_api():
-	"""Inyecta get_user_info (y get_student_info si falta) en education.education.api."""
+	"""Inyecta get_user_info y APIs del Student Portal en education.education.api (v15 puede no tenerlas)."""
 	try:
 		import education.education.api as edu_api
 		edu_api.get_user_info = get_user_info
@@ -30,8 +30,49 @@ def patch_education_api():
 		if not hasattr(edu_api, "get_student_info"):
 			from edtools_core.student_portal_api import _get_student_info
 			edu_api.get_student_info = _get_student_info
+		if not hasattr(edu_api, "get_school_abbr_logo"):
+			edu_api.get_school_abbr_logo = get_school_abbr_logo
+		if not hasattr(edu_api, "get_course_schedule_for_student"):
+			edu_api.get_course_schedule_for_student = get_course_schedule_for_student
 	except Exception:
 		pass
+
+
+@frappe.whitelist()
+def get_school_abbr_logo():
+	"""Compat con Student Portal Vue (education develop). Education v15 puede no tenerlo."""
+	abbr = frappe.db.get_single_value(
+		"Education Settings", "school_college_name_abbreviation"
+	)
+	logo = frappe.db.get_single_value("Education Settings", "school_college_logo")
+	return {"name": abbr or "Edtools Education", "logo": logo or "/favicon.png"}
+
+
+@frappe.whitelist()
+def get_course_schedule_for_student(program_name, student_groups):
+	"""Compat con Student Portal Vue (education develop). Education v15 puede no tenerlo."""
+	def _label(sg):
+		return sg.get("label") if isinstance(sg, dict) else sg
+	group_names = [_label(sg) for sg in (student_groups or []) if sg]
+	if not group_names:
+		return []
+	schedule = frappe.db.get_list(
+		"Course Schedule",
+		fields=[
+			"schedule_date",
+			"room",
+			"class_schedule_color",
+			"course",
+			"from_time",
+			"to_time",
+			"instructor",
+			"title",
+			"name",
+		],
+		filters={"program": program_name, "student_group": ["in", group_names]},
+		order_by="schedule_date asc",
+	)
+	return schedule
 
 
 @frappe.whitelist()
