@@ -21,3 +21,9 @@ def patch_redirect_post_login():
 		return original(desk_user, redirect_to=redirect_to, provider=provider)
 
 	frappe.utils.oauth.redirect_post_login = redirect_post_login
+	# Por si frappe.www.login ya fue importado (tiene su propia referencia a redirect_post_login).
+	try:
+		import frappe.www.login as login_mod
+		login_mod.redirect_post_login = redirect_post_login
+	except Exception:
+		pass
