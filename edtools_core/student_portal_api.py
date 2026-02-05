@@ -52,7 +52,9 @@ def get_school_abbr_logo():
 		logo = frappe.db.get_single_value("Education Settings", "school_college_logo")
 	except Exception:
 		pass
-	return {"name": abbr or "Edtools Education", "logo": logo or "/favicon.png"}
+	# Si no hay logo en Education Settings, devolver None: el frontend muestra el icono School (Lucide)
+	# en lugar de la "F" de Frappe, que es lo que el usuario espera ver en el sidebar.
+	return {"name": abbr or "Edtools Education", "logo": logo}
 
 
 @frappe.whitelist()
