@@ -95,17 +95,21 @@ def _get_current_user_student_name():
 	return students[0]["name"] if students else None
 
 
-@frappe.whitelist()
-def get_student_invoices(student):
-	"""Compat con Student Portal Vue (Fees). Education v15 puede no tenerlo.
-	Devuelve facturas (Sales Invoice) del estudiante con programa, estado, fechas y monto."""
-	if not student:
-		return {"invoices": [], "print_format": "Standard"}
-	my_student = _get_current_user_student_name()
-	if not my_student or my_student != student:
-		return {"invoices": [], "print_format": "Standard"}
+def _sales_invoice_has_student_field():
+	"""Comprueba si Sales Invoice tiene el campo student (custom de Education)."""
 	try:
-		sales_invoice_list = frappe.db.get_list(
+		meta = frappe.get_meta("Sales Invoice")
+		return meta.get_field("student") is not None
+	except Exception:
+		return False
+
+
+def _get_invoices_from_sales_invoice(student):
+	"""Lista desde Sales Invoice si tiene campo student. Devuelve lista de dicts o None si falla."""
+	if not _sales_invoice_has_student_field():
+		return None
+	try:
+		return frappe.db.get_list(
 			"Sales Invoice",
 			filters={
 				"student": student,
@@ -122,13 +126,62 @@ def get_student_invoices(student):
 				"currency",
 				"grand_total",
 			],
-			order_by="status desc",
+			order_by="modified desc",
 			ignore_permissions=True,
 		)
 	except Exception:
+		return None
+
+
+def _get_invoices_from_fees(student):
+	"""Lista desde DocType Fees (Education). Devuelve lista de dicts con misma forma que Sales Invoice."""
+	try:
+		rows = frappe.db.get_list(
+			"Fees",
+			filters={"student": student, "docstatus": 1},
+			fields=[
+				"name",
+				"due_date",
+				"fee_schedule",
+				"outstanding_amount",
+				"currency",
+				"grand_total",
+			],
+			order_by="modified desc",
+			ignore_permissions=True,
+		)
+	except Exception:
+		return []
+	out = []
+	for r in rows:
+		out.append({
+			"name": r.get("name"),
+			"status": "Paid" if (r.get("outstanding_amount") or 0) == 0 else "Unpaid",
+			"due_date": r.get("due_date"),
+			"fee_schedule": r.get("fee_schedule"),
+			"outstanding_amount": r.get("outstanding_amount"),
+			"currency": r.get("currency"),
+			"grand_total": r.get("grand_total"),
+		})
+	return out
+
+
+@frappe.whitelist()
+def get_student_invoices(student):
+	"""Compat con Student Portal Vue (Fees). Education v15 puede no tenerlo.
+	Devuelve facturas (Sales Invoice o Fees) del estudiante con programa, estado, fechas y monto."""
+	if not student:
 		return {"invoices": [], "print_format": "Standard"}
+	my_student = _get_current_user_student_name()
+	if not my_student or my_student != student:
+		return {"invoices": [], "print_format": "Standard"}
+	# Prefer Sales Invoice si tiene campo student; si falla o no existe, usar Fees
+	raw_list = _get_invoices_from_sales_invoice(student)
+	from_sales_invoice = raw_list is not None
+	if raw_list is None:
+		raw_list = _get_invoices_from_fees(student)
 	student_sales_invoices = []
-	for si in sales_invoice_list:
+	for si in raw_list:
 		row = {
 			"status": si.get("status", ""),
 			"program": _get_program_from_fee_schedule(si.get("fee_schedule")),
@@ -138,7 +191,11 @@ def get_student_invoices(student):
 		row["amount"] = symbol + " " + str(si.get("outstanding_amount") or 0)
 		if si.get("status") == "Paid":
 			row["amount"] = symbol + " " + str(si.get("grand_total") or 0)
-			row["payment_date"] = _get_posting_date_from_payment_entry(si.get("name"))
+			row["payment_date"] = (
+				_get_posting_date_from_payment_entry(si.get("name"))
+				if from_sales_invoice
+				else _get_posting_date_from_payment_entry_fees(si.get("name"))
+			)
 			row["due_date"] = "-"
 		else:
 			row["due_date"] = si.get("due_date") or "-"
@@ -165,6 +222,27 @@ def _get_posting_date_from_payment_entry(sales_invoice):
 			.select(pe.posting_date)
 			.where(ref.reference_doctype == "Sales Invoice")
 			.where(ref.reference_name == sales_invoice)
+		)
+		rows = q.run(as_dict=True)
+		if rows:
+			return rows[0].get("posting_date")
+	except Exception:
+		pass
+	return None
+
+
+def _get_posting_date_from_payment_entry_fees(fee_name):
+	"""Fecha de pago para un doc Fees (reference_doctype = Fees)."""
+	try:
+		ref = frappe.qb.DocType("Payment Entry Reference")
+		pe = frappe.qb.DocType("Payment Entry")
+		q = (
+			frappe.qb.from_(pe)
+			.inner_join(ref)
+			.on(pe.name == ref.parent)
+			.select(pe.posting_date)
+			.where(ref.reference_doctype == "Fees")
+			.where(ref.reference_name == fee_name)
 		)
 		rows = q.run(as_dict=True)
 		if rows:
