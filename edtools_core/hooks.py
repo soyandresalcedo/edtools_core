@@ -46,10 +46,10 @@ doctype_js = {
 # application home page (will override Website Settings)
 # home_page = "login"
 
-# website user home page (by Role)
+# website user home page (by Role). Valor debe ser lista para get_home_page_via_hooks (usa [-1]).
 # Estudiantes van a /student-portal (Education Vue app: horario, notas, cuotas, asistencia)
 role_home_page = {
-	"Student": "student-portal",
+	"Student": ["student-portal"],
 }
 
 # Resolver: /student-portal y /student-portal/schedule (etc.) sirven el mismo HTML para que F5 no dé 404
