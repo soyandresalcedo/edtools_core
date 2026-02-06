@@ -396,24 +396,33 @@ def get_course_schedule_for_student(program_name=None, student_groups=None):
 		if not group_names:
 			return []
 
-		# Usar SQL directo para evitar fallos de get_list en PostgreSQL (order_by/backticks)
-		placeholders = ", ".join(["%s"] * len(group_names))
-		sql = """
-			SELECT schedule_date, room, class_schedule_color, course,
-			       from_time, to_time, instructor, title, name
-			FROM "tabCourse Schedule"
-			WHERE program = %s AND student_group IN ({placeholders})
-			ORDER BY schedule_date ASC
-		""".format(placeholders=placeholders)
-		params = [program_name] + group_names
-		schedule = frappe.db.sql(sql, tuple(params), as_dict=True)
+		# Usar query builder (qb) para que Frappe genere SQL válido en PostgreSQL
+		cs = frappe.qb.DocType("Course Schedule")
+		query = (
+			frappe.qb.from_(cs)
+			.select(
+				cs.schedule_date,
+				cs.room,
+				cs.class_schedule_color,
+				cs.course,
+				cs.from_time,
+				cs.to_time,
+				cs.instructor,
+				cs.title,
+				cs.name,
+			)
+			.where(cs.program == program_name)
+			.where(cs.student_group.isin(group_names))
+			.orderby(cs.schedule_date, order=frappe.qb.asc)
+		)
+		schedule = query.run(as_dict=True)
 
 		# Asegurar que from_time/to_time sean strings para el frontend
 		for row in schedule:
 			for field in ("from_time", "to_time"):
 				if field in row and row[field] is not None:
 					row[field] = str(row[field])
-		return schedule
+		return list(schedule) if schedule else []
 	except Exception as e:
 		frappe.log_error(title="get_course_schedule_for_student", message=frappe.get_traceback())
 		return []
