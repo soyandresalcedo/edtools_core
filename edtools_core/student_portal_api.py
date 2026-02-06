@@ -27,10 +27,8 @@ def patch_education_api():
 	try:
 		import education.education.api as edu_api
 		edu_api.get_user_info = get_user_info
-		# get_student_info suele estar en v15; por si no, lo exponemos desde edtools_core
-		if not hasattr(edu_api, "get_student_info"):
-			from edtools_core.student_portal_api import _get_student_info
-			edu_api.get_student_info = _get_student_info
+		# get_student_info: siempre usar nuestra versión para garantizar student_groups y current_program
+		edu_api.get_student_info = get_student_info
 		if not hasattr(edu_api, "get_school_abbr_logo"):
 			edu_api.get_school_abbr_logo = get_school_abbr_logo
 		if not hasattr(edu_api, "get_course_schedule_for_student"):
@@ -64,6 +62,83 @@ def get_student_attendance(student, student_group):
 		)
 	except Exception:
 		return []
+
+
+def _get_current_enrollment_edtools(student_name):
+	"""Inscripción activa del estudiante (programa actual). Usado para rellenar student_groups."""
+	try:
+		from frappe.utils import getdate, today
+		# Enrollments con año académico vigente (year_end_date >= hoy) o el más reciente
+		enrollments = frappe.db.get_list(
+			"Program Enrollment",
+			filters={"student": student_name, "docstatus": 1},
+			fields=["name", "program", "student_name", "academic_year", "academic_term", "student_batch_name", "student_category"],
+			order_by="modified desc",
+			limit_page_length=10,
+			ignore_permissions=True,
+		)
+		if not enrollments:
+			return None
+		# Preferir el que tenga año académico vigente
+		for pe in enrollments:
+			ay_name = pe.get("academic_year")
+			if not ay_name:
+				return pe
+			year_end = frappe.db.get_value("Academic Year", ay_name, "year_end_date")
+			if year_end and getdate(year_end) >= getdate(today()):
+				return pe
+		return enrollments[0]
+	except Exception:
+		return None
+
+
+def _get_student_groups_edtools(student_name, program_name):
+	"""Lista de grupos del estudiante en el programa. Formato [{ label: "Nombre Grupo" }, ...]."""
+	if not program_name:
+		return []
+	try:
+		# Student Group Student tiene parent = Student Group name; Student Group tiene program
+		sgs = frappe.qb.DocType("Student Group Student")
+		sg = frappe.qb.DocType("Student Group")
+		rows = (
+			frappe.qb.from_(sg)
+			.inner_join(sgs)
+			.on(sg.name == sgs.parent)
+			.select(sg.name.as_("label"))
+			.where(sgs.student == student_name)
+			.where(sg.program == program_name)
+			.run(as_dict=True)
+		)
+		return list(rows) if rows else []
+	except Exception:
+		return []
+
+
+@frappe.whitelist()
+def get_student_info():
+	"""Portal del estudiante: datos del estudiante + current_program + student_groups (siempre poblados)."""
+	email = frappe.session.user
+	if not email or email == "Guest" or email == "Administrator":
+		return None
+	students = frappe.db.get_list(
+		"Student",
+		fields=["*"],
+		filters={"user": email},
+		limit_page_length=1,
+		ignore_permissions=True,
+	)
+	if not students:
+		return None
+	student_info = dict(students[0])
+	student_info.setdefault("student_groups", [])
+	student_info.setdefault("current_program", {})
+	current_program = _get_current_enrollment_edtools(student_info["name"])
+	if current_program:
+		student_info["current_program"] = current_program
+		student_info["student_groups"] = _get_student_groups_edtools(
+			student_info["name"], current_program.get("program")
+		) or []
+	return student_info
 
 
 @frappe.whitelist()
