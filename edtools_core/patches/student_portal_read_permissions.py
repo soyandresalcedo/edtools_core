@@ -7,8 +7,9 @@ from frappe.permissions import add_permission
 
 
 def execute():
-	"""Añade Custom DocPerm read para Student en Program Enrollment y Assessment Result si no existe."""
-	for doctype in ("Program Enrollment", "Assessment Result"):
+	"""Añade Custom DocPerm read para Student en Program Enrollment, Assessment Result y Student Attendance
+	para que el portal (Grades, Attendance) pueda listar sin 403."""
+	for doctype in ("Program Enrollment", "Assessment Result", "Student Attendance"):
 		try:
 			add_permission(doctype, "Student", 0, "read")
 		except Exception:

@@ -39,8 +39,31 @@ def patch_education_api():
 			edu_api.get_student_programs = get_student_programs
 		if not hasattr(edu_api, "get_student_invoices"):
 			edu_api.get_student_invoices = get_student_invoices
+		# get_student_attendance: siempre usar nuestra versión (validación + ignore_permissions)
+		edu_api.get_student_attendance = get_student_attendance
 	except Exception:
 		pass
+
+
+@frappe.whitelist()
+def get_student_attendance(student, student_group):
+	"""Compat con Student Portal Vue (Attendance). Valida estudiante, devuelve [] si grupo inválido, usa ignore_permissions."""
+	if not student:
+		return []
+	my_student = _get_current_user_student_name()
+	if not my_student or my_student != student:
+		return []
+	if not student_group or student_group.strip() in ("", "Select Student Group"):
+		return []
+	try:
+		return frappe.db.get_list(
+			"Student Attendance",
+			filters={"student": student, "student_group": student_group, "docstatus": 1},
+			fields=["date", "status", "name"],
+			ignore_permissions=True,
+		)
+	except Exception:
+		return []
 
 
 @frappe.whitelist()
