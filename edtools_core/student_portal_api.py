@@ -31,8 +31,8 @@ def patch_education_api():
 		edu_api.get_student_info = get_student_info
 		if not hasattr(edu_api, "get_school_abbr_logo"):
 			edu_api.get_school_abbr_logo = get_school_abbr_logo
-		if not hasattr(edu_api, "get_course_schedule_for_student"):
-			edu_api.get_course_schedule_for_student = get_course_schedule_for_student
+		# get_course_schedule_for_student: siempre nuestra versión (ignore_permissions + lógica unificada)
+		edu_api.get_course_schedule_for_student = get_course_schedule_for_student
 		if not hasattr(edu_api, "get_student_programs"):
 			edu_api.get_student_programs = get_student_programs
 		if not hasattr(edu_api, "get_student_invoices"):
@@ -411,6 +411,7 @@ def get_course_schedule_for_student(program_name=None, student_groups=None):
 			],
 			filters={"program": program_name, "student_group": ["in", group_names]},
 			order_by="schedule_date asc",
+			ignore_permissions=True,
 		)
 		# Asegurar que from_time/to_time sean strings para el frontend (split('.')[0])
 		for row in schedule:
