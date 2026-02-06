@@ -396,11 +396,13 @@ def get_course_schedule_for_student(program_name=None, student_groups=None):
 		if not group_names:
 			return []
 
-		# Una consulta por grupo (evita IN (...) que puede romperse con modify_query en PostgreSQL)
+		# En Education v15 la columna puede ser "color"; en develop "class_schedule_color"
 		fields = [
-			"schedule_date", "room", "class_schedule_color", "course",
+			"schedule_date", "room", "course",
 			"from_time", "to_time", "instructor", "title", "name",
+			"color",  # v15; si existe class_schedule_color lo usamos después
 		]
+
 		schedule = []
 		for group_name in group_names:
 			try:
@@ -412,16 +414,16 @@ def get_course_schedule_for_student(program_name=None, student_groups=None):
 				)
 				schedule.extend(rows or [])
 			except Exception as group_err:
-				# Registrar pero seguir con otros grupos
 				frappe.log_error(
 					title="get_course_schedule_for_student (per group)",
 					message=frappe.get_traceback() + "\n\nGroup: " + str(group_name),
 				)
-		# Ordenar por fecha (get_all no ordena entre grupos)
+		# Ordenar por fecha
 		schedule.sort(key=lambda r: (r.get("schedule_date") or "", r.get("from_time") or ""))
 
-		# Asegurar que from_time/to_time sean strings para el frontend
 		for row in schedule:
+			# El frontend espera class_schedule_color; en v15 la columna es "color"
+			row["class_schedule_color"] = row.get("class_schedule_color") or row.get("color")
 			for field in ("from_time", "to_time"):
 				if field in row and row[field] is not None:
 					row[field] = str(row[field])
