@@ -396,24 +396,19 @@ def get_course_schedule_for_student(program_name=None, student_groups=None):
 		if not group_names:
 			return []
 
-		schedule = frappe.db.get_list(
-			"Course Schedule",
-			fields=[
-				"schedule_date",
-				"room",
-				"class_schedule_color",
-				"course",
-				"from_time",
-				"to_time",
-				"instructor",
-				"title",
-				"name",
-			],
-			filters={"program": program_name, "student_group": ["in", group_names]},
-			order_by="schedule_date asc",
-			ignore_permissions=True,
-		)
-		# Asegurar que from_time/to_time sean strings para el frontend (split('.')[0])
+		# Usar SQL directo para evitar fallos de get_list en PostgreSQL (order_by/backticks)
+		placeholders = ", ".join(["%s"] * len(group_names))
+		sql = """
+			SELECT schedule_date, room, class_schedule_color, course,
+			       from_time, to_time, instructor, title, name
+			FROM "tabCourse Schedule"
+			WHERE program = %s AND student_group IN ({placeholders})
+			ORDER BY schedule_date ASC
+		""".format(placeholders=placeholders)
+		params = [program_name] + group_names
+		schedule = frappe.db.sql(sql, tuple(params), as_dict=True)
+
+		# Asegurar que from_time/to_time sean strings para el frontend
 		for row in schedule:
 			for field in ("from_time", "to_time"):
 				if field in row and row[field] is not None:
