@@ -1,1 +1,2 @@
 edtools_core.patches.student_portal_read_permissions
+edtools_core.patches.after_edit_profile_redirect
