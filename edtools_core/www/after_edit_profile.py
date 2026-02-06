@@ -1,5 +1,6 @@
 # Copyright (c) Edtools
 # Redirige al usuario tras editar perfil: Student -> student-portal, resto -> /me
+# Frappe busca el .py con guiones reemplazados por _ (after_edit_profile.py).
 
 import frappe
 from frappe.website.utils import get_home_page
