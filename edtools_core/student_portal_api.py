@@ -138,6 +138,20 @@ def get_student_info():
 		student_info["student_groups"] = _get_student_groups_edtools(
 			student_info["name"], current_program.get("program")
 		) or []
+	# Enriquecer con datos del User: Edit Profile guarda en User (mobile_no, etc.), el modal lee Student
+	user_id = student_info.get("user")
+	if user_id:
+		user_data = frappe.db.get_value(
+			"User",
+			user_id,
+			["mobile_no", "phone", "user_image"],
+			as_dict=True,
+		)
+		if user_data:
+			if not (student_info.get("student_mobile_number") or "").strip():
+				student_info["student_mobile_number"] = (user_data.get("mobile_no") or user_data.get("phone") or "").strip() or None
+			if not (student_info.get("image") or "").strip() and user_data.get("user_image"):
+				student_info["image"] = user_data["user_image"]
 	return student_info
 
 
