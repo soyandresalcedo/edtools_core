@@ -396,35 +396,41 @@ def get_course_schedule_for_student(program_name=None, student_groups=None):
 		if not group_names:
 			return []
 
-		# Usar query builder (qb) para que Frappe genere SQL válido en PostgreSQL
-		cs = frappe.qb.DocType("Course Schedule")
-		query = (
-			frappe.qb.from_(cs)
-			.select(
-				cs.schedule_date,
-				cs.room,
-				cs.class_schedule_color,
-				cs.course,
-				cs.from_time,
-				cs.to_time,
-				cs.instructor,
-				cs.title,
-				cs.name,
-			)
-			.where(cs.program == program_name)
-			.where(cs.student_group.isin(group_names))
-			.orderby(cs.schedule_date, order=frappe.qb.asc)
-		)
-		schedule = query.run(as_dict=True)
+		# Una consulta por grupo (evita IN (...) que puede romperse con modify_query en PostgreSQL)
+		fields = [
+			"schedule_date", "room", "class_schedule_color", "course",
+			"from_time", "to_time", "instructor", "title", "name",
+		]
+		schedule = []
+		for group_name in group_names:
+			try:
+				rows = frappe.get_all(
+					"Course Schedule",
+					filters={"program": program_name, "student_group": group_name},
+					fields=fields,
+					ignore_permissions=True,
+				)
+				schedule.extend(rows or [])
+			except Exception as group_err:
+				# Registrar pero seguir con otros grupos
+				frappe.log_error(
+					title="get_course_schedule_for_student (per group)",
+					message=frappe.get_traceback() + "\n\nGroup: " + str(group_name),
+				)
+		# Ordenar por fecha (get_all no ordena entre grupos)
+		schedule.sort(key=lambda r: (r.get("schedule_date") or "", r.get("from_time") or ""))
 
 		# Asegurar que from_time/to_time sean strings para el frontend
 		for row in schedule:
 			for field in ("from_time", "to_time"):
 				if field in row and row[field] is not None:
 					row[field] = str(row[field])
-		return list(schedule) if schedule else []
+		return schedule
 	except Exception as e:
-		frappe.log_error(title="get_course_schedule_for_student", message=frappe.get_traceback())
+		frappe.log_error(
+			title="get_course_schedule_for_student",
+			message=str(e) + "\n\n" + frappe.get_traceback(),
+		)
 		return []
 
 
