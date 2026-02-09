@@ -64,6 +64,7 @@ def create_payment_intent(fee_name, student_name=None):
 	Called from Student Portal when user clicks Pay Now.
 	Returns: { "client_secret": "...", "publishable_key": "pk_test_...", "payment_intent_id": "pi_..." }
 	"""
+	print("[edtools_core] create_payment_intent called fee_name=", fee_name)
 	secret = _get_stripe_secret_key()
 	if not secret:
 		frappe.throw(_("Stripe is not configured. Please set stripe_secret_key in Site Config or Stripe Settings."))
@@ -112,6 +113,7 @@ def create_payment_intent(fee_name, student_name=None):
 				"site": frappe.local.site,
 			},
 		)
+		print("[edtools_core] Stripe PaymentIntent created id=", pi.id)
 	except Exception as e:
 		frappe.log_error(title="Stripe create_payment_intent", message=frappe.get_traceback())
 		frappe.throw(_("Payment could not be started: {0}").format(str(e)))
