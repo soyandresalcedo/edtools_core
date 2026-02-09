@@ -1,33 +1,46 @@
 # Stripe payment integration for Student Portal (Fees).
 # Test mode: use pk_test_* and sk_test_*; production: pk_live_* and sk_live_*.
+# Keys can be set in Site Config (site_config.json) or in environment variables (e.g. on Railway).
 
 import json
+import os
 import frappe
 from frappe import _
 
 
+def _get(key, env_key=None, default=None):
+	"""Read from site config (frappe.conf) or from environment variable."""
+	val = frappe.conf.get(key)
+	if val:
+		return val
+	if env_key is None:
+		env_key = key.upper()
+	val = os.environ.get(env_key)
+	return val if val else default
+
+
 def _get_stripe_secret_key():
-	"""Secret key from Site Config (sites/.../site_config.json). Never expose to frontend."""
-	return frappe.conf.get("stripe_secret_key")
+	"""Secret key from Site Config or env STRIPE_SECRET_KEY. Never expose to frontend."""
+	return _get("stripe_secret_key", "STRIPE_SECRET_KEY")
 
 
 def _get_stripe_publishable_key():
-	"""Publishable key for frontend (Stripe.js)."""
-	return frappe.conf.get("stripe_publishable_key")
+	"""Publishable key from Site Config or env STRIPE_PUBLISHABLE_KEY."""
+	return _get("stripe_publishable_key", "STRIPE_PUBLISHABLE_KEY")
 
 
 def _get_stripe_webhook_secret():
-	return frappe.conf.get("stripe_webhook_secret")
+	return _get("stripe_webhook_secret", "STRIPE_WEBHOOK_SECRET")
 
 
 def _get_stripe_mode_of_payment():
 	"""Mode of Payment for Stripe (e.g. 'Stripe' or 'Tarjeta')."""
-	return frappe.conf.get("stripe_mode_of_payment") or "Stripe"
+	return _get("stripe_mode_of_payment", "STRIPE_MODE_OF_PAYMENT") or "Stripe"
 
 
 def _get_stripe_paid_to_account():
 	"""Account where Stripe deposits (e.g. 'Stripe - CUCUSA'). Must exist in Company."""
-	return frappe.conf.get("stripe_paid_to_account")
+	return _get("stripe_paid_to_account", "STRIPE_PAID_TO_ACCOUNT")
 
 
 def _get_current_student_name():

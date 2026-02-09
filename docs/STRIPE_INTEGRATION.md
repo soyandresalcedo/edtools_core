@@ -35,7 +35,7 @@ Configuración en EdTools:
 |-------|-----------|
 | Crear PaymentIntent (API) | `edtools_core.stripe_payment.create_payment_intent` |
 | Webhook Stripe | `edtools_core.stripe_payment.stripe_webhook` (URL pública) |
-| Configuración (claves) | Site Config: `stripe_secret_key`, `stripe_publishable_key`, `stripe_webhook_secret` |
+| Configuración (claves) | Site Config o variables de entorno: `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, etc. |
 | Vista "Pay Now" | Override en `education-frontend-overrides`: `FeesPaymentDialog.vue` (Stripe Elements) |
 
 ## 4. Idempotencia y duplicados
@@ -43,9 +43,14 @@ Configuración en EdTools:
 - Cada **PaymentIntent** tiene un `id` único. En el webhook, antes de crear el Payment Entry, se comprueba si ya existe un registro vinculado a ese `payment_intent_id` (tabla o campo custom). Si ya existe, no se crea otro Payment Entry.
 - Así se evitan duplicados aunque Stripe reenvíe el webhook o el usuario haga doble clic.
 
-## 5. Configuración (site_config.json)
+## 5. Configuración
 
-En `sites/<tu-sitio>/site_config.json` añade (o en Variables de Entorno en Railway con el mismo nombre):
+**Railway (recomendado):** En el servicio web → Variables, añade:
+- `STRIPE_SECRET_KEY` = `sk_test_...` (o `sk_live_...`)
+- `STRIPE_PUBLISHABLE_KEY` = `pk_test_...` (o `pk_live_...`)
+- Opcional: `STRIPE_WEBHOOK_SECRET`, `STRIPE_MODE_OF_PAYMENT`, `STRIPE_PAID_TO_ACCOUNT`
+
+**Alternativa (site_config.json):** En `sites/<tu-sitio>/site_config.json`:
 
 ```json
 {
