@@ -95,4 +95,21 @@ Si en el futuro quieres tener los overrides Vue dentro del submódulo edtools_co
 
 ---
 
+## 5. 404 en /student-portal o /student-portal/fees tras deploy
+
+Si tras un deploy en Railway las rutas del student-portal (p. ej. `/student-portal/fees`) devuelven **404**:
+
+1. **Limpiar caché de 404**  
+   Frappe guarda en caché las URLs que devolvieron 404. Tras un deploy, esa caché puede seguir activa.  
+   - Opción A: En el navegador o con curl, llama una vez al método:
+     ```
+     GET https://cucuniversity.edtools.co/api/method/edtools_core.website_resolver.clear_student_portal_404_cache
+     ```
+   - Opción B: En Railway (shell del servicio web): `bench clear-cache` o `bench --site cucuniversity.edtools.co clear-cache`.
+
+2. **Comprobar que el template existe**  
+   En el contenedor, el build del frontend de Education debe generar `apps/education/education/www/student-portal.html`. Si ese archivo no existe, el resolver devolverá "student-portal" pero no habrá template y seguirá el 404. En ese caso revisar que el paso de build del Education frontend en el Dockerfile termine bien y que `education-frontend-overrides` no rompa el build (p. ej. errores en Vue que hagan fallar `yarn build`).
+
+---
+
 *Última actualización: Feb 2026*
