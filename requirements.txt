@@ -1,1 +1,2 @@
 frappe
+stripe>=5.0,<11
