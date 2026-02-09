@@ -28,29 +28,6 @@ def _patch_education_api():
 		pass
 
 
-def _patch_education_billing():
-	"""Si education.education.billing no existe (p. ej. Education v15), inyectar el de edtools_core."""
-	import sys
-	import types
-	try:
-		import education.education.billing as _  # noqa: F401
-		return
-	except ModuleNotFoundError:
-		pass
-	from edtools_core import billing as edtools_billing
-	billing = types.ModuleType("education.education.billing")
-	billing.get_payment_options = edtools_billing.get_payment_options
-	billing.handle_payment_success = edtools_billing.handle_payment_success
-	billing.handle_payment_failure = edtools_billing.handle_payment_failure
-	sys.modules["education.education.billing"] = billing
-	try:
-		import education.education as edu_edu
-		edu_edu.billing = billing
-	except Exception:
-		pass
-
-
 _patch_portal_redirect()
 _patch_student_portal_csrf()
 _patch_education_api()
-_patch_education_billing()
