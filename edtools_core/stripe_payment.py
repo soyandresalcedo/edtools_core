@@ -6,6 +6,66 @@ import json
 import os
 import frappe
 from frappe import _
+from frappe.utils import flt
+
+
+def _get_program_for_fee(fee_name):
+	"""Get program name from Fee -> Fee Schedule -> program."""
+	try:
+		fs = frappe.db.get_value("Fees", fee_name, "fee_schedule")
+		if fs:
+			return frappe.db.get_value("Fee Schedule", fs, "program")
+	except Exception:
+		pass
+	return None
+
+
+def get_fee_cascade_breakdown(student_name, pay_amount, starting_fee_name):
+	"""
+	Compute how a single payment amount will be allocated across the student's fees (cascade).
+	Returns a list of dicts: { "fee_name", "program", "outstanding_amount", "allocated_amount", "currency" }.
+	Order: starting fee first, then others by due_date asc (oldest first).
+	"""
+	fees_with_outstanding = frappe.db.get_all(
+		"Fees",
+		filters={"student": student_name, "docstatus": 1},
+		fields=["name", "due_date", "fee_schedule", "outstanding_amount", "currency"],
+		order_by="due_date asc",
+		ignore_permissions=True,
+	)
+	# Only fees that have outstanding > 0
+	fees = [f for f in fees_with_outstanding if flt(f.get("outstanding_amount") or 0) > 0]
+	if not fees:
+		return []
+
+	# Put starting fee first if present
+	if starting_fee_name:
+		rest = [f for f in fees if f["name"] != starting_fee_name]
+		start = [f for f in fees if f["name"] == starting_fee_name]
+		fees = start + rest
+
+	currency = (fees[0].get("currency") or "USD").strip()
+	breakdown = []
+	remaining = flt(pay_amount)
+
+	for f in fees:
+		if remaining <= 0:
+			break
+		outstanding = flt(f.get("outstanding_amount") or 0)
+		if outstanding <= 0:
+			continue
+		allocated = min(outstanding, remaining)
+		program = _get_program_for_fee(f["name"]) or ""
+		breakdown.append({
+			"fee_name": f["name"],
+			"program": program,
+			"outstanding_amount": outstanding,
+			"allocated_amount": round(allocated, 2),
+			"currency": f.get("currency") or currency,
+		})
+		remaining -= allocated
+
+	return breakdown
 
 
 def _get(key, env_key=None, default=None):
@@ -85,7 +145,6 @@ def create_payment_intent(fee_name, student_name=None, amount=None):
 	if fee.student != student:
 		frappe.throw(_("This fee does not belong to you."), frappe.PermissionError)
 
-	from frappe.utils import flt
 	outstanding = flt(fee.outstanding_amount or 0)
 	if outstanding <= 0:
 		frappe.throw(_("This fee has no outstanding amount to pay."))
@@ -94,6 +153,7 @@ def create_payment_intent(fee_name, student_name=None, amount=None):
 	if pay_amount <= 0:
 		frappe.throw(_("Amount to pay must be greater than zero."))
 	# Allow amount >= outstanding for cascade payments: one charge, then script allocates across fees.
+	cascade_breakdown = get_fee_cascade_breakdown(student, pay_amount, fee_name)
 
 	# Stripe amounts in cents (smallest currency unit)
 	currency = (fee.currency or "USD").strip().upper()
@@ -127,6 +187,7 @@ def create_payment_intent(fee_name, student_name=None, amount=None):
 		"payment_intent_id": pi.id,
 		"amount_display": f"{pay_amount:.2f}",
 		"currency": currency,
+		"cascade_breakdown": cascade_breakdown,
 	}
 
 
