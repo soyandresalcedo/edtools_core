@@ -20,11 +20,11 @@ def _get_program_for_fee(fee_name):
 	return None
 
 
-def get_fee_cascade_breakdown(student_name, pay_amount, starting_fee_name):
+def get_fee_cascade_breakdown(student_name, pay_amount, starting_fee_name=None):
 	"""
 	Compute how a single payment amount will be allocated across the student's fees (cascade).
 	Returns a list of dicts: { "fee_name", "program", "outstanding_amount", "allocated_amount", "currency" }.
-	Order: starting fee first, then others by due_date asc (oldest first).
+	Order: by due_date asc (oldest first), so overdue fees are paid first regardless of which fee was clicked.
 	"""
 	fees_with_outstanding = frappe.db.get_all(
 		"Fees",
@@ -33,16 +33,10 @@ def get_fee_cascade_breakdown(student_name, pay_amount, starting_fee_name):
 		order_by="due_date asc",
 		ignore_permissions=True,
 	)
-	# Only fees that have outstanding > 0
+	# Only fees that have outstanding > 0; order is already due_date asc (vencidas primero)
 	fees = [f for f in fees_with_outstanding if flt(f.get("outstanding_amount") or 0) > 0]
 	if not fees:
 		return []
-
-	# Put starting fee first if present
-	if starting_fee_name:
-		rest = [f for f in fees if f["name"] != starting_fee_name]
-		start = [f for f in fees if f["name"] == starting_fee_name]
-		fees = start + rest
 
 	currency = (fees[0].get("currency") or "USD").strip()
 	breakdown = []
