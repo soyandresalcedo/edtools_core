@@ -245,8 +245,22 @@ def _get_invoices_from_sales_invoice(student):
 		return None
 
 
+def _fee_status(outstanding_amount, due_date):
+	"""Estado alineado con la lista de Fees en admin: Overdue, Unpaid, Paid, Submitted."""
+	from frappe.utils import flt, getdate, today
+	outstanding = flt(outstanding_amount or 0)
+	if outstanding <= 0:
+		return "Submitted" if outstanding < 0 else "Paid"
+	# outstanding > 0
+	due = getdate(due_date) if due_date else None
+	if due is not None and due < getdate(today()):
+		return "Overdue"
+	return "Unpaid"
+
+
 def _get_invoices_from_fees(student):
-	"""Lista desde DocType Fees (Education). Devuelve lista de dicts con misma forma que Sales Invoice."""
+	"""Lista desde DocType Fees (Education). Devuelve lista de dicts con misma forma que Sales Invoice.
+	Status alineado con admin: Overdue (vencida), Unpaid (pendiente), Paid, Submitted (sobrante)."""
 	try:
 		rows = frappe.db.get_list(
 			"Fees",
@@ -268,7 +282,7 @@ def _get_invoices_from_fees(student):
 	for r in rows:
 		out.append({
 			"name": r.get("name"),
-			"status": "Paid" if (r.get("outstanding_amount") or 0) == 0 else "Unpaid",
+			"status": _fee_status(r.get("outstanding_amount"), r.get("due_date")),
 			"due_date": r.get("due_date"),
 			"fee_schedule": r.get("fee_schedule"),
 			"outstanding_amount": r.get("outstanding_amount"),
@@ -305,7 +319,7 @@ def get_student_invoices(student):
 			row["description"] = ""
 		symbol = _get_currency_symbol(si.get("currency") or "USD")
 		row["amount"] = symbol + " " + str(si.get("outstanding_amount") or 0)
-		if si.get("status") == "Paid":
+		if si.get("status") in ("Paid", "Submitted"):
 			row["amount"] = symbol + " " + str(si.get("grand_total") or 0)
 			row["payment_date"] = (
 				_get_posting_date_from_payment_entry(si.get("name"))
