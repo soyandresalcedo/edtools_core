@@ -58,10 +58,10 @@ def _get_current_student_name():
 
 
 @frappe.whitelist()
-def create_payment_intent(fee_name, student_name=None):
+def create_payment_intent(fee_name, student_name=None, amount=None):
 	"""
-	Create a Stripe PaymentIntent for the given Fee (outstanding amount).
-	Called from Student Portal when user clicks Pay Now.
+	Create a Stripe PaymentIntent for the given Fee.
+	If amount is provided (partial payment), that amount is charged; otherwise full outstanding.
 	Returns: { "client_secret": "...", "publishable_key": "pk_test_...", "payment_intent_id": "pi_..." }
 	"""
 	secret = _get_stripe_secret_key()
@@ -90,12 +90,17 @@ def create_payment_intent(fee_name, student_name=None):
 	if outstanding <= 0:
 		frappe.throw(_("This fee has no outstanding amount to pay."))
 
+	pay_amount = flt(amount) if amount is not None else outstanding
+	if pay_amount <= 0:
+		frappe.throw(_("Amount to pay must be greater than zero."))
+	if pay_amount > outstanding:
+		frappe.throw(_("Amount to pay cannot exceed outstanding amount ({0}).").format(outstanding))
+
 	# Stripe amounts in cents (smallest currency unit)
 	currency = (fee.currency or "USD").strip().upper()
 	if currency != "USD":
-		# Stripe accepts many currencies; use lowercase for API
 		currency = currency.lower()
-	amount_cents = int(round(outstanding * 100))
+	amount_cents = int(round(pay_amount * 100))
 	if amount_cents < 50:
 		frappe.throw(_("Amount too small for Stripe (minimum 0.50)."))
 
@@ -121,7 +126,7 @@ def create_payment_intent(fee_name, student_name=None):
 		"client_secret": pi.client_secret,
 		"publishable_key": publishable or "",
 		"payment_intent_id": pi.id,
-		"amount_display": f"{outstanding:.2f}",
+		"amount_display": f"{pay_amount:.2f}",
 		"currency": currency,
 	}
 
