@@ -299,6 +299,10 @@ def get_student_invoices(student):
 			"program": _get_program_from_fee_schedule(si.get("fee_schedule")),
 			"invoice": si.get("name"),
 		}
+		if not from_sales_invoice:
+			row["description"] = _get_fee_description(si.get("name"))
+		else:
+			row["description"] = ""
 		symbol = _get_currency_symbol(si.get("currency") or "USD")
 		row["amount"] = symbol + " " + str(si.get("outstanding_amount") or 0)
 		if si.get("status") == "Paid":
@@ -384,6 +388,23 @@ def _get_program_from_fee_schedule(fee_schedule):
 	except Exception:
 		pass
 	return None
+
+
+def _get_fee_description(fee_name):
+	"""Description from Fee's components (Fee Component). Joins multiple with ', '."""
+	if not fee_name:
+		return ""
+	try:
+		rows = frappe.db.get_all(
+			"Fee Component",
+			filters={"parent": fee_name, "parenttype": "Fees"},
+			fields=["description"],
+			order_by="idx asc",
+		)
+		parts = [str(r.get("description") or "").strip() for r in rows if r.get("description")]
+		return ", ".join(parts) if parts else ""
+	except Exception:
+		return ""
 
 
 @frappe.whitelist()

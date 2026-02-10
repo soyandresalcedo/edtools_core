@@ -20,6 +20,21 @@ def _get_program_for_fee(fee_name):
 	return None
 
 
+def _get_fee_description(fee_name):
+	"""Get description from Fee's components table (Fee Component). Joins multiple with ', '."""
+	try:
+		rows = frappe.db.get_all(
+			"Fee Component",
+			filters={"parent": fee_name, "parenttype": "Fees"},
+			fields=["description"],
+			order_by="idx asc",
+		)
+		parts = [str(r.get("description") or "").strip() for r in rows if r.get("description")]
+		return ", ".join(parts) if parts else ""
+	except Exception:
+		return ""
+
+
 def get_fee_cascade_breakdown(student_name, pay_amount, starting_fee_name=None):
 	"""
 	Compute how a single payment amount will be allocated across the student's fees (cascade).
@@ -53,6 +68,7 @@ def get_fee_cascade_breakdown(student_name, pay_amount, starting_fee_name=None):
 		breakdown.append({
 			"fee_name": f["name"],
 			"program": program,
+			"description": _get_fee_description(f["name"]),
 			"outstanding_amount": outstanding,
 			"allocated_amount": round(allocated, 2),
 			"currency": f.get("currency") or currency,
