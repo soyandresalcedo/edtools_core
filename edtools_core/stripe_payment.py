@@ -93,8 +93,7 @@ def create_payment_intent(fee_name, student_name=None, amount=None):
 	pay_amount = flt(amount) if amount is not None else outstanding
 	if pay_amount <= 0:
 		frappe.throw(_("Amount to pay must be greater than zero."))
-	if pay_amount > outstanding:
-		frappe.throw(_("Amount to pay cannot exceed outstanding amount ({0}).").format(outstanding))
+	# Allow amount >= outstanding for cascade payments: one charge, then script allocates across fees.
 
 	# Stripe amounts in cents (smallest currency unit)
 	currency = (fee.currency or "USD").strip().upper()
