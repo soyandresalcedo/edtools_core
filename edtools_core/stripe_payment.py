@@ -207,15 +207,29 @@ def _create_payment_entry_for_stripe(student_name, payment_intent_id, paid_amoun
 	across multiple Fees (one reference row per fee with allocated_amount).
 	Idempotent: if a PE already exists with reference_no = payment_intent_id, skip.
 	"""
+	# DEBUG: entrada
+	frappe.log_error(
+		title="Stripe PE DEBUG _create_payment_entry_for_stripe entry",
+		message=f"student_name={student_name!r} payment_intent_id={payment_intent_id!r} paid_amount={paid_amount} starting_fee_name={starting_fee_name!r}",
+	)
+
 	existing = frappe.db.get_all(
 		"Payment Entry",
 		filters={"reference_no": payment_intent_id, "docstatus": 1},
 		limit=1,
 	)
 	if existing:
+		frappe.log_error(
+			title="Stripe PE DEBUG idempotent skip",
+			message=f"Ya existe Payment Entry {existing[0].name} con reference_no={payment_intent_id!r}",
+		)
 		return existing[0].name
 
 	breakdown = get_fee_cascade_breakdown(student_name, paid_amount, starting_fee_name)
+	frappe.log_error(
+		title="Stripe PE DEBUG cascade breakdown",
+		message=f"breakdown len={len(breakdown) if breakdown else 0} items={json.dumps(breakdown, default=str) if breakdown else '[]'}",
+	)
 	if not breakdown:
 		frappe.log_error(
 			title="Stripe webhook: no cascade breakdown",
@@ -269,8 +283,18 @@ def _create_payment_entry_for_stripe(student_name, payment_intent_id, paid_amoun
 			"allocated_amount": row["allocated_amount"],
 		})
 
+	# DEBUG: antes de insert
+	frappe.log_error(
+		title="Stripe PE DEBUG before insert",
+		message=(
+			f"party={pe.party} company={pe.company} paid_from={pe.paid_from} paid_to={pe.paid_to} "
+			f"paid_amount={pe.paid_amount} references_count={len(pe.references)}"
+		),
+	)
 	pe.insert(ignore_permissions=True)
+	frappe.log_error(title="Stripe PE DEBUG after insert", message=f"PE name={pe.name}")
 	pe.submit(ignore_permissions=True)
+	frappe.log_error(title="Stripe PE DEBUG after submit", message=f"PE name={pe.name} docstatus={pe.docstatus}")
 	frappe.db.commit()
 	return pe.name
 
@@ -310,6 +334,17 @@ def stripe_webhook():
 		student_name = metadata.get("student_name")
 		amount_received = (pi.get("amount_received") or pi.get("amount")) / 100.0  # cents to units
 
+		# DEBUG: ver en Error Log que el webhook llegó y qué metadata trae
+		frappe.log_error(
+			title="Stripe webhook DEBUG received",
+			message=(
+				f"event_id={event.get('id')} type={event.get('type')}\n"
+				f"payment_intent_id={payment_intent_id}\n"
+				f"metadata={json.dumps(metadata)}\n"
+				f"fee_name={fee_name!r} student_name={student_name!r} amount_received={amount_received}"
+			),
+		)
+
 		if not student_name or not fee_name:
 			frappe.log_error(
 				title="Stripe webhook missing metadata",
@@ -331,6 +366,12 @@ def stripe_webhook():
 				)
 				# Return 200 so Stripe does not retry indefinitely; error is logged for manual fix
 				frappe.db.rollback()
+	else:
+		# DEBUG: evento no es payment_intent.succeeded
+		frappe.log_error(
+			title="Stripe webhook DEBUG event ignored",
+			message=f"event_id={event.get('id')} type={event.get('type')} (solo procesamos payment_intent.succeeded)",
+		)
 
 	frappe.local.response["http_status_code"] = 200
 	return "OK"
