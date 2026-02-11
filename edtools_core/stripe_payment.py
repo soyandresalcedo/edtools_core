@@ -201,9 +201,10 @@ def create_payment_intent(fee_name, student_name=None, amount=None):
 	}
 
 
-def _create_payment_entry_for_stripe(fee_name, payment_intent_id, paid_amount):
+def _create_payment_entry_for_stripe(student_name, payment_intent_id, paid_amount, starting_fee_name=None):
 	"""
-	Create and submit a Payment Entry for the Fee, linked to this Stripe payment.
+	Create and submit a Payment Entry for the Stripe payment, with cascade allocation
+	across multiple Fees (one reference row per fee with allocated_amount).
 	Idempotent: if a PE already exists with reference_no = payment_intent_id, skip.
 	"""
 	existing = frappe.db.get_all(
@@ -214,18 +215,33 @@ def _create_payment_entry_for_stripe(fee_name, payment_intent_id, paid_amount):
 	if existing:
 		return existing[0].name
 
-	fee = frappe.get_doc("Fees", fee_name)
+	breakdown = get_fee_cascade_breakdown(student_name, paid_amount, starting_fee_name)
+	if not breakdown:
+		frappe.log_error(
+			title="Stripe webhook: no cascade breakdown",
+			message=f"student_name={student_name} paid_amount={paid_amount} starting_fee_name={starting_fee_name}",
+		)
+		frappe.throw(_("No fees to allocate for this payment."))
+
+	# Use first fee for company, receivable_account, party_name
+	first_fee_name = breakdown[0]["fee_name"]
+	fee = frappe.get_doc("Fees", first_fee_name)
 	if not fee.receivable_account:
 		fee.run_method("set_missing_accounts_and_fields")
 
 	paid_to = _get_stripe_paid_to_account()
 	mode_of_payment = _get_stripe_mode_of_payment()
 	if not paid_to:
-		# Fallback: try first account linked to mode of payment
-		mop = frappe.db.get_value("Mode of Payment Account", {"parent": mode_of_payment, "company": fee.company}, "default_account")
+		mop = frappe.db.get_value(
+			"Mode of Payment Account",
+			{"parent": mode_of_payment, "company": fee.company},
+			"default_account",
+		)
 		paid_to = mop
 	if not paid_to:
-		frappe.throw(_("Stripe paid_to account not configured. Set stripe_paid_to_account or create Mode of Payment '{0}'.").format(mode_of_payment))
+		frappe.throw(_(
+			"Stripe paid_to account not configured. Set stripe_paid_to_account or create Mode of Payment '{0}'."
+		).format(mode_of_payment))
 
 	from frappe.utils import nowdate
 	pe = frappe.new_doc("Payment Entry")
@@ -245,11 +261,14 @@ def _create_payment_entry_for_stripe(fee_name, payment_intent_id, paid_amount):
 	pe.reference_no = payment_intent_id
 	pe.reference_date = nowdate()
 	pe.remarks = f"Stripe payment: {payment_intent_id}"
-	pe.append("references", {
-		"reference_doctype": "Fees",
-		"reference_name": fee.name,
-		"allocated_amount": paid_amount,
-	})
+
+	for row in breakdown:
+		pe.append("references", {
+			"reference_doctype": "Fees",
+			"reference_name": row["fee_name"],
+			"allocated_amount": row["allocated_amount"],
+		})
+
 	pe.insert(ignore_permissions=True)
 	pe.submit(ignore_permissions=True)
 	frappe.db.commit()
@@ -288,22 +307,30 @@ def stripe_webhook():
 		payment_intent_id = pi["id"]
 		metadata = pi.get("metadata") or {}
 		fee_name = metadata.get("fee_name")
+		student_name = metadata.get("student_name")
 		amount_received = (pi.get("amount_received") or pi.get("amount")) / 100.0  # cents to units
 
-		# Paso 1: solo registrar en log; no crear Payment Entry todavía.
-		# Cuando quieras activar la creación del PE, descomenta el bloque siguiente.
-		frappe.log_error(
-			title="Stripe webhook (solo log)",
-			message=f"payment_intent_id={payment_intent_id} fee_name={fee_name} amount={amount_received}",
-		)
-		# if not fee_name:
-		# 	frappe.log_error(title="Stripe webhook missing fee_name", message=json.dumps(pi))
-		# else:
-		# 	try:
-		# 		pe_name = _create_payment_entry_for_stripe(fee_name, payment_intent_id, amount_received)
-		# 		frappe.log_error(title="Stripe webhook success", message=f"Payment Entry {pe_name} for Fee {fee_name}")
-		# 	except Exception:
-		# 		frappe.log_error(title="Stripe webhook create PE failed", message=frappe.get_traceback())
+		if not student_name or not fee_name:
+			frappe.log_error(
+				title="Stripe webhook missing metadata",
+				message=f"payment_intent_id={payment_intent_id} metadata={json.dumps(metadata)}",
+			)
+		else:
+			try:
+				pe_name = _create_payment_entry_for_stripe(
+					student_name, payment_intent_id, amount_received, fee_name
+				)
+				frappe.log_error(
+					title="Stripe webhook success",
+					message=f"Payment Entry {pe_name} for student {student_name} amount={amount_received}",
+				)
+			except Exception as e:
+				frappe.log_error(
+					title="Stripe webhook create PE failed",
+					message=frappe.get_traceback(),
+				)
+				# Return 200 so Stripe does not retry indefinitely; error is logged for manual fix
+				frappe.db.rollback()
 
 	frappe.local.response["http_status_code"] = 200
 	return "OK"
