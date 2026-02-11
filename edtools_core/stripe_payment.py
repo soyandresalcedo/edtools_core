@@ -212,6 +212,7 @@ def _create_payment_entry_for_stripe(student_name, payment_intent_id, paid_amoun
 		title="Stripe PE DEBUG _create_payment_entry_for_stripe entry",
 		message=f"student_name={student_name!r} payment_intent_id={payment_intent_id!r} paid_amount={paid_amount} starting_fee_name={starting_fee_name!r}",
 	)
+	frappe.db.commit()
 
 	existing = frappe.db.get_all(
 		"Payment Entry",
@@ -223,6 +224,7 @@ def _create_payment_entry_for_stripe(student_name, payment_intent_id, paid_amoun
 			title="Stripe PE DEBUG idempotent skip",
 			message=f"Ya existe Payment Entry {existing[0].name} con reference_no={payment_intent_id!r}",
 		)
+		frappe.db.commit()
 		return existing[0].name
 
 	breakdown = get_fee_cascade_breakdown(student_name, paid_amount, starting_fee_name)
@@ -230,6 +232,7 @@ def _create_payment_entry_for_stripe(student_name, payment_intent_id, paid_amoun
 		title="Stripe PE DEBUG cascade breakdown",
 		message=f"breakdown len={len(breakdown) if breakdown else 0} items={json.dumps(breakdown, default=str) if breakdown else '[]'}",
 	)
+	frappe.db.commit()
 	if not breakdown:
 		frappe.log_error(
 			title="Stripe webhook: no cascade breakdown",
@@ -291,8 +294,10 @@ def _create_payment_entry_for_stripe(student_name, payment_intent_id, paid_amoun
 			f"paid_amount={pe.paid_amount} references_count={len(pe.references)}"
 		),
 	)
+	frappe.db.commit()
 	pe.insert(ignore_permissions=True)
 	frappe.log_error(title="Stripe PE DEBUG after insert", message=f"PE name={pe.name}")
+	frappe.db.commit()
 	pe.submit(ignore_permissions=True)
 	frappe.log_error(title="Stripe PE DEBUG after submit", message=f"PE name={pe.name} docstatus={pe.docstatus}")
 	frappe.db.commit()
@@ -306,72 +311,99 @@ def stripe_webhook():
 	URL: https://cucuniversity.edtools.co/api/method/edtools_core.stripe_payment.stripe_webhook
 	Events: payment_intent.succeeded
 	"""
-	payload = frappe.request.get_data(as_text=True)
-	sig = frappe.get_request_header("Stripe-Signature")
-	secret = _get_stripe_webhook_secret()
-	if not secret:
-		frappe.local.response["http_status_code"] = 500
-		return "Webhook secret not configured"
+	try:
+		# Primera línea: confirmar que la petición llegó (buscar "Stripe webhook ENTRY" en Error Log)
+		frappe.log_error(
+			title="Stripe webhook ENTRY",
+			message=f"Webhook endpoint called. Site: {getattr(frappe.local, 'site', None)}",
+		)
+		frappe.db.commit()
+	except Exception:
+		pass  # si falla el log, seguir para no ocultar el error real
 
 	try:
+		payload = frappe.request.get_data(as_text=True)
+		sig = frappe.get_request_header("Stripe-Signature")
+		secret = _get_stripe_webhook_secret()
+		if not secret:
+			frappe.log_error(title="Stripe webhook no secret", message="stripe_webhook_secret not configured")
+			frappe.local.response["http_status_code"] = 500
+			return "Webhook secret not configured"
+
 		import stripe
 		stripe.api_key = _get_stripe_secret_key()
 		event = stripe.Webhook.construct_event(payload, sig, secret)
+		# Ejecutar el resto como Administrator: el webhook llega como Guest y no tiene permiso para crear Payment Entry
+		frappe.set_user("Administrator")
 	except ValueError as e:
 		frappe.log_error(title="Stripe webhook payload error", message=str(e))
+		frappe.db.commit()
 		frappe.local.response["http_status_code"] = 400
 		return "Invalid payload"
 	except Exception as e:
-		frappe.log_error(title="Stripe webhook signature error", message=str(e))
+		frappe.log_error(title="Stripe webhook signature error", message=frappe.get_traceback())
+		frappe.db.commit()
 		frappe.local.response["http_status_code"] = 400
 		return "Invalid signature"
 
-	if event["type"] == "payment_intent.succeeded":
-		pi = event["data"]["object"]
-		payment_intent_id = pi["id"]
-		metadata = pi.get("metadata") or {}
-		fee_name = metadata.get("fee_name")
-		student_name = metadata.get("student_name")
-		amount_received = (pi.get("amount_received") or pi.get("amount")) / 100.0  # cents to units
+	try:
+		if event["type"] == "payment_intent.succeeded":
+			pi = event["data"]["object"]
+			payment_intent_id = pi["id"]
+			metadata = pi.get("metadata") or {}
+			fee_name = metadata.get("fee_name")
+			student_name = metadata.get("student_name")
+			amount_received = (pi.get("amount_received") or pi.get("amount")) / 100.0  # cents to units
 
-		# DEBUG: ver en Error Log que el webhook llegó y qué metadata trae
-		frappe.log_error(
-			title="Stripe webhook DEBUG received",
-			message=(
-				f"event_id={event.get('id')} type={event.get('type')}\n"
-				f"payment_intent_id={payment_intent_id}\n"
-				f"metadata={json.dumps(metadata)}\n"
-				f"fee_name={fee_name!r} student_name={student_name!r} amount_received={amount_received}"
-			),
-		)
-
-		if not student_name or not fee_name:
+			# DEBUG: ver en Error Log que el webhook llegó y qué metadata trae
 			frappe.log_error(
-				title="Stripe webhook missing metadata",
-				message=f"payment_intent_id={payment_intent_id} metadata={json.dumps(metadata)}",
+				title="Stripe webhook DEBUG received",
+				message=(
+					f"event_id={event.get('id')} type={event.get('type')}\n"
+					f"payment_intent_id={payment_intent_id}\n"
+					f"metadata={json.dumps(metadata)}\n"
+					f"fee_name={fee_name!r} student_name={student_name!r} amount_received={amount_received}"
+				),
 			)
-		else:
-			try:
-				pe_name = _create_payment_entry_for_stripe(
-					student_name, payment_intent_id, amount_received, fee_name
-				)
-				frappe.log_error(
-					title="Stripe webhook success",
-					message=f"Payment Entry {pe_name} for student {student_name} amount={amount_received}",
-				)
-			except Exception as e:
-				frappe.log_error(
-					title="Stripe webhook create PE failed",
-					message=frappe.get_traceback(),
-				)
-				# Return 200 so Stripe does not retry indefinitely; error is logged for manual fix
-				frappe.db.rollback()
-	else:
-		# DEBUG: evento no es payment_intent.succeeded
-		frappe.log_error(
-			title="Stripe webhook DEBUG event ignored",
-			message=f"event_id={event.get('id')} type={event.get('type')} (solo procesamos payment_intent.succeeded)",
-		)
+			frappe.db.commit()
 
-	frappe.local.response["http_status_code"] = 200
-	return "OK"
+			if not student_name or not fee_name:
+				frappe.log_error(
+					title="Stripe webhook missing metadata",
+					message=f"payment_intent_id={payment_intent_id} metadata={json.dumps(metadata)}",
+				)
+				frappe.db.commit()
+			else:
+				try:
+					pe_name = _create_payment_entry_for_stripe(
+						student_name, payment_intent_id, amount_received, fee_name
+					)
+					frappe.log_error(
+						title="Stripe webhook success",
+						message=f"Payment Entry {pe_name} for student {student_name} amount={amount_received}",
+					)
+					frappe.db.commit()
+				except Exception:
+					frappe.log_error(
+						title="Stripe webhook create PE failed",
+						message=frappe.get_traceback(),
+					)
+					frappe.db.commit()
+					frappe.db.rollback()
+		else:
+			frappe.log_error(
+				title="Stripe webhook DEBUG event ignored",
+				message=f"event_id={event.get('id')} type={event.get('type')} (solo procesamos payment_intent.succeeded)",
+			)
+			frappe.db.commit()
+
+		frappe.local.response["http_status_code"] = 200
+		return "OK"
+	except Exception:
+		frappe.log_error(
+			title="Stripe webhook UNHANDLED",
+			message=frappe.get_traceback(),
+		)
+		frappe.db.commit()
+		frappe.local.response["http_status_code"] = 500
+		return "Internal error"
