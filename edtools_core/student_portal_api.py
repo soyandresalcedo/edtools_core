@@ -39,8 +39,130 @@ def patch_education_api():
 			edu_api.get_student_invoices = get_student_invoices
 		# get_student_attendance: siempre usar nuestra versión (validación + ignore_permissions)
 		edu_api.get_student_attendance = get_student_attendance
+		if not hasattr(edu_api, "get_student_curriculum"):
+			edu_api.get_student_curriculum = get_student_curriculum
 	except Exception:
 		pass
+
+
+@frappe.whitelist()
+def get_student_curriculum(student, program_enrollment=None):
+	"""Devuelve el pensum del estudiante para un Program Enrollment: lista de cursos con estado (completed, in_progress, upcoming)."""
+	if not student:
+		return {}
+	my_student = _get_current_user_student_name()
+	if not my_student or my_student != student:
+		return {}
+	# Obtener Program Enrollment(s)
+	pe_list = frappe.db.get_list(
+		"Program Enrollment",
+		filters={"student": student, "docstatus": 1},
+		fields=["name", "program", "enrollment_date", "academic_year"],
+		order_by="modified desc",
+		ignore_permissions=True,
+	)
+	if not pe_list:
+		return {"program_name": None, "program_enrollment": None, "courses": [], "summary": {"total": 0, "completed": 0, "in_progress": 0, "upcoming": 0}}
+	# Elegir el enrollment
+	if program_enrollment:
+		pe = next((p for p in pe_list if p["name"] == program_enrollment), None)
+		if not pe:
+			pe = pe_list[0]
+	else:
+		pe = pe_list[0]
+	program_name = pe.get("program")
+	if not program_name:
+		return {"program_name": None, "program_enrollment": pe["name"], "courses": [], "summary": {"total": 0, "completed": 0, "in_progress": 0, "upcoming": 0}}
+	# Cursos del programa (Program Course) en orden
+	program_doc = frappe.get_doc("Program", program_name)
+	if not program_doc or not getattr(program_doc, "courses", None):
+		return {
+			"program_name": program_name,
+			"program_enrollment": pe["name"],
+			"enrollment_date": pe.get("enrollment_date"),
+			"courses": [],
+			"summary": {"total": 0, "completed": 0, "in_progress": 0, "upcoming": 0},
+		}
+	# Assessment Results del estudiante en este programa (para marcar completed)
+	assessment_results = frappe.db.get_list(
+		"Assessment Result",
+		filters={"student": student, "program": program_name, "docstatus": 1},
+		fields=["course", "grade", "total_score", "maximum_score", "academic_term"],
+		ignore_permissions=True,
+	)
+	results_by_course = {}
+	for ar in assessment_results or []:
+		c = ar.get("course")
+		if c and c not in results_by_course:
+			results_by_course[c] = ar
+	# Course Enrollments del estudiante (para in_progress)
+	ce_meta = frappe.get_meta("Course Enrollment")
+	has_custom_term = ce_meta.has_field("custom_academic_term")
+	ce_fields = ["course", "enrollment_date", "program_enrollment"]
+	if has_custom_term:
+		ce_fields.append("custom_academic_term")
+	ce_list = frappe.db.get_list(
+		"Course Enrollment",
+		filters={"student": student, "docstatus": 1},
+		fields=ce_fields,
+		ignore_permissions=True,
+	)
+	enrollments_by_course = {}
+	for ce in ce_list or []:
+		c = ce.get("course")
+		if c and c not in enrollments_by_course:
+			enrollments_by_course[c] = ce
+	courses_out = []
+	summary = {"completed": 0, "in_progress": 0, "upcoming": 0}
+	for row in program_doc.courses:
+		course_id = row.get("course")
+		course_name = row.get("course_name") or course_id
+		required = 1 if row.get("required") else 0
+		ar = results_by_course.get(course_id)
+		ce = enrollments_by_course.get(course_id)
+		if ar:
+			status = "completed"
+			summary["completed"] += 1
+			academic_term = ar.get("academic_term")
+			grade = ar.get("grade")
+			total_score = ar.get("total_score")
+			maximum_score = ar.get("maximum_score")
+			enrollment_date = ce.get("enrollment_date") if ce else None
+		elif ce:
+			status = "in_progress"
+			summary["in_progress"] += 1
+			academic_term = ce.get("custom_academic_term") if has_custom_term else None
+			grade = None
+			total_score = None
+			maximum_score = None
+			enrollment_date = ce.get("enrollment_date")
+		else:
+			status = "upcoming"
+			summary["upcoming"] += 1
+			academic_term = None
+			grade = None
+			total_score = None
+			maximum_score = None
+			enrollment_date = None
+		courses_out.append({
+			"course": course_id,
+			"course_name": course_name,
+			"required": required,
+			"status": status,
+			"grade": grade,
+			"total_score": total_score,
+			"maximum_score": maximum_score,
+			"academic_term": academic_term,
+			"enrollment_date": enrollment_date,
+		})
+	summary["total"] = len(courses_out)
+	return {
+		"program_name": program_name,
+		"program_enrollment": pe["name"],
+		"enrollment_date": pe.get("enrollment_date"),
+		"courses": courses_out,
+		"summary": summary,
+	}
 
 
 @frappe.whitelist()
