@@ -167,9 +167,10 @@ doc_events = {
 # Overriding Methods
 # ------------------------------
 #
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "edtools_core.event.get_events"
-# }
+# Office 365: Microsoft no envía email/email_verified en id_token para cuentas organizacionales.
+override_whitelisted_methods = {
+	"frappe.integrations.oauth2_logins.login_via_office365": "edtools_core.oauth_office365.login_via_office365",
+}
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,

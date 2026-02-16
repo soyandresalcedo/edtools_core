@@ -28,16 +28,6 @@ def _patch_education_api():
 		pass
 
 
-def _patch_office365_oauth():
-	"""Corrige login OAuth Office 365: Microsoft no envía email/email_verified para cuentas organizacionales."""
-	try:
-		from edtools_core.oauth_patches import patch_office365_oauth
-		patch_office365_oauth()
-	except Exception:
-		pass
-
-
 _patch_portal_redirect()
 _patch_student_portal_csrf()
 _patch_education_api()
-_patch_office365_oauth()
