@@ -1,2 +1,3 @@
 edtools_core.patches.student_portal_read_permissions
 edtools_core.patches.after_edit_profile_redirect
+edtools_core.patches.add_fees_components_description_field

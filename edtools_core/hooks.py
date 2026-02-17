@@ -135,6 +135,9 @@ doc_events = {
 	},
 	"Student": {
 		"before_save": "edtools_core.validations.student.track_status_change"
+	},
+	"Fees": {
+		"before_save": "edtools_core.fees_events.update_components_description"
 	}
 }
 
