@@ -1468,67 +1468,93 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
     """
     Genera los registros para TODO el grupo.
     CORREGIDO: Agrega la tabla obligatoria 'student_groups' al Fee Schedule.
+    Normaliza fechas, company y valida Program Enrollment para evitar fallos silenciosos.
     """
     import json
-    
-    # 1. DECODIFICAR Y VALIDAR
-    if isinstance(components, str): components = json.loads(components)
-    if isinstance(schedule_data, str): schedule_data = json.loads(schedule_data)
-        
-    if not components: frappe.throw("❌ ERROR: Lista de componentes vacía.")
-    if not schedule_data: frappe.throw("❌ ERROR: Plan de pagos vacío.")
+    import traceback
 
-    # 2. OBTENER ESTUDIANTES
-    students = frappe.db.get_list("Student Group Student", 
-        filters={"parent": student_group, "active": 1}, 
-        fields=["student"],
-        ignore_permissions=True
+    # 1. DECODIFICAR Y VALIDAR
+    if isinstance(components, str):
+        components = json.loads(components)
+    if isinstance(schedule_data, str):
+        schedule_data = json.loads(schedule_data)
+
+    if not components:
+        frappe.throw("❌ ERROR: Lista de componentes vacía.")
+    if not schedule_data:
+        frappe.throw("❌ ERROR: Plan de pagos vacío.")
+
+    # 2. Normalizar fechas (evita fallos con MM-DD-YYYY o formatos del frontend)
+    for row in schedule_data:
+        raw_date = row.get("due_date")
+        if raw_date is not None:
+            row["due_date"] = getdate(raw_date)
+
+    total_schedule_amount = sum(flt(d.get("amount")) for d in schedule_data)
+    first_due_date = getdate(schedule_data[0].get("due_date")) if schedule_data else getdate(frappe.utils.today())
+
+    # 3. Obtener datos base de la estructura y company (requerido por Fee Schedule y Fees)
+    struct_base = frappe.db.get_value(
+        "Fee Structure", fee_structure,
+        ["program", "academic_year", "company"],
+        as_dict=True
     )
-    
+    if not struct_base:
+        frappe.throw(f"❌ ERROR: Fee Structure '{fee_structure}' no encontrada.")
+
+    company = (struct_base.get("company") or frappe.defaults.get_defaults().get("company"))
+    if not company:
+        frappe.throw("❌ ERROR: No hay Company definida en la Fee Structure ni por defecto en el sitio. Configure una Company.")
+
+    # 4. OBTENER ESTUDIANTES
+    students = frappe.db.get_list(
+        "Student Group Student",
+        filters={"parent": student_group, "active": 1},
+        fields=["student"],
+        ignore_permissions=True,
+    )
+
     if not students:
         frappe.throw(f"El grupo '{student_group}' no tiene estudiantes activos.")
 
     generated_count = 0
-    total_schedule_amount = sum(flt(d.get("amount")) for d in schedule_data)
-    first_due_date = schedule_data[0].get("due_date") if schedule_data else frappe.utils.today()
-
-    # Obtener datos base de la estructura
-    struct_base = frappe.db.get_value("Fee Structure", fee_structure, ["program", "academic_year"], as_dict=True)
+    errors_detail = []
 
     for stu in students:
         try:
+            # --- B. OBTENER ENROLLMENT (antes de crear Fee Schedule para fallar rápido) ---
+            enrollment = frappe.db.get_value(
+                "Program Enrollment",
+                {"student": stu.student, "docstatus": 1},
+                "name",
+            )
+            if not enrollment:
+                errors_detail.append(f"{stu.student}: sin Program Enrollment enviado (docstatus=1). Cree/envíe el Program Enrollment del estudiante.")
+                continue
+
             # --- A. CREAR FEE SCHEDULE ---
             fs = frappe.new_doc("Fee Schedule")
             fs.student = stu.student
-            # fs.student_group = student_group  <-- A veces este campo simple no existe o es read-only
             fs.program = struct_base.program
             fs.academic_year = struct_base.academic_year
             fs.fee_structure = fee_structure
             fs.grand_total = total_schedule_amount
             fs.outstanding_amount = total_schedule_amount
             fs.due_date = first_due_date
-            
-            # --- CORRECCIÓN CRÍTICA: LLENAR LA TABLA OBLIGATORIA ---
-            fs.append("student_groups", {
-                "student_group": student_group
-            })
-            
-            # Llenar componentes
+            fs.company = company
+
+            fs.append("student_groups", {"student_group": student_group})
+
             for c in components:
                 fs.append("components", {
                     "fees_category": c.get("fees_category"),
                     "description": c.get("description"),
-                    "amount": c.get("amount")
+                    "amount": c.get("amount"),
                 })
-            
+
             fs.save(ignore_permissions=True)
             fs.submit()
-            
-            # --- B. OBTENER ENROLLMENT ---
-            enrollment = frappe.db.get_value("Program Enrollment", 
-                {"student": stu.student, "docstatus": 1}, "name"
-            )
-            
+
             # --- C. CREAR FEES (FACTURAS) ---
             for row in schedule_data:
                 fee = frappe.new_doc("Fees")
@@ -1538,14 +1564,14 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 fee.academic_year = fs.academic_year
                 fee.fee_structure = fee_structure
                 fee.fee_schedule = fs.name
-                fee.due_date = row.get("due_date")
-                fee.posting_date = row.get("due_date")
+                fee.due_date = getdate(row.get("due_date"))
+                fee.posting_date = getdate(row.get("due_date"))
                 fee.currency = "USD"
-                
+                fee.company = company
+
                 row_type = row.get("type")
                 row_amount = flt(row.get("amount"))
-                
-                # Asignación de componentes
+
                 if row_type == "Inscripcion":
                     fee.append("components", {"fees_category": "Inscripción", "description": "Registration Fee", "amount": row_amount})
                 elif row_type == "Traduccion":
@@ -1556,21 +1582,29 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                     fee.append("components", {"fees_category": "Costo de programa", "description": f"{row.get('term')} (Capital)", "amount": val_cap})
                     fee.append("components", {"fees_category": "Graduación", "description": "Graduation Fee", "amount": val_grad})
                 else:
-                    # Fallback
                     fee.append("components", {"fees_category": "Costo de programa", "description": row.get("term"), "amount": row_amount})
 
                 fee.grand_total = row_amount
                 fee.outstanding_amount = row_amount
-                
+
                 fee.save(ignore_permissions=True)
                 fee.submit()
-            
+
             generated_count += 1
-            
+
         except Exception as e:
-            frappe.log_error(f"Fallo al generar para {stu.student}", str(e))
+            msg = f"{stu.student}: {cstr(e)}\n{traceback.format_exc()}"
+            frappe.log_error(msg, title=f"Student Financial Tool - {stu.student}")
+            errors_detail.append(f"{stu.student}: {cstr(e)}")
             continue
-            
+
+    if errors_detail and generated_count == 0:
+        frappe.msgprint(
+            _("Ningún registro generado. Revisar Error Log y:\n{0}").format("\n".join(errors_detail)),
+            title=_("Generar para Grupo"),
+            indicator="red",
+        )
+
     return generated_count
 
 @frappe.whitelist()
