@@ -1594,7 +1594,7 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
 
         except Exception as e:
             msg = f"{stu.student}: {cstr(e)}\n{traceback.format_exc()}"
-            frappe.log_error(msg, title=f"Student Financial Tool - {stu.student}")
+            frappe.log_error(title=f"Student Financial Tool - {stu.student}", message=msg)
             errors_detail.append(f"{stu.student}: {cstr(e)}")
             continue
 

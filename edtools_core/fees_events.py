@@ -4,8 +4,10 @@
 import frappe
 
 
-def update_components_description(doc):
-	"""Set doc.components_description from Components table (Description column)."""
+def update_components_description(doc, method=None):
+	"""Set doc.components_description from Components table (Description column).
+	Frappe doc_events call handlers as (doc, method).
+	"""
 	if not doc:
 		return
 	parts = []
