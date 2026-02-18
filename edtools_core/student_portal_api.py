@@ -592,19 +592,24 @@ def get_course_schedule_for_student(program_name=None, student_groups=None):
 		# Ordenar por fecha
 		schedule.sort(key=lambda r: (r.get("schedule_date") or "", r.get("from_time") or ""))
 
-		# Obtener meeting_url de cada Room (Custom Field para clases virtuales)
+		# Enriquecer con datos de Room: room_name, room_number, meeting_url (si existe)
 		room_names = list({r.get("room") for r in schedule if r.get("room")})
-		room_meeting_urls = {}
-		if room_names and frappe.db.exists("Custom Field", {"dt": "Room", "fieldname": "meeting_url"}):
+		room_info = {}
+		if room_names:
+			fields_room = ["name", "room_name", "room_number"]
+			if frappe.db.exists("Custom Field", {"dt": "Room", "fieldname": "meeting_url"}):
+				fields_room.append("meeting_url")
 			for room_doc in frappe.get_all(
 				"Room",
 				filters={"name": ["in", room_names]},
-				fields=["name", "meeting_url"],
+				fields=fields_room,
 				ignore_permissions=True,
 			):
-				url = (room_doc.get("meeting_url") or "").strip()
-				if url:
-					room_meeting_urls[room_doc["name"]] = url
+				room_info[room_doc["name"]] = {
+					"room_name": room_doc.get("room_name") or "",
+					"room_number": room_doc.get("room_number") or "",
+					"room_meeting_url": (room_doc.get("meeting_url") or "").strip() or None,
+				}
 
 		for row in schedule:
 			# El frontend espera class_schedule_color; en v15 la columna es "color"
@@ -612,7 +617,10 @@ def get_course_schedule_for_student(program_name=None, student_groups=None):
 			for field in ("from_time", "to_time"):
 				if field in row and row[field] is not None:
 					row[field] = str(row[field])
-			row["room_meeting_url"] = room_meeting_urls.get(row.get("room")) or None
+			info = room_info.get(row.get("room")) or {}
+			row["room_name"] = info.get("room_name")
+			row["room_number"] = info.get("room_number")
+			row["room_meeting_url"] = info.get("room_meeting_url")
 		return schedule
 	except Exception as e:
 		frappe.log_error(
