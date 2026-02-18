@@ -592,12 +592,27 @@ def get_course_schedule_for_student(program_name=None, student_groups=None):
 		# Ordenar por fecha
 		schedule.sort(key=lambda r: (r.get("schedule_date") or "", r.get("from_time") or ""))
 
+		# Obtener meeting_url de cada Room (Custom Field para clases virtuales)
+		room_names = list({r.get("room") for r in schedule if r.get("room")})
+		room_meeting_urls = {}
+		if room_names and frappe.db.exists("Custom Field", {"dt": "Room", "fieldname": "meeting_url"}):
+			for room_doc in frappe.get_all(
+				"Room",
+				filters={"name": ["in", room_names]},
+				fields=["name", "meeting_url"],
+				ignore_permissions=True,
+			):
+				url = (room_doc.get("meeting_url") or "").strip()
+				if url:
+					room_meeting_urls[room_doc["name"]] = url
+
 		for row in schedule:
 			# El frontend espera class_schedule_color; en v15 la columna es "color"
 			row["class_schedule_color"] = row.get("class_schedule_color") or row.get("color")
 			for field in ("from_time", "to_time"):
 				if field in row and row[field] is not None:
 					row[field] = str(row[field])
+			row["room_meeting_url"] = room_meeting_urls.get(row.get("room")) or None
 		return schedule
 	except Exception as e:
 		frappe.log_error(
