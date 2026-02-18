@@ -62,7 +62,12 @@ def _parse_instructor_name(instructor_name: str) -> tuple:
 
 
 def _get_instructor_idnumber(instructor) -> str:
-    """ID externo para Moodle. Usamos el name del Instructor (ej: EDU-INS-2026-00001)."""
+    """
+    ID externo para Moodle (Número de ID del usuario).
+    Usamos el campo Employee (ej: HR-EMP-00002) si está asignado; si no, el name del Instructor.
+    """
+    if getattr(instructor, "employee", None) and instructor.employee:
+        return instructor.employee
     return instructor.name
 
 # ------------------------------------------------------------
