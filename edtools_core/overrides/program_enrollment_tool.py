@@ -45,7 +45,6 @@ class ProgramEnrollmentTool(EducationProgramEnrollmentTool):
                     "Student Applicant",
                     filters=filters,
                     fields=["name as student_applicant", "title as student_name"],
-                    as_dict=1,
                 )
 
             elif self.get_students_from == "Program Enrollment":
@@ -66,7 +65,6 @@ class ProgramEnrollmentTool(EducationProgramEnrollmentTool):
                         "student_batch_name",
                         "student_category",
                     ],
-                    as_dict=1,
                 )
 
                 student_list = [d.student for d in students]
