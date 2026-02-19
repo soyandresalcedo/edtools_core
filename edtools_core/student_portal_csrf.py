@@ -12,7 +12,7 @@ def patch_student_portal_csrf():
 
 # Logo por defecto que existe en Frappe (evita 404 en /favicon.png)
 DEFAULT_LOGO = "/assets/frappe/images/frappe-favicon.svg"
-DEFAULT_ABBR = "Edtools Education"
+DEFAULT_ABBR = "Cucusa Education"
 
 
 def _patch_get_context():

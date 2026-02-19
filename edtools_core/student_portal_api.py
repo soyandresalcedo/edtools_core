@@ -292,7 +292,7 @@ def get_school_abbr_logo():
 		pass
 	# Si no hay logo en Education Settings, devolver None: el frontend muestra el icono School (Lucide)
 	# en lugar de la "F" de Frappe, que es lo que el usuario espera ver en el sidebar.
-	return {"name": abbr or "Edtools Education", "logo": logo}
+	return {"name": abbr or "Cucusa Education", "logo": logo}
 
 
 @frappe.whitelist()
