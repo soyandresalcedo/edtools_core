@@ -120,6 +120,7 @@ standard_portal_menu_items = [
 override_doctype_class = {
 	"Course Enrollment": "edtools_core.overrides.course_enrollment.CourseEnrollment",
 	"Program Enrollment": "edtools_core.overrides.program_enrollment.ProgramEnrollment",
+	"Program Enrollment Tool": "edtools_core.overrides.program_enrollment_tool.ProgramEnrollmentTool",
 }
 
 # Document Events
