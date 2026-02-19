@@ -51,11 +51,12 @@ footer a[href*="erpnext"] {
     margin-top: 10px;
 }
 
-/* Logo de login: más grande y visible (CUC University) */
+/* Logo de login: tamaño amplio y visible (CUC University) */
 .for-login .page-card-head .app-logo,
 .for-email-login .page-card-head .app-logo {
-    max-height: 72px !important;
-    height: 72px !important;
+    max-height: 140px !important;
+    height: 140px !important;
+    min-width: 200px !important;
     width: auto !important;
     object-fit: contain;
 }
