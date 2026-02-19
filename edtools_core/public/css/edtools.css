@@ -28,9 +28,9 @@ footer a[href*="erpnext"] {
     line-height: 0 !important;
 }
 
-/* Replace with "Iniciar sesión en Edtools" */
+/* Replace with "Iniciar sesión en CUC University" */
 .page-card-head .page-card-head-title::before {
-    content: "Iniciar sesión en Edtools";
+    content: "Iniciar sesión en CUC University";
     font-size: 1.5rem !important;
     line-height: 1.2 !important;
     display: block;
@@ -49,6 +49,15 @@ footer a[href*="erpnext"] {
     font-size: 0.9rem;
     color: #6c757d;
     margin-top: 10px;
+}
+
+/* Logo de login: más grande y visible (CUC University) */
+.for-login .page-card-head .app-logo,
+.for-email-login .page-card-head .app-logo {
+    max-height: 72px !important;
+    height: 72px !important;
+    width: auto !important;
+    object-fit: contain;
 }
 
 /* That's it! Keep everything else as default Frappe styling */

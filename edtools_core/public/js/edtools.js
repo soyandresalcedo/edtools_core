@@ -12,15 +12,16 @@
 function replaceTextInPage() {
     // Text replacements - only changes wording, not design
     const replacements = {
-        'Frappe': 'Edtools',
-        'ERPNext': 'Edtools',
-        'with ERPNext': 'with Edtools',
-        'Powered by Frappe': 'Powered by Edtools',
-        'Powered by ERPNext': 'Powered by Edtools',
-        "Let's begin your journey with ERPNext": "Comencemos tu experiencia con Edtools",
-        "Let's begin your journey with Edtools": "Comencemos tu experiencia con Edtools",
-        'Configuración de ERPNext': 'Configuración de Edtools',
-        'ERPNext Settings': 'Configuración de Edtools'
+        'Frappe': 'CUC University',
+        'ERPNext': 'CUC University',
+        'Edtools': 'CUC University',
+        'with ERPNext': 'with CUC University',
+        'Powered by Frappe': 'Powered by CUC University',
+        'Powered by ERPNext': 'Powered by CUC University',
+        "Let's begin your journey with ERPNext": "Comencemos tu experiencia con CUC University",
+        "Let's begin your journey with Edtools": "Comencemos tu experiencia con CUC University",
+        'Configuración de ERPNext': 'Configuración de CUC University',
+        'ERPNext Settings': 'Configuración de CUC University'
     };
 
     // Function to replace text in a text node
@@ -64,17 +65,20 @@ function replaceTextInPage() {
 function updatePageTitles() {
     // Update browser tab title
     if (document.title.includes('Frappe')) {
-        document.title = document.title.replace('Frappe', 'Edtools');
+        document.title = document.title.replace('Frappe', 'CUC University');
     }
     if (document.title.includes('ERPNext')) {
-        document.title = document.title.replace('ERPNext', 'Edtools');
+        document.title = document.title.replace('ERPNext', 'CUC University');
+    }
+    if (document.title.includes('Edtools')) {
+        document.title = document.title.replace('Edtools', 'CUC University');
     }
 
     // Update frappe.boot if available
     if (window.frappe && frappe.boot) {
-        frappe.boot.app_name = "Edtools";
+        frappe.boot.app_name = "CUC University";
         if (frappe.boot.website_settings) {
-            frappe.boot.website_settings.app_name = "Edtools";
+            frappe.boot.website_settings.app_name = "CUC University";
         }
     }
 }

@@ -235,16 +235,18 @@ override_whitelisted_methods = {
 # Website Settings
 # Override the default website title
 website_context = {
-	"brand_html": "Edtools",
+	"brand_html": "CUC University",
 	"top_bar_items": [],
 	"footer_items": []
 }
 
-# Brand overrides - Change "Frappe" to "Edtools" throughout the UI
-# This is the key part for branding!
-brand_html = "Edtools"
+# Brand overrides - CUC University
+brand_html = "CUC University"
 app_name = "edtools_core"
-app_title = "Edtools"
+app_title = "CUC University"
+
+# Logo de login y páginas web (transparente, se ve sobre fondo claro u oscuro)
+app_logo_url = ["/assets/edtools_core/images/cuc-university-logo.png"]
 
 # Boot session - inject custom values into frappe.boot
 # extend_bootinfo = "edtools_core.boot.boot_session"
