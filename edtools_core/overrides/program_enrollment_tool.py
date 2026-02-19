@@ -35,7 +35,7 @@ class ProgramEnrollmentTool(EducationProgramEnrollmentTool):
         else:
             if self.get_students_from == "Student Applicant":
                 filters = {
-                    "application_status": "Approved",
+                    "application_status": ["in", ["Approved", "Admitted"]],
                     "program": self.program,
                     "academic_year": self.academic_year,
                 }
