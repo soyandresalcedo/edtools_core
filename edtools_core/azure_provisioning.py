@@ -102,6 +102,12 @@ def is_provisioning_enabled() -> bool:
 	return str(val).strip() in ("1", "true", "True", "yes")
 
 
+@frappe.whitelist()
+def get_provisioning_enabled() -> bool:
+	"""API para cliente: indica si Azure provisioning está activo."""
+	return is_provisioning_enabled()
+
+
 def create_azure_user(
 	email: str,
 	password: str,
