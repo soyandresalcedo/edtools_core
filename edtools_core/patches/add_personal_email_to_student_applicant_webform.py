@@ -2,6 +2,8 @@
 # Agrega personal_email al Web Form student-applicant para que aparezca en el formulario público.
 # No modifica el submódulo Education.
 
+import json
+
 import frappe
 
 
@@ -14,6 +16,10 @@ def execute():
 	if "personal_email" in existing:
 		print("✓ Web Form student-applicant: personal_email ya existe")
 		return
+
+	# condition_json puede venir parseado como list/dict; Frappe exige string para guardar
+	if isinstance(doc.condition_json, (list, dict)):
+		doc.condition_json = json.dumps(doc.condition_json)
 
 	doc.append("web_form_fields", {
 		"fieldname": "personal_email",
