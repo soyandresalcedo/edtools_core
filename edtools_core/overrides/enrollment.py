@@ -77,20 +77,25 @@ def enroll_student_with_azure_provisioning(source_name: str):
 	frappe.publish_realtime("enroll_student_progress", {"progress": [3, 6]}, user=frappe.session.user)
 
 	# Crear User en Frappe con @cucusa.org (evitar send_welcome_email)
+	# Manejar DuplicateEntryError: User puede existir por intento previo o condición de carrera
+	from frappe.utils.password import update_password
 	if not frappe.db.exists("User", institutional_email):
-		user = frappe.get_doc({
-			"doctype": "User",
-			"email": institutional_email,
-			"first_name": applicant.first_name,
-			"last_name": applicant.last_name,
-			"user_type": "Website User",
-			"send_welcome_email": 0,
-		})
-		user.add_roles("Student")
-		user.insert(ignore_permissions=True)
-		frappe.db.commit()
-		from frappe.utils.password import update_password
-		update_password(institutional_email, password, logout_all_sessions=False)
+		try:
+			user = frappe.get_doc({
+				"doctype": "User",
+				"email": institutional_email,
+				"first_name": applicant.first_name,
+				"last_name": applicant.last_name,
+				"user_type": "Website User",
+				"send_welcome_email": 0,
+			})
+			user.add_roles("Student")
+			user.insert(ignore_permissions=True)
+		except frappe.DuplicateEntryError:
+			# User ya existe (intento previo, doble clic, etc.); continuar con la contraseña
+			frappe.db.rollback()
+	update_password(institutional_email, password, logout_all_sessions=False)
+	frappe.db.commit()
 
 	# Actualizar Applicant para que el mapper use @cucusa.org
 	frappe.db.set_value(
@@ -101,21 +106,28 @@ def enroll_student_with_azure_provisioning(source_name: str):
 
 	frappe.publish_realtime("enroll_student_progress", {"progress": [4, 6]}, user=frappe.session.user)
 
-	# Crear Student y Program Enrollment (mismo flujo que original)
-	student = get_mapped_doc(
-		"Student Applicant",
-		source_name,
-		{
-			"Student Applicant": {
-				"doctype": "Student",
-				"field_map": {"name": "student_applicant"},
-			}
-		},
-		ignore_permissions=True,
-	)
-	student.user = institutional_email  # Enlazar al User que ya creamos
-	student.student_email_id = institutional_email  # Por si acaso
-	student.save()
+	# Crear Student o reusar si ya existe (intento previo)
+	existing_student = frappe.db.exists("Student", {"student_applicant": source_name})
+	if existing_student:
+		student = frappe.get_doc("Student", existing_student)
+		student.user = institutional_email
+		student.student_email_id = institutional_email
+		student.save()
+	else:
+		student = get_mapped_doc(
+			"Student Applicant",
+			source_name,
+			{
+				"Student Applicant": {
+					"doctype": "Student",
+					"field_map": {"name": "student_applicant"},
+				}
+			},
+			ignore_permissions=True,
+		)
+		student.user = institutional_email
+		student.student_email_id = institutional_email
+		student.save()
 
 	student_applicant_data = frappe.db.get_value(
 		"Student Applicant", source_name,
