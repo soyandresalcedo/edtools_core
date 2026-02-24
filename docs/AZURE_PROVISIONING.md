@@ -33,7 +33,8 @@ Si el correo ya existe (User o Student), no se crea uno nuevo: se lanza un error
 
 ## Logs y correo de credenciales
 
-- **Logs de Azure/correo:** Los mensajes `[Azure] Enviando correo...` y `[Azure Sandbox] Simulando...` van al stdout. En Railway aparecen en **Deploy Logs** cuando se ejecuta la acción (al hacer "Inscribir estudiantes"), no solo al arrancar; filtrar por "Azure" o buscar la hora del intento.
+- **Logs de Azure/correo:** Al hacer "Inscribir estudiantes" se escribe a stdout `[Azure] Iniciando provisioning...`, `[Azure Sandbox] Simulando...` (si SANDBOX=1) y `[Azure] Enviando correo de credenciales a...`. En Railway aparecen en **Deploy Logs**; filtrar por "Azure" o buscar la hora del clic.
+- **Errores CSS al inscribir:** Pueden aparecer `ERROR PropertyValue` / `box-shadow: 0 3px 6px #0000001a` por el inline de estilos del correo (Premailer). No bloquean la inscripción ni el envío del correo; se pueden ignorar.
 - **Correo de credenciales no llega:** Comprueba en Frappe: **Configuración → Email → Email Account**: debe haber una cuenta saliente por defecto. Si el envío falla, en **Registro de Errores** aparecerá una entrada con título "Error enviando credenciales al estudiante".
 
 ## Probar en sandbox

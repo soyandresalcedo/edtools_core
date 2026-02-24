@@ -149,7 +149,9 @@ def create_azure_user(
 	Retorna el user id (GUID) de Azure para asignar licencia.
 	"""
 	if is_sandbox_mode():
-		frappe.logger().info(f"[Azure Sandbox] Simulando creación de usuario: {email}")
+		msg = f"[Azure Sandbox] Simulando creación de usuario: {email}"
+		print(msg, flush=True)
+		frappe.logger().info(msg)
 		return f"sandbox-{email.replace('@', '-at-')}"
 
 	import requests
@@ -194,7 +196,9 @@ def assign_microsoft_license(user_id: str, sku_id: Optional[str] = None) -> None
 	Si la licencia ya está asignada (400), no falla (idempotente).
 	"""
 	if is_sandbox_mode():
-		frappe.logger().info(f"[Azure Sandbox] Simulando asignación de licencia para: {user_id}")
+		msg = f"[Azure Sandbox] Simulando asignación de licencia para: {user_id}"
+		print(msg, flush=True)
+		frappe.logger().info(msg)
 		return
 
 	import requests

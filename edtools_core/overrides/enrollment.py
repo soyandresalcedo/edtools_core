@@ -44,6 +44,7 @@ def enroll_student_with_azure_provisioning(source_name: str):
 		from education.education.api import enroll_student as _edu_enroll
 		return _edu_enroll(source_name)
 
+	print(f"[Azure] Iniciando provisioning para applicant {source_name}", flush=True)
 	frappe.publish_realtime("enroll_student_progress", {"progress": [1, 6]}, user=frappe.session.user)
 
 	applicant = frappe.get_doc("Student Applicant", source_name)
@@ -141,6 +142,8 @@ def _send_credentials_email(
 Equipo CUC University</p>
 """
 	try:
+		# print() para que aparezca en Railway Deploy Logs al hacer "Inscribir estudiantes"
+		print(f"[Azure] Enviando correo de credenciales a {recipient}", flush=True)
 		frappe.logger().info(f"[Azure] Enviando correo de credenciales a {recipient}")
 		frappe.sendmail(
 			recipients=[recipient],
@@ -148,6 +151,7 @@ Equipo CUC University</p>
 			content=content,
 			delayed=False,  # Enviar ya: en Railway el scheduler puede no procesar la cola
 		)
+		print(f"[Azure] Correo de credenciales enviado a {recipient}", flush=True)
 		frappe.logger().info(f"[Azure] Correo de credenciales enviado a {recipient}")
 	except Exception as e:
 		frappe.log_error(
