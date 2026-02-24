@@ -79,7 +79,10 @@ def enroll_student_with_azure_provisioning(source_name: str):
 	# Crear User en Frappe con @cucusa.org (evitar send_welcome_email)
 	# Manejar DuplicateEntryError: User puede existir por intento previo o condición de carrera
 	from frappe.utils.password import update_password
-	if not frappe.db.exists("User", institutional_email):
+
+	def _ensure_user():
+		if frappe.db.exists("User", institutional_email):
+			return
 		try:
 			user = frappe.get_doc({
 				"doctype": "User",
@@ -92,10 +95,22 @@ def enroll_student_with_azure_provisioning(source_name: str):
 			user.add_roles("Student")
 			user.insert(ignore_permissions=True)
 		except frappe.DuplicateEntryError:
-			# User ya existe (intento previo, doble clic, etc.); continuar con la contraseña
 			frappe.db.rollback()
+
+	_ensure_user()
+	frappe.db.commit()
 	update_password(institutional_email, password, logout_all_sessions=False)
 	frappe.db.commit()
+
+	# Limpiar caché y forzar carga del User (asegura que la validación de links lo vea)
+	frappe.clear_cache(doctype="User")
+	try:
+		frappe.get_doc("User", institutional_email)
+	except frappe.DoesNotExistError:
+		frappe.throw(
+			f"Usuario {institutional_email} no pudo ser creado. "
+			"Verifique que no exista un User huérfano en la base de datos."
+		)
 
 	# Actualizar Applicant para que el mapper use @cucusa.org
 	frappe.db.set_value(
