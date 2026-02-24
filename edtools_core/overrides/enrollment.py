@@ -141,13 +141,17 @@ def _send_credentials_email(
 Equipo CUC University</p>
 """
 	try:
+		frappe.logger().info(f"[Azure] Enviando correo de credenciales a {recipient}")
 		frappe.sendmail(
 			recipients=[recipient],
 			subject=subject,
 			content=content,
+			delayed=False,  # Enviar ya: en Railway el scheduler puede no procesar la cola
 		)
+		frappe.logger().info(f"[Azure] Correo de credenciales enviado a {recipient}")
 	except Exception as e:
 		frappe.log_error(
 			title="Error enviando credenciales al estudiante",
 			message=f"Recipient: {recipient}\nError: {e}\n{frappe.get_traceback()}",
 		)
+		raise
