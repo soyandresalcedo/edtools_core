@@ -101,22 +101,17 @@ def enroll_student_with_azure_provisioning(source_name: str):
 			user.add_roles("Student")
 			user.insert(ignore_permissions=True)
 		except frappe.DuplicateEntryError:
-			# User ya existe (intento previo o reintento). Limpiar estado y comprobar.
+			# Duplicate key = el User YA existe en la BD (nodo de escritura).
+			# Con USE_PUBLIC_PGHOST / réplicas, el SELECT puede seguir devolviendo vacío en esta
+			# conexión; no volver a comprobar ni lanzar. Confiar en el error y continuar.
 			frappe.db.rollback()
 			frappe.db.commit()
 			frappe.clear_cache(doctype="User")
-			if frappe.db.exists("User", institutional_email):
-				return
-			# Si tras rollback aún no existe, algo raro; intentar obtener y seguir
-			try:
-				frappe.get_doc("User", institutional_email)
-				return
-			except Exception:
-				pass
+			return
 		frappe.db.commit()
 		if not frappe.db.exists("User", institutional_email):
 			frappe.clear_cache(doctype="User")
-			if frappe.db.exists("User", institutional_email):
+			if frappe.db.sql('SELECT 1 FROM "tabUser" WHERE name = %s LIMIT 1', (institutional_email,)):
 				return
 			frappe.throw(
 				_("No se pudo crear el usuario {0}. Ejecute el script de recuperación en "
@@ -126,28 +121,28 @@ def enroll_student_with_azure_provisioning(source_name: str):
 			)
 
 	_ensure_user()
-	# Asegurar rol Student por si el User ya existía de un intento previo
+	# Asegurar rol Student, contraseña y DocShare (pueden fallar si esta conexión no ve al User por réplica)
 	try:
 		user_doc = frappe.get_doc("User", institutional_email)
 		if user_doc and "Student" not in [r.role for r in user_doc.roles]:
 			user_doc.add_roles("Student")
 			user_doc.save(ignore_permissions=True)
 			frappe.db.commit()
-	except Exception:
-		pass
-	update_password(institutional_email, password, logout_all_sessions=False)
-	frappe.db.commit()
-
-	# Añadir DocShare para que el usuario pueda ver su propio perfil (omitido en User.on_update).
-	try:
+		update_password(institutional_email, password, logout_all_sessions=False)
+		frappe.db.commit()
 		frappe.share.add_docshare(
 			"User", institutional_email, institutional_email,
 			write=1, share=1, flags={"ignore_share_permission": True}
 		)
 		frappe.db.commit()
-	except Exception:
+	except Exception as e:
 		frappe.db.rollback()
 		frappe.db.commit()
+		# Con USE_PUBLIC_PGHOST/réplicas el User puede no ser visible aquí; el enrollment continúa
+		frappe.log_error(
+			title="Azure provisioning: User post-create (password/share)",
+			message=f"email={institutional_email} error={e}\nPuede ser desfase réplica. Ejecute el script de recuperación en AZURE_PROVISIONING.md.",
+		)
 
 	# No verificar con SQL: en Railway/PostgreSQL con réplicas, el SELECT puede ir a réplica
 	# que aún no tiene el commit (replication lag) y devolver vacío aunque el User exista.

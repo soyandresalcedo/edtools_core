@@ -56,27 +56,37 @@ Si devuelve `False`, añade a `site_config.json` o variables de entorno:
 - `azure_provisioning_enabled`: `1`
 - `azure_provisioning_sandbox`: `1` (para pruebas sin Azure real)
 
-### 404 al hacer clic en User ID del Student
+### 404 al hacer clic en User ID del Student / "User not found" pero "duplicate key" al crear
 
-Si el Student se creó pero el enlace al User da 404, el User puede no existir (por un enrollment anterior con errores) o hay registros huérfanos en `tabHas Role`. Usar este script robusto en bench console:
+Si el Student se creó pero el enlace al User da 404, o si en bench console **get_doc("User", email)** da "not found" y al hacer **user.insert()** sale "duplicate key tabUser_pkey", suele ser **desfase réplica/primario**: la lectura no ve el User pero la escritura sí lo encuentra. Usar este script **solo con SQL en la misma conexión** (bench console):
 
 ```python
 # bench --site cucuniversity.edtools.co console
+# Copiar y pegar TODO el bloque de una vez (incluye las 3 líneas finales).
 import frappe
 
 email = "camilo.villalobos.fernandez@cucusa.org"  # usar el email del Student
-first_name = "Camilo"   # del Student
-last_name = "Villalobos Fernandez"  # del Student
+first_name = "Camilo"
+last_name = "Villalobos Fernandez"
 
-# Usar get_doc para evitar duplicados y desfase de réplicas
-try:
-    user = frappe.get_doc("User", email)
-    if "Student" not in [r.role for r in user.roles]:
-        user.add_roles("Student")
-        user.save(ignore_permissions=True)
+frappe.clear_cache(doctype="User")
+# Comprobar existencia con SQL en la misma conexión que la escritura (evita réplica)
+exists = frappe.db.sql('SELECT 1 FROM "tabUser" WHERE name = %s LIMIT 1', (email,))
+if exists:
+    # User existe en BD. Añadir rol Student por SQL si falta (sin usar get_doc por si lee de réplica).
+    has_role = frappe.db.sql(
+        'SELECT 1 FROM "tabHas Role" WHERE parent = %s AND parenttype = %s AND role = %s LIMIT 1',
+        (email, "User", "Student"),
+    )
+    if not has_role:
+        name_hr = frappe.generate_hash(length=10)
+        frappe.db.sql("""
+            INSERT INTO "tabHas Role" (name, parent, parenttype, role, creation, modified, modified_by, owner, docstatus, idx)
+            VALUES (%s, %s, 'User', 'Student', NOW(), NOW(), %s, %s, 0, 0)
+        """, (name_hr, email, frappe.session.user or "Administrator", frappe.session.user or "Administrator"))
     frappe.db.commit()
-    print("User ya existía, rol Student verificado")
-except frappe.DoesNotExistError:
+    print("User ya existía, rol Student verificado/añadido por SQL")
+else:
     try:
         user = frappe.get_doc({
             "doctype": "User",
@@ -90,17 +100,31 @@ except frappe.DoesNotExistError:
         user.insert(ignore_permissions=True)
         frappe.db.commit()
         print("User creado")
-    except (frappe.DuplicateEntryError, frappe.UniqueValidationError, Exception) as e:
-        if "duplicate" in str(e).lower() or "unique" in str(e).lower() or "already exists" in str(e).lower():
-            frappe.db.rollback()
-            user = frappe.get_doc("User", email)
-            if "Student" not in [r.role for r in user.roles]:
-                user.add_roles("Student")
-                user.save(ignore_permissions=True)
+    except frappe.DuplicateEntryError:
+        frappe.db.rollback()
+        frappe.db.commit()
+        frappe.clear_cache(doctype="User")
+        # Existe en primario pero no en nuestra lectura. Añadir rol por SQL.
+        has_role = frappe.db.sql(
+            'SELECT 1 FROM "tabHas Role" WHERE parent = %s AND parenttype = %s AND role = %s LIMIT 1',
+            (email, "User", "Student"),
+        )
+        if not has_role:
+            name_hr = frappe.generate_hash(length=10)
+            frappe.db.sql("""
+                INSERT INTO "tabHas Role" (name, parent, parenttype, role, creation, modified, modified_by, owner, docstatus, idx)
+                VALUES (%s, %s, 'User', 'Student', NOW(), NOW(), %s, %s, 0, 0)
+            """, (name_hr, email, frappe.session.user or "Administrator", frappe.session.user or "Administrator"))
             frappe.db.commit()
-            print("User existía (duplicado detectado), rol verificado")
-        else:
-            raise
+        print("User existía en primario (duplicado al insertar), rol Student verificado/añadido por SQL")
 ```
 
-**Nota:** Si usas réplicas de solo lectura (ej. DBeaver conectado a réplica de Railway), el `SELECT` puede devolver vacío aunque el User exista en el primario. Ejecuta el script en bench console (que usa el nodo primario) o verifica la conexión de DBeaver al nodo de escritura.
+**Nota:** Si usas réplicas de solo lectura (ej. DBeaver/pgAdmin conectado a réplica de Railway), el `SELECT` puede devolver vacío aunque el User exista en el primario. Ejecuta el script en bench console (que usa el nodo primario) o verifica la conexión de DBeaver al nodo de escritura.
+
+**Por qué la herramienta falla pero el User no aparece en tu SELECT:** Si el error es "duplicate key tabUser_pkey" y en pgAdmin/DBeaver no ves ese usuario, casi siempre es porque estás consultando una **réplica de solo lectura** o **otra base de datos**. La app escribe en el nodo primario; si hay réplicas, el User puede existir solo en el primario. Solución: ejecuta el script de recuperación desde **bench console** (misma conexión que la app) y vuelve a intentar la herramienta.
+
+**Conexión pública en Railway (USE_PUBLIC_PGHOST):** Si en el entrypoint usas `USE_PUBLIC_PGHOST=1` y la URL pública de Postgres, las lecturas y escrituras pueden ir por rutas distintas (réplica vs primario), por eso a veces `get_doc` no ve al User y el `insert` devuelve "duplicate key". El código de enrollment está preparado para que, ante **DuplicateEntryError**, se asuma que el User existe y se continúe sin lanzar error; si fallan `update_password` o DocShare por no ver al User, se registra en Error Log y el enrollment termina igual (Student y Program Enrollment se crean). Luego puedes ejecutar el script de recuperación para fijar contraseña y rol.
+
+### Verificar registros huérfanos (tabUser, tabHas Role, tabDocShare)
+
+Si ves errores como `duplicate key "tabUser_pkey"` o `tabHas Role_pkey`, puede haber registros duplicados o filas huérfanas. En el repo está **`docs/VERIFICAR_REGISTROS_FANTASMAS_USER.sql`**: ábrelo en pgAdmin (o psql) y ejecuta las consultas. Las consultas 1–3 listan duplicados/huérfanos; la 4 da conteos. Las sentencias DELETE al final están comentadas; úsalas solo tras revisar y hacer backup.
