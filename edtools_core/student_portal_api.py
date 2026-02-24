@@ -11,16 +11,16 @@ def get_user_info():
 	Solo lee el usuario actual; el rol Student no tiene permiso en User, por eso ignore_permissions."""
 	if frappe.session.user == "Guest":
 		frappe.throw("Authentication failed", exc=frappe.AuthenticationError)
-	result = frappe.db.get_value(
+	users = frappe.db.get_list(
 		"User",
-		frappe.session.user,
-		["name", "email", "enabled", "user_image", "full_name", "user_type"],
-		as_dict=True,
+		fields=["name", "email", "enabled", "user_image", "full_name", "user_type"],
+		filters={"name": frappe.session.user},
+		limit_page_length=1,
 		ignore_permissions=True,
 	)
-	if not result:
+	if not users:
 		frappe.throw("User not found", exc=frappe.AuthenticationError)
-	result = dict(result)
+	result = dict(users[0])
 	result["session_user"] = True
 	return result
 
@@ -266,13 +266,14 @@ def get_student_info():
 	# Enriquecer con datos del User: Edit Profile guarda en User (mobile_no, etc.), el modal lee Student
 	user_id = student_info.get("user")
 	if user_id and user_id == frappe.session.user:
-		user_data = frappe.db.get_value(
+		user_list = frappe.db.get_list(
 			"User",
-			user_id,
-			["mobile_no", "phone", "user_image"],
-			as_dict=True,
+			filters={"name": user_id},
+			fields=["mobile_no", "phone", "user_image"],
+			limit_page_length=1,
 			ignore_permissions=True,
 		)
+		user_data = user_list[0] if user_list else None
 		if user_data:
 			if not (student_info.get("student_mobile_number") or "").strip():
 				student_info["student_mobile_number"] = (user_data.get("mobile_no") or user_data.get("phone") or "").strip() or None
