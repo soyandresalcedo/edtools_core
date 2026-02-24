@@ -85,19 +85,17 @@ def enroll_student_with_azure_provisioning(source_name: str):
 	def _ensure_user():
 		if frappe.db.exists("User", institutional_email):
 			return
-		try:
-			user = frappe.get_doc({
-				"doctype": "User",
-				"email": institutional_email,
-				"first_name": applicant.first_name,
-				"last_name": applicant.last_name,
-				"user_type": "Website User",
-				"send_welcome_email": 0,
-			})
-			user.add_roles("Student")
-			user.insert(ignore_permissions=True)
-		except frappe.DuplicateEntryError:
-			frappe.db.rollback()
+		user = frappe.get_doc({
+			"doctype": "User",
+			"email": institutional_email,
+			"first_name": applicant.first_name,
+			"last_name": applicant.last_name,
+			"user_type": "Website User",
+			"send_welcome_email": 0,
+		})
+		user.add_roles("Student")
+		# ignore_if_duplicate: si ya existe (race/replicación), no fallar; update_password lo actualiza
+		user.insert(ignore_permissions=True, ignore_if_duplicate=True)
 
 	_ensure_user()
 	frappe.db.commit()

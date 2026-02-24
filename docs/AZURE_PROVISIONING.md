@@ -38,3 +38,30 @@ Si el correo ya existe (User o Student), no se crea uno nuevo: se lanza un error
 3. Aprobar el Applicant.
 4. En Program Enrollment Tool: Get Students From = Student Applicant, seleccionar y Enroll.
 5. Se creará Student, User (@cucusa.org), Program Enrollment y se enviará email con credenciales al correo personal.
+
+## Solución de problemas
+
+### 404 al hacer clic en User ID del Student
+
+Si el Student se creó pero el enlace al User da 404, el User puede no existir (por un enrollment anterior con errores). Crear el User manualmente en bench console:
+
+```python
+# bench --site cucuniversity.edtools.co console
+import frappe
+email = "camilo.villalobos.fernandez@cucusa.org"  # usar el email del Student
+if not frappe.db.exists("User", email):
+    user = frappe.get_doc({
+        "doctype": "User",
+        "email": email,
+        "first_name": "Camilo",
+        "last_name": "Villalobos Fernandez",
+        "user_type": "Website User",
+        "send_welcome_email": 0,
+    })
+    user.add_roles("Student")
+    user.insert(ignore_permissions=True, ignore_if_duplicate=True)
+    frappe.db.commit()
+    print("User creado")
+else:
+    print("User ya existe")
+```
