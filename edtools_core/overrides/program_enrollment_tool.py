@@ -86,36 +86,40 @@ class ProgramEnrollmentTool(EducationProgramEnrollmentTool):
         else:
             frappe.throw(_("No students Found"))
 
-    @frappe.whitelist()
-    def enroll_students(self):
-        from edtools_core.overrides.enrollment import enroll_student_with_azure_provisioning
-
-        total = len(self.students)
-        for i, stud in enumerate(self.students):
-            frappe.publish_realtime(
-                "program_enrollment_tool", dict(progress=[i + 1, total]), user=frappe.session.user
-            )
-            if stud.student:
-                prog_enrollment = frappe.new_doc("Program Enrollment")
-                prog_enrollment.student = stud.student
-                prog_enrollment.student_name = stud.student_name
-                prog_enrollment.student_category = stud.student_category
-                prog_enrollment.program = self.new_program
-                prog_enrollment.academic_year = self.new_academic_year
-                prog_enrollment.academic_term = self.new_academic_term
-                prog_enrollment.student_batch_name = (
-                    stud.student_batch_name if stud.student_batch_name else self.new_student_batch
-                )
-                prog_enrollment.enrollment_date = self.enrollment_date
-                prog_enrollment.save()
-
-            elif stud.student_applicant:
-                prog_enrollment = enroll_student_with_azure_provisioning(stud.student_applicant)
-                prog_enrollment.academic_year = self.academic_year
-                prog_enrollment.academic_term = self.academic_term
-                prog_enrollment.student_batch_name = (
-                    stud.student_batch_name if stud.student_batch_name else self.new_student_batch
-                )
-                prog_enrollment.save()
-
-        frappe.msgprint(_("{0} Students have been enrolled").format(total))
+    # enroll_students no se sobreescribe: se usa el de Education (education.education.api.enroll_student).
+    # Si se quiere volver a usar provisioning Azure, descomentar el bloque siguiente y quitar el override
+    # del padre (o llamar a enroll_student_with_azure_provisioning en lugar de enroll_student).
+    #
+    # @frappe.whitelist()
+    # def enroll_students(self):
+    #     from edtools_core.overrides.enrollment import enroll_student_with_azure_provisioning
+    #
+    #     total = len(self.students)
+    #     for i, stud in enumerate(self.students):
+    #         frappe.publish_realtime(
+    #             "program_enrollment_tool", dict(progress=[i + 1, total]), user=frappe.session.user
+    #         )
+    #         if stud.student:
+    #             prog_enrollment = frappe.new_doc("Program Enrollment")
+    #             prog_enrollment.student = stud.student
+    #             prog_enrollment.student_name = stud.student_name
+    #             prog_enrollment.student_category = stud.student_category
+    #             prog_enrollment.program = self.new_program
+    #             prog_enrollment.academic_year = self.new_academic_year
+    #             prog_enrollment.academic_term = self.new_academic_term
+    #             prog_enrollment.student_batch_name = (
+    #                 stud.student_batch_name if stud.student_batch_name else self.new_student_batch
+    #             )
+    #             prog_enrollment.enrollment_date = self.enrollment_date
+    #             prog_enrollment.save()
+    #
+    #         elif stud.student_applicant:
+    #             prog_enrollment = enroll_student_with_azure_provisioning(stud.student_applicant)
+    #             prog_enrollment.academic_year = self.academic_year
+    #             prog_enrollment.academic_term = self.academic_term
+    #             prog_enrollment.student_batch_name = (
+    #                 stud.student_batch_name if stud.student_batch_name else self.new_student_batch
+    #             )
+    #             prog_enrollment.save()
+    #
+    #     frappe.msgprint(_("{0} Students have been enrolled").format(total))
