@@ -37,7 +37,17 @@ def _patch_login_context():
 		pass
 
 
+def _patch_email_footer():
+	"""Quitar 'Sent via ERPNext' del pie de los correos."""
+	try:
+		from edtools_core.email_footer_patch import patch_email_footer
+		patch_email_footer()
+	except Exception:
+		pass
+
+
 _patch_portal_redirect()
 _patch_student_portal_csrf()
 _patch_education_api()
 _patch_login_context()
+_patch_email_footer()
