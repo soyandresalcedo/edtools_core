@@ -16,6 +16,34 @@ from frappe import _
 from edtools_core.azure_provisioning import generate_cucusa_email
 
 
+def _student_role_profile_name():
+	"""Nombre del Role Profile para estudiantes (Estudiante o Student)."""
+	for name in ("Estudiante", "Student"):
+		if frappe.db.exists("Role Profile", name):
+			return name
+	return None
+
+
+def _new_student_user_doc(self, **kwargs):
+	"""Crea un doc User para estudiante con rol y perfil de rol."""
+	user = frappe.get_doc({
+		"doctype": "User",
+		"first_name": self.first_name,
+		"last_name": self.last_name,
+		"email": self.student_email_id,
+		"gender": self.gender,
+		"send_welcome_email": 0,
+		"user_type": "Website User",
+		**kwargs,
+	})
+	role_profile = _student_role_profile_name()
+	if role_profile:
+		user.role_profile_name = role_profile
+	else:
+		user.add_roles("Student")
+	return user
+
+
 class Student(EducationStudent):
     def validate_user(self):
         # Asegurar email desde Applicant si falta (evita AttributeError en User.autoname)
@@ -46,18 +74,7 @@ class Student(EducationStudent):
             if frappe.db.exists("User", self.student_email_id):
                 self.user = self.student_email_id
                 return
-            user = frappe.get_doc(
-                {
-                    "doctype": "User",
-                    "first_name": self.first_name,
-                    "last_name": self.last_name,
-                    "email": self.student_email_id,
-                    "gender": self.gender,
-                    "send_welcome_email": 0,
-                    "user_type": "Website User",
-                }
-            )
-            user.add_roles("Student")
+            user = _new_student_user_doc(self)
             user.save(ignore_permissions=True)
             self.user = user.name
             # No enviar welcome aquí; enrollment.py enviará credenciales al correo personal
@@ -81,18 +98,7 @@ class Student(EducationStudent):
                 personal_email = personal_email.strip() or None
         if personal_email:
             # Crear User con correo institucional pero enviar bienvenida al correo personal
-            student_user = frappe.get_doc(
-                {
-                    "doctype": "User",
-                    "first_name": self.first_name,
-                    "last_name": self.last_name,
-                    "email": self.student_email_id,
-                    "gender": self.gender,
-                    "send_welcome_email": 0,
-                    "user_type": "Website User",
-                }
-            )
-            student_user.add_roles("Student")
+            student_user = _new_student_user_doc(self)
             student_user.save(ignore_permissions=True)
             self.user = student_user.name
             # Enviar correo de bienvenida al correo personal (link de reset de contraseña)

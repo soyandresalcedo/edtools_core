@@ -33,7 +33,7 @@ Si el correo ya existe (User o Student), no se crea uno nuevo: se lanza un error
 
 ## Logs y correo de credenciales
 
-- **Logs de simulación (SANDBOX=1):** Los mensajes `[Azure Sandbox] Simulando...` van al **log del servidor** (stdout), no al Registro de Errores de Frappe. En Railway: pestaña **Deployments** → tu servicio → **View Logs**.
+- **Logs de Azure/correo:** Los mensajes `[Azure] Enviando correo...` y `[Azure Sandbox] Simulando...` van al stdout. En Railway aparecen en **Deploy Logs** cuando se ejecuta la acción (al hacer "Inscribir estudiantes"), no solo al arrancar; filtrar por "Azure" o buscar la hora del intento.
 - **Correo de credenciales no llega:** Comprueba en Frappe: **Configuración → Email → Email Account**: debe haber una cuenta saliente por defecto. Si el envío falla, en **Registro de Errores** aparecerá una entrada con título "Error enviando credenciales al estudiante".
 
 ## Probar en sandbox
