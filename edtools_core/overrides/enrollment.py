@@ -86,9 +86,9 @@ def enroll_student_with_azure_provisioning(source_name: str):
 	from frappe.utils.password import update_password
 
 	def _ensure_user():
-		"""Crea User si no existe. Si ya existe (DuplicateEntryError), se continúa sin fallar."""
+		"""Crea User si no existe. Retorna 'created' si lo creó, 'duplicate_handled' si ya existía."""
 		if frappe.db.exists("User", institutional_email):
-			return
+			return "exists"
 		try:
 			user = frappe.get_doc({
 				"doctype": "User",
@@ -102,46 +102,56 @@ def enroll_student_with_azure_provisioning(source_name: str):
 			user.insert(ignore_permissions=True)
 		except frappe.DuplicateEntryError:
 			# Duplicate key = el User YA existe en la BD (nodo de escritura).
-			# Con USE_PUBLIC_PGHOST / réplicas, el SELECT puede seguir devolviendo vacío en esta
-			# conexión; no volver a comprobar ni lanzar. Confiar en el error y continuar.
+			# No llamar get_doc aquí ni después: con réplica puede lanzar "no encontrado" y ese
+			# mensaje queda en el response aunque lo capturemos. Saltamos password/share en esta
+			# petición; el admin puede ejecutar el script de recuperación.
 			frappe.db.rollback()
 			frappe.db.commit()
 			frappe.clear_cache(doctype="User")
-			return
+			return "duplicate_handled"
 		frappe.db.commit()
 		if not frappe.db.exists("User", institutional_email):
 			frappe.clear_cache(doctype="User")
 			if frappe.db.sql('SELECT 1 FROM "tabUser" WHERE name = %s LIMIT 1', (institutional_email,)):
-				return
+				return "exists"
 			frappe.throw(
 				_("No se pudo crear el usuario {0}. Ejecute el script de recuperación en "
 				  "AZURE_PROVISIONING.md (sección Solución de problemas).").format(
 					institutional_email
 				)
 			)
+		return "created"
 
-	_ensure_user()
-	# Asegurar rol Student, contraseña y DocShare (pueden fallar si esta conexión no ve al User por réplica)
-	try:
-		user_doc = frappe.get_doc("User", institutional_email)
-		if user_doc and "Student" not in [r.role for r in user_doc.roles]:
-			user_doc.add_roles("Student")
-			user_doc.save(ignore_permissions=True)
+	user_created = _ensure_user()
+	# Solo tocar User (password, DocShare, rol) si lo creamos en esta petición. Si fue
+	# duplicate_handled, esta conexión puede no ver al User (réplica) y get_doc lanzaría
+	# "Usuario no encontrado", que Frappe añade al response y muestra como error.
+	if user_created == "created":
+		try:
+			user_doc = frappe.get_doc("User", institutional_email)
+			if user_doc and "Student" not in [r.role for r in user_doc.roles]:
+				user_doc.add_roles("Student")
+				user_doc.save(ignore_permissions=True)
+				frappe.db.commit()
+			update_password(institutional_email, password, logout_all_sessions=False)
 			frappe.db.commit()
-		update_password(institutional_email, password, logout_all_sessions=False)
-		frappe.db.commit()
-		frappe.share.add_docshare(
-			"User", institutional_email, institutional_email,
-			write=1, share=1, flags={"ignore_share_permission": True}
-		)
-		frappe.db.commit()
-	except Exception as e:
-		frappe.db.rollback()
-		frappe.db.commit()
-		# Con USE_PUBLIC_PGHOST/réplicas el User puede no ser visible aquí; el enrollment continúa
+			frappe.share.add_docshare(
+				"User", institutional_email, institutional_email,
+				write=1, share=1, flags={"ignore_share_permission": True}
+			)
+			frappe.db.commit()
+		except Exception as e:
+			frappe.db.rollback()
+			frappe.db.commit()
+			frappe.log_error(
+				title="Azure provisioning: User post-create (password/share)",
+				message=f"email={institutional_email} error={e}",
+			)
+	elif user_created == "duplicate_handled":
+		# Contraseña/rol/DocShare: ejecutar script de recuperación en AZURE_PROVISIONING.md si hace falta.
 		frappe.log_error(
-			title="Azure provisioning: User post-create (password/share)",
-			message=f"email={institutional_email} error={e}\nPuede ser desfase réplica. Ejecute el script de recuperación en AZURE_PROVISIONING.md.",
+			title="Azure provisioning: User ya existía (duplicate)",
+			message=f"email={institutional_email}. Enrollment completado. Para contraseña/rol ejecute el script en AZURE_PROVISIONING.md.",
 		)
 
 	# No verificar con SQL: en Railway/PostgreSQL con réplicas, el SELECT puede ir a réplica
