@@ -43,24 +43,25 @@ def _normalize_for_email(text: str) -> str:
 
 def generate_cucusa_email(first_name: str, middle_name: Optional[str], last_name: str) -> str:
 	"""
-	Genera email institucional: nombre.primerapellido.segundoapellido@cucusa.org
-	last_name puede ser "Pérez García" (dos apellidos) o "Pérez" (uno).
+	Genera email institucional: primernombre.segundonombre.apellido1.apellido2@cucusa.org
+	Incluye segundo nombre (middle_name) si existe. last_name puede ser "Pérez García" (dos apellidos).
 	"""
-	nombre = _normalize_for_email(first_name or "")
-	# Si hay middle_name, podría ser segundo nombre o primer apellido según convención
-	# Por simplicidad: usamos last_name y lo partimos por espacios
+	partes_nombre = [_normalize_for_email(first_name or "")]
+	if middle_name and _normalize_for_email(middle_name):
+		partes_nombre.append(_normalize_for_email(middle_name))
+	nombre = ".".join(p for p in partes_nombre if p)
+	if not nombre:
+		nombre = "estudiante"
+
 	apellidos = _normalize_for_email(last_name or "")
 	if not apellidos:
 		apellidos = _normalize_for_email(middle_name or "")
+	parts_apellidos = [p for p in apellidos.split(".") if p]
+	if not parts_apellidos:
+		parts_apellidos = [nombre]
 
-	parts = [p for p in apellidos.split(".") if p]
-	if not nombre:
-		nombre = "estudiante"
-	if not parts:
-		parts = [nombre]  # fallback
-
-	# Formato: nombre.primerapellido.segundoapellido (o nombre.apellido si solo uno)
-	email = f"{nombre}." + ".".join(parts) + f"@{DOMAIN}"
+	# Formato: primernombre.segundonombre.apellido1.apellido2@cucusa.org
+	email = f"{nombre}." + ".".join(parts_apellidos) + f"@{DOMAIN}"
 
 	# No crear correos duplicados: si ya existe, lanzar error
 	if _email_exists_in_edtools(email):

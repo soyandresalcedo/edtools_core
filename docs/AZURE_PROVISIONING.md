@@ -27,9 +27,14 @@ Con `AZURE_PROVISIONING_ENABLED=0` o ausente, el flujo vuelve al comportamiento 
 
 ## Formato del email institucional
 
-`nombre.primerapellido.segundoapellido@cucusa.org` (minúsculas, sin acentos).
+`primernombre.segundonombre.apellido1.apellido2@cucusa.org` (minúsculas, sin acentos). Incluye el segundo nombre si está definido en el Applicant.
 
 Si el correo ya existe (User o Student), no se crea uno nuevo: se lanza un error y el admin debe revisar si el estudiante ya está matriculado.
+
+## Logs y correo de credenciales
+
+- **Logs de simulación (SANDBOX=1):** Los mensajes `[Azure Sandbox] Simulando...` van al **log del servidor** (stdout), no al Registro de Errores de Frappe. En Railway: pestaña **Deployments** → tu servicio → **View Logs**.
+- **Correo de credenciales no llega:** Comprueba en Frappe: **Configuración → Email → Email Account**: debe haber una cuenta saliente por defecto. Si el envío falla, en **Registro de Errores** aparecerá una entrada con título "Error enviando credenciales al estudiante".
 
 ## Probar en sandbox
 
