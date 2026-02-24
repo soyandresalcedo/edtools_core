@@ -77,7 +77,9 @@ def enroll_student_with_azure_provisioning(source_name: str):
 	frappe.publish_realtime("enroll_student_progress", {"progress": [3, 6]}, user=frappe.session.user)
 
 	# Crear User en Frappe con @cucusa.org (evitar send_welcome_email)
-	# Manejar DuplicateEntryError: User puede existir por intento previo o condición de carrera
+	# Manejar DuplicateEntryError: User puede existir por intento previo o condición de carrera.
+	# Paradoja: duplicate key dice que existe, pero exists/get_doc puede fallar (replicación, caché).
+	# Si capturamos DuplicateEntryError, confiar en él y continuar.
 	from frappe.utils.password import update_password
 
 	def _ensure_user():
@@ -102,21 +104,14 @@ def enroll_student_with_azure_provisioning(source_name: str):
 	update_password(institutional_email, password, logout_all_sessions=False)
 	frappe.db.commit()
 
-	# Verificar User: existe en DB (duplicate key) pero get_doc puede fallar si está "deleted" u otro estado.
-	# Usar SQL directo para evitar la paradoja User-existe vs Frappe-no-lo-encuentra.
+	# No verificar con SQL: en Railway/PostgreSQL con réplicas, el SELECT puede ir a réplica
+	# que aún no tiene el commit (replication lag) y devolver vacío aunque el User exista.
 	frappe.clear_cache(doctype="User")
-	user_exists_raw = frappe.db.sql(
-		"SELECT 1 FROM `tabUser` WHERE name = %s LIMIT 1",
-		(institutional_email,),
-	)
-	user_exists_in_db = bool(user_exists_raw)
-	if not user_exists_in_db:
-		frappe.throw(
-			f"Usuario {institutional_email} no pudo ser creado. "
-			"Verifique que no exista un User huérfano en la base de datos."
-		)
-	# Si existe en DB pero Frappe no lo carga bien, ignorar validación de links al guardar Student
-	skip_link_validation = not frappe.db.exists("User", institutional_email)
+
+	# Usar ignore_links: con réplicas, exists() puede devolver False por lag aunque el User exista.
+	# El Student override evita que validate_user cree User duplicado.
+	skip_link_validation = True
+	frappe.flags.azure_provisioning_enroll = True  # Student override lo usa
 
 	# Actualizar Applicant para que el mapper use @cucusa.org
 	frappe.db.set_value(
@@ -179,7 +174,10 @@ def enroll_student_with_azure_provisioning(source_name: str):
 
 	frappe.publish_realtime("enroll_student_progress", {"progress": [6, 6]}, user=frappe.session.user)
 
-	return program_enrollment
+	try:
+		return program_enrollment
+	finally:
+		frappe.flags.azure_provisioning_enroll = False
 
 
 def _send_credentials_email(
