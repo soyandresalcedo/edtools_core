@@ -8,6 +8,7 @@ import string
 from random import choice
 
 import frappe
+from frappe import _
 from frappe.model.mapper import get_mapped_doc
 
 from edtools_core.azure_provisioning import (
@@ -76,30 +77,51 @@ def enroll_student_with_azure_provisioning(source_name: str):
 
 	frappe.publish_realtime("enroll_student_progress", {"progress": [3, 6]}, user=frappe.session.user)
 
+	# Flag para que el override de User omita share_with_self (evita LinkValidationError
+	# porque DocShare valida el link al User dentro de la misma transacción).
+	frappe.flags.azure_provisioning_enroll = True
+
 	# Crear User en Frappe con @cucusa.org (evitar send_welcome_email)
 	# Manejar DuplicateEntryError: User puede existir por intento previo o condición de carrera.
-	# Paradoja: duplicate key dice que existe, pero exists/get_doc puede fallar (replicación, caché).
-	# Si capturamos DuplicateEntryError, confiar en él y continuar.
 	from frappe.utils.password import update_password
 
 	def _ensure_user():
+		"""Crea User si no existe. Sin ignore_if_duplicate para asegurar insert real."""
 		if frappe.db.exists("User", institutional_email):
 			return
-		user = frappe.get_doc({
-			"doctype": "User",
-			"email": institutional_email,
-			"first_name": applicant.first_name,
-			"last_name": applicant.last_name,
-			"user_type": "Website User",
-			"send_welcome_email": 0,
-		})
-		user.add_roles("Student")
-		# ignore_if_duplicate: si ya existe (race/replicación), no fallar; update_password lo actualiza
-		user.insert(ignore_permissions=True, ignore_if_duplicate=True)
+		try:
+			user = frappe.get_doc({
+				"doctype": "User",
+				"email": institutional_email,
+				"first_name": applicant.first_name,
+				"last_name": applicant.last_name,
+				"user_type": "Website User",
+				"send_welcome_email": 0,
+			})
+			user.add_roles("Student")
+			user.insert(ignore_permissions=True)
+		except frappe.DuplicateEntryError:
+			# User o tabHas Role ya existen (intento previo o huérfanos). Continuar si el User existe.
+			frappe.db.rollback()
+			frappe.db.commit()
+		frappe.db.commit()
+		if not frappe.db.exists("User", institutional_email):
+			frappe.throw(
+				_("No se pudo crear el usuario {0}. Ejecute el script de recuperación en "
+				  "AZURE_PROVISIONING.md (sección Solución de problemas).").format(
+					institutional_email
+				)
+			)
 
 	_ensure_user()
-	frappe.db.commit()
 	update_password(institutional_email, password, logout_all_sessions=False)
+	frappe.db.commit()
+
+	# Añadir DocShare para que el usuario pueda ver su propio perfil (omitido en User.on_update).
+	frappe.share.add_docshare(
+		"User", institutional_email, institutional_email,
+		write=1, share=1, flags={"ignore_share_permission": True}
+	)
 	frappe.db.commit()
 
 	# No verificar con SQL: en Railway/PostgreSQL con réplicas, el SELECT puede ir a réplica
@@ -109,7 +131,7 @@ def enroll_student_with_azure_provisioning(source_name: str):
 	# Usar ignore_links: con réplicas, exists() puede devolver False por lag aunque el User exista.
 	# El Student override evita que validate_user cree User duplicado.
 	skip_link_validation = True
-	frappe.flags.azure_provisioning_enroll = True  # Student override lo usa
+	# azure_provisioning_enroll ya está True desde antes de _ensure_user
 
 	# Actualizar Applicant para que el mapper use @cucusa.org
 	frappe.db.set_value(

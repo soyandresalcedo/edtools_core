@@ -123,6 +123,7 @@ override_doctype_class = {
 	"Program Enrollment": "edtools_core.overrides.program_enrollment.ProgramEnrollment",
 	"Program Enrollment Tool": "edtools_core.overrides.program_enrollment_tool.ProgramEnrollmentTool",
 	"Student": "edtools_core.overrides.student.Student",
+	"User": "edtools_core.overrides.user.User",
 }
 
 # Document Events
