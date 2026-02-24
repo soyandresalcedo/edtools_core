@@ -7,17 +7,20 @@ import frappe
 
 @frappe.whitelist()
 def get_user_info():
-	"""Compat con Student Portal Vue (education develop). Education v15 no lo tiene."""
+	"""Compat con Student Portal Vue (education develop). Education v15 no lo tiene.
+	Solo lee el usuario actual; el rol Student no tiene permiso en User, por eso ignore_permissions."""
 	if frappe.session.user == "Guest":
 		frappe.throw("Authentication failed", exc=frappe.AuthenticationError)
-	users = frappe.db.get_list(
+	result = frappe.db.get_value(
 		"User",
-		fields=["name", "email", "enabled", "user_image", "full_name", "user_type"],
-		filters={"name": frappe.session.user},
+		frappe.session.user,
+		["name", "email", "enabled", "user_image", "full_name", "user_type"],
+		as_dict=True,
+		ignore_permissions=True,
 	)
-	if not users:
+	if not result:
 		frappe.throw("User not found", exc=frappe.AuthenticationError)
-	result = users[0]
+	result = dict(result)
 	result["session_user"] = True
 	return result
 
@@ -262,12 +265,13 @@ def get_student_info():
 		) or []
 	# Enriquecer con datos del User: Edit Profile guarda en User (mobile_no, etc.), el modal lee Student
 	user_id = student_info.get("user")
-	if user_id:
+	if user_id and user_id == frappe.session.user:
 		user_data = frappe.db.get_value(
 			"User",
 			user_id,
 			["mobile_no", "phone", "user_image"],
 			as_dict=True,
+			ignore_permissions=True,
 		)
 		if user_data:
 			if not (student_info.get("student_mobile_number") or "").strip():
