@@ -1,7 +1,7 @@
 # Copyright (c) EdTools
-# Override de Student: durante Azure provisioning, no crear User duplicado.
-# El User @cucusa.org ya se crea en enrollment.py; validate_user podría intentar crearlo de nuevo
-# si frappe.db.exists falla por replicación/caché.
+# Override de Student: con Azure provisioning, Education es la única que crea el User.
+# Cuando azure_provisioning_enroll está activo: creamos el User aquí (send_welcome_email=0) y
+# no enviamos welcome; enrollment.py envía después el correo de credenciales al personal.
 
 from __future__ import annotations
 
@@ -41,9 +41,26 @@ class Student(EducationStudent):
                 "student_email_id",
                 self.student_email_id,
             )
-        # Durante Azure provisioning, el User @cucusa.org ya fue creado en enrollment.py.
+        # Azure provisioning: crear User aquí (única fuente) sin enviar welcome; enrollment envía credenciales al personal.
         if getattr(frappe.flags, "azure_provisioning_enroll", False) and self.student_email_id and self.student_email_id.endswith("@cucusa.org"):
-            self.user = self.student_email_id
+            if frappe.db.exists("User", self.student_email_id):
+                self.user = self.student_email_id
+                return
+            user = frappe.get_doc(
+                {
+                    "doctype": "User",
+                    "first_name": self.first_name,
+                    "last_name": self.last_name,
+                    "email": self.student_email_id,
+                    "gender": self.gender,
+                    "send_welcome_email": 0,
+                    "user_type": "Website User",
+                }
+            )
+            user.add_roles("Student")
+            user.save(ignore_permissions=True)
+            self.user = user.name
+            # No enviar welcome aquí; enrollment.py enviará credenciales al correo personal
             return
         # User ya existe: solo enlazar
         if frappe.db.exists("User", self.student_email_id):

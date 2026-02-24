@@ -1,6 +1,6 @@
 # Copyright (c) EdTools
 # Override de enroll_student con provisioning Azure @cucusa.org.
-# Modo sandbox: simula Azure, crea Student/User/Program Enrollment reales.
+# Education es la única que crea Student y User en Frappe; aquí solo Azure + contraseña + correo de credenciales.
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from random import choice
 
 import frappe
 from frappe import _
-from frappe.model.mapper import get_mapped_doc
 
 from edtools_core.azure_provisioning import (
 	assign_microsoft_license,
@@ -36,10 +35,11 @@ def _generate_temp_password(length: int = 12) -> str:
 
 def enroll_student_with_azure_provisioning(source_name: str):
 	"""
-	Reemplaza education.education.api.enroll_student cuando Azure provisioning está habilitado.
-	Flujo: generar @cucusa.org -> Azure (o sandbox) -> Student -> User -> Program Enrollment -> email credenciales.
+	Flujo Azure: generar @cucusa.org → crear en Azure (o reusar) → asignar licencia →
+	actualizar Applicant → Education enroll_student (crea Student + User, sin welcome) →
+	update_password → enviar credenciales al correo personal.
+	No creamos User en Frappe aquí; solo Education (Student.validate_user).
 	"""
-	# Si no está habilitado, llamar al original de Education
 	if not is_provisioning_enabled():
 		from education.education.api import enroll_student as _edu_enroll
 		return _edu_enroll(source_name)
@@ -47,15 +47,13 @@ def enroll_student_with_azure_provisioning(source_name: str):
 	frappe.publish_realtime("enroll_student_progress", {"progress": [1, 6]}, user=frappe.session.user)
 
 	applicant = frappe.get_doc("Student Applicant", source_name)
-	# Correo personal para enviar credenciales
 	personal_email = (applicant.get("personal_email") or applicant.student_email_id or "").strip()
 	if not personal_email:
 		frappe.throw(
-			"Para provisioning con Azure se requiere Correo personal (personal_email) o "
-			"Dirección de correo electrónico del estudiante en el Student Applicant."
+			_("Para provisioning con Azure se requiere Correo personal (personal_email) o "
+			  "Dirección de correo electrónico del estudiante en el Student Applicant.")
 		)
 
-	# Generar email institucional
 	institutional_email = generate_cucusa_email(
 		applicant.first_name,
 		applicant.middle_name,
@@ -65,7 +63,7 @@ def enroll_student_with_azure_provisioning(source_name: str):
 
 	frappe.publish_realtime("enroll_student_progress", {"progress": [2, 6]}, user=frappe.session.user)
 
-	# Azure (o sandbox)
+	# Azure: crear usuario (o obtener id si ya existe) y asignar licencia
 	user_id = create_azure_user(
 		institutional_email,
 		password,
@@ -77,187 +75,39 @@ def enroll_student_with_azure_provisioning(source_name: str):
 
 	frappe.publish_realtime("enroll_student_progress", {"progress": [3, 6]}, user=frappe.session.user)
 
-	# Flag para que el override de User omita share_with_self (evita LinkValidationError
-	# porque DocShare valida el link al User dentro de la misma transacción).
-	frappe.flags.azure_provisioning_enroll = True
-
-	# Crear User en Frappe con @cucusa.org (evitar send_welcome_email)
-	# Manejar DuplicateEntryError: User puede existir por intento previo o condición de carrera.
-	from frappe.utils.password import update_password
-
-	def _ensure_user():
-		"""Crea User si no existe. Retorna 'created' si lo creó, 'duplicate_handled' si ya existía."""
-		if frappe.db.exists("User", institutional_email):
-			return "exists"
-		try:
-			user = frappe.get_doc({
-				"doctype": "User",
-				"email": institutional_email,
-				"first_name": applicant.first_name,
-				"last_name": applicant.last_name,
-				"user_type": "Website User",
-				"send_welcome_email": 0,
-			})
-			user.add_roles("Student")
-			user.insert(ignore_permissions=True)
-		except frappe.DuplicateEntryError:
-			# Duplicate key = el User YA existe en la BD (nodo de escritura).
-			# No llamar get_doc aquí ni después: con réplica puede lanzar "no encontrado" y ese
-			# mensaje queda en el response aunque lo capturemos. Saltamos password/share en esta
-			# petición; el admin puede ejecutar el script de recuperación.
-			frappe.db.rollback()
-			frappe.db.commit()
-			frappe.clear_cache(doctype="User")
-			return "duplicate_handled"
-		frappe.db.commit()
-		if not frappe.db.exists("User", institutional_email):
-			frappe.clear_cache(doctype="User")
-			if frappe.db.sql('SELECT 1 FROM "tabUser" WHERE name = %s LIMIT 1', (institutional_email,)):
-				return "exists"
-			frappe.throw(
-				_("No se pudo crear el usuario {0}. Ejecute el script de recuperación en "
-				  "AZURE_PROVISIONING.md (sección Solución de problemas).").format(
-					institutional_email
-				)
-			)
-		return "created"
-
-	user_created = _ensure_user()
-	# Solo tocar User (password, DocShare, rol) si lo creamos en esta petición. Si fue
-	# duplicate_handled, esta conexión puede no ver al User (réplica) y get_doc lanzaría
-	# "Usuario no encontrado", que Frappe añade al response y muestra como error.
-	if user_created == "created":
-		try:
-			user_doc = frappe.get_doc("User", institutional_email)
-			if user_doc and "Student" not in [r.role for r in user_doc.roles]:
-				user_doc.add_roles("Student")
-				user_doc.save(ignore_permissions=True)
-				frappe.db.commit()
-			update_password(institutional_email, password, logout_all_sessions=False)
-			frappe.db.commit()
-			frappe.share.add_docshare(
-				"User", institutional_email, institutional_email,
-				write=1, share=1, flags={"ignore_share_permission": True}
-			)
-			frappe.db.commit()
-		except Exception as e:
-			frappe.db.rollback()
-			frappe.db.commit()
-			frappe.log_error(
-				title="Azure provisioning: User post-create (password/share)",
-				message=f"email={institutional_email} error={e}",
-			)
-	elif user_created == "duplicate_handled":
-		# Encolar asignación de contraseña y DocShare en segundo plano; el worker puede usar
-		# otra conexión que sí vea al User. El estudiante recibe la misma contraseña por email.
-		frappe.enqueue(
-			_set_password_and_share_for_user,
-			queue="default",
-			after_commit=True,
-			email=institutional_email,
-			password=password,
-		)
-
-	# No verificar con SQL: en Railway/PostgreSQL con réplicas, el SELECT puede ir a réplica
-	# que aún no tiene el commit (replication lag) y devolver vacío aunque el User exista.
-	frappe.clear_cache(doctype="User")
-
-	# Usar ignore_links: con réplicas, exists() puede devolver False por lag aunque el User exista.
-	# El Student override evita que validate_user cree User duplicado.
-	skip_link_validation = True
-	# azure_provisioning_enroll ya está True desde antes de _ensure_user
-
-	# Actualizar Applicant para que el mapper use @cucusa.org
+	# Actualizar Applicant para que el mapper copie @cucusa.org al Student
 	frappe.db.set_value(
 		"Student Applicant", source_name,
 		{"student_email_id": institutional_email, "institutional_email": institutional_email},
 	)
 	frappe.db.commit()
 
-	frappe.publish_realtime("enroll_student_progress", {"progress": [4, 6]}, user=frappe.session.user)
-
-	# Crear Student o reusar si ya existe (intento previo)
-	existing_student = frappe.db.exists("Student", {"student_applicant": source_name})
-	if existing_student:
-		student = frappe.get_doc("Student", existing_student)
-		student.user = institutional_email
-		student.student_email_id = institutional_email
-		if skip_link_validation:
-			student.flags.ignore_links = True
-		student.save()
-	else:
-		student = get_mapped_doc(
-			"Student Applicant",
-			source_name,
-			{
-				"Student Applicant": {
-					"doctype": "Student",
-					"field_map": {"name": "student_applicant"},
-				}
-			},
-			ignore_permissions=True,
-		)
-		student.user = institutional_email
-		student.student_email_id = institutional_email
-		if skip_link_validation:
-			student.flags.ignore_links = True
-		student.save()
-
-	student_applicant_data = frappe.db.get_value(
-		"Student Applicant", source_name,
-		["student_category", "program", "academic_year"],
-		as_dict=True,
-	)
-	program_enrollment = frappe.new_doc("Program Enrollment")
-	program_enrollment.student = student.name
-	program_enrollment.student_category = student_applicant_data.student_category
-	program_enrollment.student_name = student.student_name
-	program_enrollment.program = student_applicant_data.program
-	program_enrollment.academic_year = student_applicant_data.academic_year
-	program_enrollment.save()
-
-	frappe.publish_realtime("enroll_student_progress", {"progress": [5, 6]}, user=frappe.session.user)
-
-	# Enviar credenciales al correo personal
-	_send_credentials_email(
-		recipient=personal_email,
-		institutional_email=institutional_email,
-		password=password,
-		student_name=student.student_name or applicant.title,
-	)
-
-	frappe.publish_realtime("enroll_student_progress", {"progress": [6, 6]}, user=frappe.session.user)
-
+	frappe.flags.azure_provisioning_enroll = True
 	try:
+		frappe.publish_realtime("enroll_student_progress", {"progress": [4, 6]}, user=frappe.session.user)
+
+		# Education crea Student + User (validate_user crea User con send_welcome_email=0, sin enviar welcome)
+		from education.education.api import enroll_student as _edu_enroll
+		program_enrollment = _edu_enroll(source_name)
+
+		frappe.publish_realtime("enroll_student_progress", {"progress": [5, 6]}, user=frappe.session.user)
+
+		# Contraseña en Frappe (misma que en Azure) y correo de credenciales al personal
+		from frappe.utils.password import update_password
+		update_password(institutional_email, password, logout_all_sessions=False)
+		frappe.db.commit()
+
+		_send_credentials_email(
+			recipient=personal_email,
+			institutional_email=institutional_email,
+			password=password,
+			student_name=program_enrollment.student_name or applicant.title,
+		)
+
+		frappe.publish_realtime("enroll_student_progress", {"progress": [6, 6]}, user=frappe.session.user)
 		return program_enrollment
 	finally:
 		frappe.flags.azure_provisioning_enroll = False
-
-
-def _set_password_and_share_for_user(email: str, password: str) -> None:
-	"""
-	Job en segundo plano: asigna contraseña y DocShare a un User (p. ej. cuando
-	enrollment detectó duplicate_handled y no pudo hacerlo en la petición por réplica).
-	"""
-	from frappe.utils.password import update_password
-	try:
-		update_password(email, password, logout_all_sessions=False)
-		frappe.db.commit()
-		user_doc = frappe.get_doc("User", email)
-		if "Student" not in [r.role for r in user_doc.roles]:
-			user_doc.add_roles("Student")
-			user_doc.save(ignore_permissions=True)
-			frappe.db.commit()
-		frappe.share.add_docshare(
-			"User", email, email,
-			write=1, share=1, flags={"ignore_share_permission": True}
-		)
-		frappe.db.commit()
-	except Exception as e:
-		frappe.log_error(
-			title="Azure provisioning: job password/share falló",
-			message=f"email={email} error={e}\nEjecute el script de recuperación en AZURE_PROVISIONING.md.",
-		)
 
 
 def _send_credentials_email(

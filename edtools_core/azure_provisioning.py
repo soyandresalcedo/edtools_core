@@ -108,6 +108,32 @@ def get_provisioning_enabled() -> bool:
 	return is_provisioning_enabled()
 
 
+def get_azure_user_id(email: str) -> Optional[str]:
+	"""
+	Obtiene el object id de un usuario en Azure AD por userPrincipalName.
+	Retorna None si no existe. Solo modo real (sandbox retorna None).
+	"""
+	if is_sandbox_mode():
+		return None
+	import urllib.parse
+	import requests
+	token = _get_graph_token()
+	# GET /users/{id|userPrincipalName} acepta el UPN con @
+	encoded = urllib.parse.quote(email, safe="")
+	url = f"https://graph.microsoft.com/v1.0/users/{encoded}"
+	try:
+		resp = requests.get(url, headers={
+			"Authorization": f"Bearer {token}",
+			"Content-Type": "application/json",
+		}, timeout=15)
+		if resp.status_code == 404:
+			return None
+		resp.raise_for_status()
+		return resp.json().get("id")
+	except Exception:
+		return None
+
+
 def create_azure_user(
 	email: str,
 	password: str,
@@ -118,14 +144,14 @@ def create_azure_user(
 ) -> str:
 	"""
 	Crea usuario en Azure AD. En sandbox, simula y retorna un ID ficticio.
+	Si el usuario ya existe (userPrincipalName duplicado), devuelve su id (idempotente).
 	Retorna el user id (GUID) de Azure para asignar licencia.
 	"""
 	if is_sandbox_mode():
 		frappe.logger().info(f"[Azure Sandbox] Simulando creación de usuario: {email}")
 		return f"sandbox-{email.replace('@', '-at-')}"
 
-	# Modo real: llamar a Microsoft Graph
-	# TODO: implementar cuando se active Azure real
+	import requests
 	token = _get_graph_token()
 	url = "https://graph.microsoft.com/v1.0/users"
 	mail_nickname = email.split("@")[0]
@@ -141,11 +167,21 @@ def create_azure_user(
 		"givenName": first_name or "",
 		"surname": last_name or "",
 	}
-	import requests
 	resp = requests.post(url, json=payload, headers={
 		"Authorization": f"Bearer {token}",
 		"Content-Type": "application/json",
 	}, timeout=30)
+	if resp.status_code == 400:
+		body = resp.json() if resp.text else {}
+		# Usuario ya existe: obtener id y retornarlo para asignar licencia
+		code = body.get("error", {}).get("code", "")
+		msg = (body.get("error", {}).get("message") or "").lower()
+		if "already exists" in msg or "duplicate" in msg or code == "Request_ResourceAlreadyExists":
+			existing_id = get_azure_user_id(email)
+			if existing_id:
+				frappe.logger().info(f"Usuario Azure ya existía: {email}, reutilizando id para licencia")
+				return existing_id
+		resp.raise_for_status()
 	resp.raise_for_status()
 	return resp.json().get("id", "")
 
@@ -154,13 +190,13 @@ def assign_microsoft_license(user_id: str, sku_id: Optional[str] = None) -> None
 	"""
 	Asigna licencia Microsoft 365 al usuario.
 	En sandbox, simula sin llamar a Azure.
+	Si la licencia ya está asignada (400), no falla (idempotente).
 	"""
 	if is_sandbox_mode():
 		frappe.logger().info(f"[Azure Sandbox] Simulando asignación de licencia para: {user_id}")
 		return
 
-	# Modo real: POST /users/{id}/assignLicense
-	# TODO: implementar cuando se active Azure real
+	import requests
 	token = _get_graph_token()
 	url = f"https://graph.microsoft.com/v1.0/users/{user_id}/assignLicense"
 	sku = sku_id or _get_config("sku_id") or DEFAULT_SKU_ID
@@ -168,11 +204,18 @@ def assign_microsoft_license(user_id: str, sku_id: Optional[str] = None) -> None
 		"addLicenses": [{"skuId": sku, "disabledPlans": []}],
 		"removeLicenses": [],
 	}
-	import requests
 	resp = requests.post(url, json=payload, headers={
 		"Authorization": f"Bearer {token}",
 		"Content-Type": "application/json",
 	}, timeout=30)
+	if resp.status_code == 400:
+		body = resp.json() if resp.text else {}
+		msg = (body.get("error", {}).get("message") or "").lower()
+		# Licencia ya asignada o conflicto: no fallar
+		if "already assigned" in msg or "license" in msg:
+			frappe.logger().info(f"Licencia ya asignada o sin cambios para user_id={user_id}")
+			return
+		resp.raise_for_status()
 	resp.raise_for_status()
 
 
