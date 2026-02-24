@@ -148,10 +148,14 @@ def enroll_student_with_azure_provisioning(source_name: str):
 				message=f"email={institutional_email} error={e}",
 			)
 	elif user_created == "duplicate_handled":
-		# Contraseña/rol/DocShare: ejecutar script de recuperación en AZURE_PROVISIONING.md si hace falta.
-		frappe.log_error(
-			title="Azure provisioning: User ya existía (duplicate)",
-			message=f"email={institutional_email}. Enrollment completado. Para contraseña/rol ejecute el script en AZURE_PROVISIONING.md.",
+		# Encolar asignación de contraseña y DocShare en segundo plano; el worker puede usar
+		# otra conexión que sí vea al User. El estudiante recibe la misma contraseña por email.
+		frappe.enqueue(
+			_set_password_and_share_for_user,
+			queue="default",
+			after_commit=True,
+			email=institutional_email,
+			password=password,
 		)
 
 	# No verificar con SQL: en Railway/PostgreSQL con réplicas, el SELECT puede ir a réplica
@@ -230,6 +234,32 @@ def enroll_student_with_azure_provisioning(source_name: str):
 		frappe.flags.azure_provisioning_enroll = False
 
 
+def _set_password_and_share_for_user(email: str, password: str) -> None:
+	"""
+	Job en segundo plano: asigna contraseña y DocShare a un User (p. ej. cuando
+	enrollment detectó duplicate_handled y no pudo hacerlo en la petición por réplica).
+	"""
+	from frappe.utils.password import update_password
+	try:
+		update_password(email, password, logout_all_sessions=False)
+		frappe.db.commit()
+		user_doc = frappe.get_doc("User", email)
+		if "Student" not in [r.role for r in user_doc.roles]:
+			user_doc.add_roles("Student")
+			user_doc.save(ignore_permissions=True)
+			frappe.db.commit()
+		frappe.share.add_docshare(
+			"User", email, email,
+			write=1, share=1, flags={"ignore_share_permission": True}
+		)
+		frappe.db.commit()
+	except Exception as e:
+		frappe.log_error(
+			title="Azure provisioning: job password/share falló",
+			message=f"email={email} error={e}\nEjecute el script de recuperación en AZURE_PROVISIONING.md.",
+		)
+
+
 def _send_credentials_email(
 	recipient: str,
 	institutional_email: str,
@@ -254,6 +284,8 @@ def _send_credentials_email(
 <p><a href="{portal_url}">{portal_url}</a></p>
 
 <p><strong>Importante:</strong> Te recomendamos cambiar tu contraseña en el primer inicio de sesión por razones de seguridad.</p>
+
+<p>Si no puedes acceder de inmediato, espera un momento e inténtalo de nuevo, o usa "¿Olvidaste tu contraseña?" con tu correo institucional.</p>
 
 <p>Saludos,<br>
 Equipo CUC University</p>
