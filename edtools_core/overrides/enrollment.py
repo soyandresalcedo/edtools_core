@@ -102,15 +102,21 @@ def enroll_student_with_azure_provisioning(source_name: str):
 	update_password(institutional_email, password, logout_all_sessions=False)
 	frappe.db.commit()
 
-	# Limpiar caché y forzar carga del User (asegura que la validación de links lo vea)
+	# Verificar User: existe en DB (duplicate key) pero get_doc puede fallar si está "deleted" u otro estado.
+	# Usar SQL directo para evitar la paradoja User-existe vs Frappe-no-lo-encuentra.
 	frappe.clear_cache(doctype="User")
-	try:
-		frappe.get_doc("User", institutional_email)
-	except frappe.DoesNotExistError:
+	user_exists_raw = frappe.db.sql(
+		"SELECT 1 FROM `tabUser` WHERE name = %s LIMIT 1",
+		(institutional_email,),
+	)
+	user_exists_in_db = bool(user_exists_raw)
+	if not user_exists_in_db:
 		frappe.throw(
 			f"Usuario {institutional_email} no pudo ser creado. "
 			"Verifique que no exista un User huérfano en la base de datos."
 		)
+	# Si existe en DB pero Frappe no lo carga bien, ignorar validación de links al guardar Student
+	skip_link_validation = not frappe.db.exists("User", institutional_email)
 
 	# Actualizar Applicant para que el mapper use @cucusa.org
 	frappe.db.set_value(
@@ -127,6 +133,8 @@ def enroll_student_with_azure_provisioning(source_name: str):
 		student = frappe.get_doc("Student", existing_student)
 		student.user = institutional_email
 		student.student_email_id = institutional_email
+		if skip_link_validation:
+			student.flags.ignore_links = True
 		student.save()
 	else:
 		student = get_mapped_doc(
@@ -142,6 +150,8 @@ def enroll_student_with_azure_provisioning(source_name: str):
 		)
 		student.user = institutional_email
 		student.student_email_id = institutional_email
+		if skip_link_validation:
+			student.flags.ignore_links = True
 		student.save()
 
 	student_applicant_data = frappe.db.get_value(
