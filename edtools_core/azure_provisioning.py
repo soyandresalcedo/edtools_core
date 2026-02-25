@@ -103,6 +103,30 @@ def is_provisioning_enabled() -> bool:
 	return str(val).strip() in ("1", "true", "True", "yes")
 
 
+def _log_azure_response(operation: str, resp, *, extra: str = "") -> None:
+	"""
+	Log completo de respuestas Azure: en 2xx preview corto; en 4xx/5xx cuerpo completo.
+	Imprime a stdout (Railway) y a frappe.logger para trazabilidad.
+	"""
+	status = resp.status_code
+	body = resp.text or ""
+	is_error = status >= 400
+	pref = f"[Azure DEBUG] {operation} → HTTP {status}"
+	if extra:
+		pref = f"{pref} | {extra}"
+	if is_error:
+		# Error: cuerpo completo para diagnóstico (403, 500, etc.)
+		full_msg = f"{pref}\nbody_full={body}"
+		print(full_msg, flush=True)
+		frappe.logger().error(f"Azure {operation} error: {full_msg}")
+	else:
+		# Éxito: preview corto
+		preview = body[:200] if body else "(vacío)"
+		msg = f"{pref} | body_preview={preview}"
+		print(msg, flush=True)
+		frappe.logger().info(f"Azure {operation}: HTTP {status}")
+
+
 @frappe.whitelist()
 def get_provisioning_enabled() -> bool:
 	"""API para cliente: indica si Azure provisioning está activo."""
@@ -129,9 +153,12 @@ def get_azure_user_id(email: str) -> Optional[str]:
 		}, timeout=15)
 		if resp.status_code == 404:
 			return None
+		if resp.status_code >= 400:
+			_log_azure_response("get_azure_user_id", resp, extra=f"email={email}")
 		resp.raise_for_status()
 		return resp.json().get("id")
-	except Exception:
+	except Exception as e:
+		frappe.logger().error(f"Azure get_azure_user_id falló para {email}: {e}")
 		return None
 
 
@@ -170,10 +197,12 @@ def create_azure_user(
 		"givenName": first_name or "",
 		"surname": last_name or "",
 	}
+	print(f"[Azure DEBUG] POST {url} | userPrincipalName={email}", flush=True)
 	resp = requests.post(url, json=payload, headers={
 		"Authorization": f"Bearer {token}",
 		"Content-Type": "application/json",
 	}, timeout=30)
+	_log_azure_response("create_azure_user", resp, extra=f"userPrincipalName={email}")
 	if resp.status_code == 400:
 		body = resp.json() if resp.text else {}
 		# Usuario ya existe: obtener id y retornarlo para asignar licencia
@@ -182,11 +211,14 @@ def create_azure_user(
 		if "already exists" in msg or "duplicate" in msg or code == "Request_ResourceAlreadyExists":
 			existing_id = get_azure_user_id(email)
 			if existing_id:
+				print(f"[Azure DEBUG] Usuario ya existía, reutilizando id={existing_id}", flush=True)
 				frappe.logger().info(f"Usuario Azure ya existía: {email}, reutilizando id para licencia")
 				return existing_id
 		resp.raise_for_status()
 	resp.raise_for_status()
-	return resp.json().get("id", "")
+	azure_id = resp.json().get("id", "")
+	print(f"[Azure DEBUG] create_azure_user → 201 Created | azure_id={azure_id}", flush=True)
+	return azure_id
 
 
 def assign_microsoft_license(user_id: str, sku_id: Optional[str] = None) -> None:
@@ -209,19 +241,23 @@ def assign_microsoft_license(user_id: str, sku_id: Optional[str] = None) -> None
 		"addLicenses": [{"skuId": sku, "disabledPlans": []}],
 		"removeLicenses": [],
 	}
+	print(f"[Azure DEBUG] POST {url} | user_id={user_id} | sku={sku}", flush=True)
 	resp = requests.post(url, json=payload, headers={
 		"Authorization": f"Bearer {token}",
 		"Content-Type": "application/json",
 	}, timeout=30)
+	_log_azure_response("assign_microsoft_license", resp, extra=f"user_id={user_id}")
 	if resp.status_code == 400:
 		body = resp.json() if resp.text else {}
 		msg = (body.get("error", {}).get("message") or "").lower()
 		# Licencia ya asignada o conflicto: no fallar
 		if "already assigned" in msg or "license" in msg:
+			print(f"[Azure DEBUG] Licencia ya asignada o sin cambios para user_id={user_id}", flush=True)
 			frappe.logger().info(f"Licencia ya asignada o sin cambios para user_id={user_id}")
 			return
 		resp.raise_for_status()
 	resp.raise_for_status()
+	print(f"[Azure DEBUG] assign_microsoft_license → 200 OK", flush=True)
 
 
 def _get_graph_token() -> str:
@@ -242,6 +278,8 @@ def _get_graph_token() -> str:
 		"client_secret": client_secret,
 		"scope": "https://graph.microsoft.com/.default",
 	}
+	print(f"[Azure DEBUG] POST token | tenant={tenant_id}", flush=True)
 	resp = requests.post(url, data=data, timeout=30)
+	_log_azure_response("token", resp, extra=f"tenant={tenant_id}")
 	resp.raise_for_status()
 	return resp.json().get("access_token", "")
