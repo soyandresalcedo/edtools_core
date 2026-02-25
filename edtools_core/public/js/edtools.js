@@ -88,6 +88,7 @@ if (typeof $ !== 'undefined') {
     $(document).on('app_ready', function() {
         updatePageTitles();
         replaceTextInPage();
+        initStudentLinkFormatter();
     });
 }
 
@@ -96,5 +97,19 @@ if (typeof frappe !== 'undefined' && frappe.ready) {
     frappe.ready(function() {
         updatePageTitles();
         replaceTextInPage();
+        initStudentLinkFormatter();
     });
+}
+
+// Link formatter para Student: usar student_name cuando esté disponible (evita mostrar EDU-STU-xxx en tablas)
+// Fix: filas añadidas con "Obtener Estudiantes" no tienen título en _link_titles; student_name sí está en la fila
+function initStudentLinkFormatter() {
+    if (frappe.form && frappe.form.link_formatters) {
+        frappe.form.link_formatters['Student'] = function(value, doc, docfield) {
+            if (doc && doc.student_name) {
+                return doc.student_name;
+            }
+            return value;
+        };
+    }
 }
