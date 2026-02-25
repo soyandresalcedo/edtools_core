@@ -1328,6 +1328,86 @@ def get_students_by_group(student_group):
         pluck='student'
     )
 
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def fetch_students_flexible(doctype, txt, searchfield, start, page_len, filters):
+    """
+    Búsqueda flexible de estudiantes para añadir manualmente en Student Group.
+    Primero intenta con los filtros completos; si no hay resultados, amplía a solo año/término académico.
+    """
+    try:
+        from education.education.education.doctype.student_group.student_group import get_program_enrollment
+    except ImportError:
+        from education.education.doctype.student_group.student_group import get_program_enrollment
+
+    if filters.get("group_based_on") == "Activity":
+        # Activity: mostrar todos los estudiantes (búsqueda libre)
+        return frappe.db.sql(
+            """select name, student_name from tabStudent
+            where (`{0}` LIKE %s or student_name LIKE %s)
+            order by idx desc, name
+            limit %s offset %s""".format(searchfield),
+            ("%%%s%%" % txt, "%%%s%%" % txt, page_len, start),
+        )
+
+    academic_year = filters.get("academic_year")
+    if not academic_year:
+        return []
+
+    enrolled_students = get_program_enrollment(
+        academic_year,
+        filters.get("academic_term"),
+        filters.get("program"),
+        filters.get("batch"),
+        filters.get("student_category"),
+        filters.get("course"),
+    )
+    student_group_name = filters.get("student_group")
+    if student_group_name:
+        already_in_group = frappe.db.sql_list(
+            """select student from `tabStudent Group Student` where parent=%s""",
+            (student_group_name,),
+        )
+        students = [
+            d.student for d in (enrolled_students or [])
+            if d.student not in already_in_group
+        ]
+    else:
+        students = [d.student for d in (enrolled_students or [])]
+
+    # Fallback: si no hay resultados con filtros completos, intentar solo año + término
+    if not students and (filters.get("program") or filters.get("batch") or filters.get("student_category") or filters.get("course")):
+        enrolled_students = get_program_enrollment(
+            academic_year,
+            filters.get("academic_term"),
+            None,
+            None,
+            None,
+            None,
+        )
+        if student_group_name and enrolled_students:
+            already_in_group = frappe.db.sql_list(
+                """select student from `tabStudent Group Student` where parent=%s""",
+                (student_group_name,),
+            )
+            students = [d.student for d in enrolled_students if d.student not in already_in_group]
+        else:
+            students = [d.student for d in (enrolled_students or [])]
+
+    if not students:
+        students = [""]
+
+    return frappe.db.sql(
+        """select name, student_name from tabStudent
+        where name in ({0}) and (`{1}` LIKE %s or student_name LIKE %s)
+        order by idx desc, name
+        limit %s offset %s""".format(
+            ", ".join(["%s"] * len(students)), searchfield
+        ),
+        tuple(students + ["%%%s%%" % txt, "%%%s%%" % txt, page_len, start]),
+    )
+
 # ------------------------------------------------------------------
 # STUDENT FINANCIAL TOOL - LÓGICA DE NEGOCIO
 # ------------------------------------------------------------------
