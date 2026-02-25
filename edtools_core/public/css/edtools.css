@@ -61,4 +61,71 @@ footer a[href*="erpnext"] {
     object-fit: contain;
 }
 
+/* ============================= */
+/* LOGIN SPLIT LAYOUT - 50% imagen, 50% formulario */
+/* ============================= */
+
+/* Romper contenedor para que el split ocupe toda la pantalla */
+body:has(.login-split-wrapper) .page-content-wrapper,
+body:has(.login-split-wrapper) .page-content-wrapper main,
+body:has(.login-split-wrapper) .page-content-wrapper .container,
+#page-login .page-content-wrapper,
+#page-login .page-content-wrapper main,
+#page-login .page-content-wrapper .container {
+	min-height: 100vh !important;
+	max-width: none !important;
+	width: 100% !important;
+	padding: 0 !important;
+	margin: 0 !important;
+}
+
+.login-split-wrapper {
+	display: flex;
+	min-height: 100vh;
+	width: 100%;
+}
+
+.login-split-left {
+	flex: 1;
+	min-width: 50%;
+	background-size: cover;
+	background-position: center;
+	background-repeat: no-repeat;
+	background-color: #f0f4f8;
+}
+
+.login-split-right {
+	flex: 1;
+	min-width: 50%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	overflow-y: auto;
+	padding: 2rem;
+	background-color: #fff;
+}
+
+.login-split-right > div {
+	width: 100%;
+	max-width: 420px;
+}
+
+/* Móvil: imagen arriba (reducida), formulario abajo */
+@media (max-width: 767px) {
+	.login-split-wrapper {
+		flex-direction: column;
+	}
+
+	.login-split-left {
+		min-height: 35vh;
+		min-width: 100%;
+	}
+
+	.login-split-right {
+		min-width: 100%;
+		padding: 1.5rem;
+	}
+}
+
 /* That's it! Keep everything else as default Frappe styling */
