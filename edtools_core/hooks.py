@@ -35,7 +35,8 @@ web_include_js = "/assets/edtools_core/js/edtools.js"
 doctype_js = {
 	"Student": "public/js/student.js",
 	"Student Applicant": "public/js/student_applicant.js",
-	"Fee Structure": "public/js/fee_structure_custom.js"
+	"Fee Structure": "public/js/fee_structure_custom.js",
+	"Student Group": "public/js/student_group_custom.js",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -123,6 +124,7 @@ override_doctype_class = {
 	"Program Enrollment": "edtools_core.overrides.program_enrollment.ProgramEnrollment",
 	"Program Enrollment Tool": "edtools_core.overrides.program_enrollment_tool.ProgramEnrollmentTool",
 	"Student": "edtools_core.overrides.student.Student",
+	"Student Group": "edtools_core.overrides.student_group.StudentGroup",
 	"User": "edtools_core.overrides.user.User",
 }
 
