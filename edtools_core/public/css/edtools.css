@@ -62,7 +62,7 @@ footer a[href*="erpnext"] {
 }
 
 /* ============================= */
-/* LOGIN SPLIT LAYOUT - 50% imagen, 50% formulario */
+/* LOGIN SPLIT LAYOUT - 75% imagen, 25% formulario */
 /* ============================= */
 
 /* Romper contenedor para que el split ocupe toda la pantalla */
@@ -86,8 +86,8 @@ body:has(.login-split-wrapper) .page-content-wrapper .container,
 }
 
 .login-split-left {
-	flex: 1;
-	min-width: 50%;
+	flex: 3;
+	min-width: 75%;
 	background-size: cover;
 	background-position: center;
 	background-repeat: no-repeat;
@@ -96,7 +96,7 @@ body:has(.login-split-wrapper) .page-content-wrapper .container,
 
 .login-split-right {
 	flex: 1;
-	min-width: 50%;
+	min-width: max(25%, 320px); /* 25% mínimo, o 320px en pantallas pequeñas */
 	display: flex;
 	flex-direction: column;
 	align-items: center;
