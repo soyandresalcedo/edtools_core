@@ -19,7 +19,7 @@ def update_components_description(doc, method=None):
 	doc.components_description = ", ".join(parts) if parts else ""
 
 
-def set_payment_date_for_print(doc, method=None):
+def set_payment_date_for_print(doc, method=None, print_settings=None, **kwargs):
 	"""Inyecta doc.payment_date desde Payment Entry para el Print Format.
 	Permite mostrar 'Fecha de pago' en el Bolante de Pago."""
 	if not doc or not doc.name:
