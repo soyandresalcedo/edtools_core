@@ -143,7 +143,8 @@ doc_events = {
 		"before_save": "edtools_core.validations.student.track_status_change"
 	},
 	"Fees": {
-		"before_save": "edtools_core.fees_events.update_components_description"
+		"before_save": "edtools_core.fees_events.update_components_description",
+		"before_print": "edtools_core.fees_events.set_payment_date_for_print"
 	}
 }
 
