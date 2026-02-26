@@ -528,16 +528,10 @@ def _get_fees_print_format():
 
 
 def _get_print_format_for_fees():
-	"""Print format para Fees (bolante/comprobante). Property Setter o 'Standard'."""
-	try:
-		return frappe.db.get_value(
-			"Property Setter",
-			{"property": "default_print_format", "doc_type": "Fees"},
-			"value",
-		)
-	except Exception:
-		pass
-	return None
+	"""Print format para Fees en el portal del estudiante (bolante/comprobante).
+	Siempre devuelve 'Bolante de Pago' para el portal; el default del DocType (Matricula)
+	se usa en el backend/admin."""
+	return "Bolante de Pago"
 
 
 def _get_program_from_fee_schedule(fee_schedule):
