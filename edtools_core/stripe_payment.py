@@ -6,7 +6,7 @@ import json
 import os
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import flt, getdate, today
 
 
 def _get_program_for_fee(fee_name):
@@ -38,8 +38,15 @@ def _get_fee_description(fee_name):
 def get_fee_cascade_breakdown(student_name, pay_amount, starting_fee_name=None):
 	"""
 	Compute how a single payment amount will be allocated across the student's fees (cascade).
-	Returns a list of dicts: { "fee_name", "program", "outstanding_amount", "allocated_amount", "currency" }.
-	Order: by due_date asc (oldest first), so overdue fees are paid first regardless of which fee was clicked.
+
+	When starting_fee_name is provided (portal: student clicked Pay on a specific fee):
+	- Order: 1) selected fee first, 2) overdue fees (due_date < today), 3) future fees (due_date >= today).
+	- This ensures the selected fee gets paid; any extra goes to atrasados first, then futuros.
+
+	When starting_fee_name is None (e.g. webhook fallback):
+	- Order: due_date asc (overdue first, then future).
+
+	Returns list of dicts: { "fee_name", "program", "outstanding_amount", "allocated_amount", "currency" }.
 	"""
 	fees_with_outstanding = frappe.db.get_all(
 		"Fees",
@@ -48,16 +55,32 @@ def get_fee_cascade_breakdown(student_name, pay_amount, starting_fee_name=None):
 		order_by="due_date asc",
 		ignore_permissions=True,
 	)
-	# Only fees that have outstanding > 0; order is already due_date asc (vencidas primero)
 	fees = [f for f in fees_with_outstanding if flt(f.get("outstanding_amount") or 0) > 0]
 	if not fees:
 		return []
 
+	today_dt = getdate(today())
 	currency = (fees[0].get("currency") or "USD").strip()
+
+	# Build ordered list of fees for allocation
+	if starting_fee_name:
+		# 1) Selected fee first
+		selected = next((f for f in fees if f["name"] == starting_fee_name), None)
+		others = [f for f in fees if f["name"] != starting_fee_name]
+		if selected:
+			# Selected first, then others: overdue (due_date < today) first, then future. Others already in due_date asc.
+			overdue = [f for f in others if f.get("due_date") and getdate(f["due_date"]) < today_dt]
+			future = [f for f in others if not f.get("due_date") or getdate(f["due_date"]) >= today_dt]
+			ordered_fees = [selected] + overdue + future
+		else:
+			ordered_fees = fees  # starting_fee not found, fallback to due_date asc
+	else:
+		ordered_fees = fees  # due_date asc (overdue first, then future)
+
 	breakdown = []
 	remaining = flt(pay_amount)
 
-	for f in fees:
+	for f in ordered_fees:
 		if remaining <= 0:
 			break
 		outstanding = flt(f.get("outstanding_amount") or 0)
@@ -159,13 +182,16 @@ def create_payment_intent(fee_name, student_name=None, amount=None):
 	if outstanding <= 0:
 		frappe.throw(_("This fee has no outstanding amount to pay."))
 
+	# Minimum = selected fee's outstanding. User cannot pay less than the fee they chose.
 	pay_amount = flt(amount) if amount is not None else outstanding
+	if pay_amount < outstanding:
+		frappe.throw(_("Amount must be at least {0} (outstanding for this fee).").format(outstanding))
 	if pay_amount <= 0:
 		frappe.throw(_("Amount to pay must be greater than zero."))
-	# Allow amount >= outstanding for cascade payments: one charge, then script allocates across fees.
+	# Allow amount >= outstanding for cascade payments: extra goes to overdue first, then future.
 	cascade_breakdown = get_fee_cascade_breakdown(student, pay_amount, fee_name)
 
-	# Stripe amounts in cents (smallest currency unit)
+	# Stripe amounts in cents (minimum 50 cents)
 	currency = (fee.currency or "USD").strip().upper()
 	if currency != "USD":
 		currency = currency.lower()

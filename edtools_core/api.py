@@ -1309,7 +1309,8 @@ def get_student_report_card(student, academic_year=None, academic_term=None):
 
 @frappe.whitelist()
 def get_ordered_student_fees(student):
-    """Obtiene todas las Fees pendientes ordenadas por fecha de vencimiento"""
+    """Obtiene todas las Fees pendientes ordenadas por fecha de vencimiento (due_date asc).
+    Order: overdue first, then future. Used by Payment Entry Client Script for cascade distribution."""
     return frappe.db.get_list("Fees",
         filters={
             "student": student,
