@@ -424,10 +424,10 @@ def get_student_invoices(student):
 	"""Compat con Student Portal Vue (Fees). Education v15 puede no tenerlo.
 	Devuelve facturas (Sales Invoice o Fees) del estudiante con programa, estado, fechas y monto."""
 	if not student:
-		return {"invoices": [], "print_format": "Standard"}
+		return {"invoices": [], "print_format": "Standard", "print_format_fees": "Standard"}
 	my_student = _get_current_user_student_name()
 	if not my_student or my_student != student:
-		return {"invoices": [], "print_format": "Standard"}
+		return {"invoices": [], "print_format": "Standard", "print_format_fees": "Standard"}
 	# Prefer Sales Invoice si tiene campo student; si falla o no existe, usar Fees
 	raw_list = _get_invoices_from_sales_invoice(student)
 	from_sales_invoice = raw_list is not None
@@ -439,6 +439,7 @@ def get_student_invoices(student):
 			"status": si.get("status", ""),
 			"program": _get_program_from_fee_schedule(si.get("fee_schedule")),
 			"invoice": si.get("name"),
+			"doctype": "Sales Invoice" if from_sales_invoice else "Fees",
 		}
 		if not from_sales_invoice:
 			row["description"] = _get_fee_description(si.get("name"))
@@ -458,8 +459,13 @@ def get_student_invoices(student):
 			row["due_date"] = si.get("due_date") or "-"
 			row["payment_date"] = "-"
 		student_sales_invoices.append(row)
-	print_format = _get_fees_print_format() or "Standard"
-	return {"invoices": student_sales_invoices, "print_format": print_format}
+	print_format_si = _get_fees_print_format() or "Standard"
+	print_format_fees = _get_print_format_for_fees() or "Standard"
+	return {
+		"invoices": student_sales_invoices,
+		"print_format": print_format_si,
+		"print_format_fees": print_format_fees,
+	}
 
 
 def _get_currency_symbol(currency):
@@ -514,6 +520,19 @@ def _get_fees_print_format():
 		return frappe.db.get_value(
 			"Property Setter",
 			{"property": "default_print_format", "doc_type": "Sales Invoice"},
+			"value",
+		)
+	except Exception:
+		pass
+	return None
+
+
+def _get_print_format_for_fees():
+	"""Print format para Fees (bolante/comprobante). Property Setter o 'Standard'."""
+	try:
+		return frappe.db.get_value(
+			"Property Setter",
+			{"property": "default_print_format", "doc_type": "Fees"},
 			"value",
 		)
 	except Exception:
