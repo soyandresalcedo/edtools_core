@@ -261,6 +261,63 @@ def ensure_academic_term_category(
     frappe.throw("Respuesta inesperada de Moodle en core_course_create_categories (term)")
 
 
+def _find_course_in_category_case_insensitive(
+    *,
+    category_id: int,
+    course_idnumber: str,
+    course_shortname: str,
+) -> int | None:
+    """Busca un curso en la categoría (y hermanas) por idnumber/shortname (case-insensitive).
+
+    El curso puede estar en 202635 (Spring B 8w) mientras buscamos en 202602 (Spring B).
+    """
+    idnum_norm = (course_idnumber or "").strip().lower()
+    short_norm = (course_shortname or "").strip().lower()
+    if not idnum_norm and not short_norm:
+        return None
+
+    def _match(c: Dict[str, Any]) -> bool:
+        c_idnum = (c.get("idnumber") or "").strip().lower()
+        c_short = (c.get("shortname") or "").strip().lower()
+        if idnum_norm and (c_idnum == idnum_norm or c_short == idnum_norm):
+            return True
+        if short_norm and (c_idnum == short_norm or c_short == short_norm):
+            return True
+        return False
+
+    def _search_in_category(cat_id: int) -> int | None:
+        try:
+            courses = get_courses_by_field(field="category", value=str(cat_id))
+            for c in courses or []:
+                if _match(c):
+                    return int(c.get("id"))
+        except Exception:
+            pass
+        return None
+
+    # 1. Buscar en la categoría del término
+    found = _search_in_category(category_id)
+    if found is not None:
+        return found
+
+    # 2. Buscar en categorías hermanas (mismo padre, ej. 2026)
+    try:
+        categories = get_all_categories()
+        current = next((c for c in categories if int(c.get("id") or 0) == category_id), None)
+        if current:
+            parent_id = int(current.get("parent") or 0)
+            sibling_ids = [int(c["id"]) for c in categories if int(c.get("parent") or 0) == parent_id]
+            for sid in sibling_ids:
+                if sid != category_id:
+                    found = _search_in_category(sid)
+                    if found is not None:
+                        return found
+    except Exception:
+        pass
+
+    return None
+
+
 def get_courses_by_field(*, field: str, value: str) -> List[Dict[str, Any]]:
     """Wrapper para `core_course_get_courses_by_field`.
 
@@ -351,6 +408,16 @@ def ensure_course(
         if courses_by_shortname:
             c = courses_by_shortname[0]
             return int(c.get("id"))
+
+    # Fallback: buscar en la categoría y hacer match case-insensitive por idnumber/shortname.
+    # Moodle puede tener diferencias de mayúsculas o el curso estar en otra categoría hermana.
+    course_id = _find_course_in_category_case_insensitive(
+        category_id=category_id,
+        course_idnumber=course_idnumber,
+        course_shortname=course_shortname,
+    )
+    if course_id is not None:
+        return course_id
 
     # Crear
     resp = _moodle_post(
