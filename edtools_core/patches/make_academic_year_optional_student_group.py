@@ -14,7 +14,6 @@ def execute():
 			"property": "reqd",
 			"value": "0",
 			"property_type": "Check",
-		},
-		ignore_permissions=True,
+		}
 	)
 	frappe.db.commit()

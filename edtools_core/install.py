@@ -20,8 +20,7 @@ def make_academic_year_optional_in_student_group():
 			"property": "reqd",
 			"value": "0",
 			"property_type": "Check",
-		},
-		ignore_permissions=True,
+		}
 	)
 
 
