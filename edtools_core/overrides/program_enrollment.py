@@ -4,6 +4,9 @@
 
 from __future__ import annotations
 
+import frappe
+from frappe import _
+
 try:
     from education.education.education.doctype.program_enrollment.program_enrollment import (
         ProgramEnrollment as EducationProgramEnrollment,
@@ -11,6 +14,40 @@ try:
 except ImportError:
     from education.education.doctype.program_enrollment.program_enrollment import (
         ProgramEnrollment as EducationProgramEnrollment,
+    )
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def get_program_courses(doctype, txt, searchfield, start, page_len, filters):
+    """
+    Obtiene los cursos que pertenecen al programa seleccionado.
+    Versión compatible con PostgreSQL (strpos en lugar de locate/if).
+    """
+    if not filters.get("program"):
+        frappe.msgprint(_("Please select a Program first."))
+        return []
+
+    from frappe.desk.reportview import get_match_cond
+
+    match_cond = get_match_cond("Program Course")
+    # PostgreSQL: strpos(haystack, needle) en lugar de locate(needle, haystack)
+    # CASE WHEN en lugar de IF() para compatibilidad
+    return frappe.db.sql(
+        """select course, course_name from `tabProgram Course`
+        where parent = %(program)s and course like %(txt)s {match_cond}
+        order by
+            CASE WHEN strpos(course::text, %(_txt)s) > 0 THEN strpos(course::text, %(_txt)s) ELSE 99999 END,
+            idx desc,
+            `tabProgram Course`.course asc
+        limit %(page_len)s offset %(start)s""".format(match_cond=match_cond),
+        {
+            "txt": "%{0}%".format(txt),
+            "_txt": txt.replace("%", ""),
+            "program": filters["program"],
+            "start": start,
+            "page_len": page_len,
+        },
     )
 
 

@@ -180,6 +180,8 @@ doc_events = {
 # Office 365: Microsoft no envía email/email_verified en id_token para cuentas organizacionales.
 override_whitelisted_methods = {
 	"frappe.integrations.oauth2_logins.login_via_office365": "edtools_core.oauth_office365.login_via_office365",
+	"education.education.doctype.program_enrollment.program_enrollment.get_program_courses": "edtools_core.overrides.program_enrollment.get_program_courses",
+	"education.education.education.doctype.program_enrollment.program_enrollment.get_program_courses": "edtools_core.overrides.program_enrollment.get_program_courses",
 }
 #
 # each overriding function accepts a `data` argument;
