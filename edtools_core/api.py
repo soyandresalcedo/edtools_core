@@ -1337,10 +1337,7 @@ def fetch_students_flexible(doctype, txt, searchfield, start, page_len, filters)
     Búsqueda flexible de estudiantes para añadir manualmente en Student Group.
     Primero intenta con los filtros completos; si no hay resultados, amplía a solo año/término académico.
     """
-    try:
-        from education.education.education.doctype.student_group.student_group import get_program_enrollment
-    except ImportError:
-        from education.education.doctype.student_group.student_group import get_program_enrollment
+    from edtools_core.overrides.student_group import get_program_enrollment
 
     if filters.get("group_based_on") == "Activity":
         # Activity: mostrar todos los estudiantes (búsqueda libre)
@@ -1353,8 +1350,6 @@ def fetch_students_flexible(doctype, txt, searchfield, start, page_len, filters)
         )
 
     academic_year = filters.get("academic_year")
-    if not academic_year:
-        return []
 
     enrolled_students = get_program_enrollment(
         academic_year,

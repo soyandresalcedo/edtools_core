@@ -5,7 +5,36 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 def after_install():
 	"""Run after edtools_core app installation"""
 	create_student_status_fields()
+	disable_student_group_list_count()
+	make_academic_year_optional_in_student_group()
 	frappe.db.commit()
+
+
+def make_academic_year_optional_in_student_group():
+	"""Hace opcional el campo Academic Year en Student Group (EdTools)."""
+	frappe.make_property_setter(
+		{
+			"doctype": "Student Group",
+			"doctype_or_field": "DocField",
+			"fieldname": "academic_year",
+			"property": "reqd",
+			"value": "0",
+			"property_type": "Check",
+		},
+		ignore_permissions=True,
+	)
+
+
+def disable_student_group_list_count():
+	"""Disable list count for Student Group to avoid 503 on get_count when filtering."""
+	doctype = "Student Group"
+	if frappe.db.exists("List View Settings", doctype):
+		doc = frappe.get_doc("List View Settings", doctype)
+	else:
+		doc = frappe.new_doc("List View Settings")
+		doc.name = doctype
+	doc.disable_count = 1
+	doc.save(ignore_permissions=True)
 
 
 def create_student_status_fields():

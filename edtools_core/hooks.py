@@ -183,6 +183,8 @@ override_whitelisted_methods = {
 	"frappe.integrations.oauth2_logins.login_via_office365": "edtools_core.oauth_office365.login_via_office365",
 	"education.education.doctype.program_enrollment.program_enrollment.get_program_courses": "edtools_core.overrides.program_enrollment.get_program_courses",
 	"education.education.education.doctype.program_enrollment.program_enrollment.get_program_courses": "edtools_core.overrides.program_enrollment.get_program_courses",
+	"education.education.doctype.student_group.student_group.get_students": "edtools_core.overrides.student_group.get_students",
+	"education.education.education.doctype.student_group.student_group.get_students": "edtools_core.overrides.student_group.get_students",
 }
 #
 # each overriding function accepts a `data` argument;
