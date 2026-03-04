@@ -1442,6 +1442,9 @@ def _classify_fee_components(components):
     """
     Clasifica componentes de Fee Structure en inscripción, traducción, graduación,
     capital (financiado) y opcionales (ej. Certificado).
+
+    Los descuentos (Beca, montos negativos) REDUCEN el capital.
+    Solo los montos positivos fuera de capital van a opcionales (ej. Certificado).
     """
     from frappe.utils import flt
 
@@ -1466,8 +1469,11 @@ def _classify_fee_components(components):
             val_graduacion += amount
         elif cat in CAPITAL_CATEGORIES:
             val_capital += amount
+        elif amount < 0:
+            # Descuentos (Beca, etc.) REDUCEN el capital financiado
+            val_capital += amount
         else:
-            # Cualquier otra categoría (ej. Certificado) → opcional
+            # Montos positivos no-capital (ej. Certificado) → opcional
             optional_items.append((cat, desc, amount))
 
     # Valores por defecto solo si la categoría NO existe en la estructura
@@ -1481,6 +1487,9 @@ def _classify_fee_components(components):
         val_traduccion = DEFAULT_TRADUCCION
     if not has_graduacion and val_graduacion == 0:
         val_graduacion = DEFAULT_GRADUACION
+
+    # Capital no puede ser negativo (beca mayor que costo)
+    val_capital = max(0.0, flt(val_capital, 2))
 
     return val_inscripcion, val_traduccion, val_graduacion, val_capital, optional_items
 
