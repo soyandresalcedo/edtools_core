@@ -369,14 +369,24 @@ def get_posting_date_from_fee_payment(fee_name):
 # ------------------------------------------------------------------
 
 # --- CONFIGURACIÓN FINANCIERA ---
-INTEREST_RATE_MONTHLY = 0.0103  # 1.03% Tasa Mensual
+# Tasa mensual derivada de APR 13.12% (alineada con Excel Plan Amortizacion)
+APR_ANNUAL = 0.1312  # 13.12%
+INTEREST_RATE_MONTHLY = (1 + APR_ANNUAL) ** (1 / 12) - 1  # ~0.0103262
 
 # --- CATEGORÍAS EXACTAS ---
-CAT_INSCRIPCION = "Inscripción"      # Mes 1
-CAT_TRADUCCION = "Traducción y equivalencia" # Mes 2
-CAT_GRADUACION = "Graduación"        # Último Mes
-CAT_REGISTRO = "Registro"            # Distribuido
+CAT_INSCRIPCION = "Inscripción"      # Mes 1 (pago inicial)
+CAT_TRADUCCION = "Traducción y equivalencia"  # Mes 2 (pago inicial)
+CAT_GRADUACION = "Graduación"        # Último mes (junto con última cuota)
+CAT_REGISTRO = "Registro"            # Va al capital financiado
 CAT_INTERESES = "Intereses"          # Calculado
+CAT_COSTO_PROGRAMA = "Costo de programa"  # Va al capital financiado
+
+# Categorías que forman parte del capital (reciben interés)
+CAPITAL_CATEGORIES = (CAT_REGISTRO, CAT_COSTO_PROGRAMA)
+# Valores por defecto si no existen en Fee Structure
+DEFAULT_INSCRIPCION = 100.0
+DEFAULT_TRADUCCION = 200.0
+DEFAULT_GRADUACION = 200.0
 
 @frappe.whitelist()
 def get_amount_distribution_based_on_fee_plan(
@@ -1428,116 +1438,160 @@ def get_structure_components(fee_structure):
         "currency": moneda
     }
 
+def _classify_fee_components(components):
+    """
+    Clasifica componentes de Fee Structure en inscripción, traducción, graduación,
+    capital (financiado) y opcionales (ej. Certificado).
+    """
+    from frappe.utils import flt
+
+    val_inscripcion = 0.0
+    val_traduccion = 0.0
+    val_graduacion = 0.0
+    val_capital = 0.0
+    optional_items = []  # [(fees_category, description, amount), ...]
+
+    for c in components:
+        cat = (c.get("fees_category") or "").strip()
+        amount = flt(c.get("amount") or 0)
+        desc = (c.get("description") or cat or "Otros").strip()
+
+        if cat == CAT_INTERESES:
+            continue
+        elif cat == CAT_INSCRIPCION:
+            val_inscripcion += amount
+        elif cat == CAT_TRADUCCION:
+            val_traduccion += amount
+        elif cat == CAT_GRADUACION:
+            val_graduacion += amount
+        elif cat in CAPITAL_CATEGORIES:
+            val_capital += amount
+        else:
+            # Cualquier otra categoría (ej. Certificado) → opcional
+            optional_items.append((cat, desc, amount))
+
+    # Valores por defecto solo si la categoría NO existe en la estructura
+    has_inscripcion = any((c.get("fees_category") or "").strip() == CAT_INSCRIPCION for c in components)
+    has_traduccion = any((c.get("fees_category") or "").strip() == CAT_TRADUCCION for c in components)
+    has_graduacion = any((c.get("fees_category") or "").strip() == CAT_GRADUACION for c in components)
+
+    if not has_inscripcion and val_inscripcion == 0:
+        val_inscripcion = DEFAULT_INSCRIPCION
+    if not has_traduccion and val_traduccion == 0:
+        val_traduccion = DEFAULT_TRADUCCION
+    if not has_graduacion and val_graduacion == 0:
+        val_graduacion = DEFAULT_GRADUACION
+
+    return val_inscripcion, val_traduccion, val_graduacion, val_capital, optional_items
+
+
 @frappe.whitelist()
 def calculate_special_plan(components, capital_installments, start_date, apply_interest=0):
     """
-    Calcula el plan financiero y devuelve también el interés total generado.
+    Calcula el plan financiero. Usa valores de la Fee Structure cuando existan;
+    soporta componentes opcionales (ej. Certificado) como pagos adicionales.
     """
     from frappe.utils import getdate, add_months, flt, cint
     import json
 
     # 1. LIMPIEZA DE DATOS
-    if isinstance(components, str): components = json.loads(components)
+    if isinstance(components, str):
+        components = json.loads(components)
     capital_installments = int(capital_installments)
     start_date = getdate(start_date)
 
-    # Conversión de Checkbox
     if isinstance(apply_interest, str):
-        if apply_interest.lower() == 'true': apply_interest = True
-        elif apply_interest.lower() == 'false': apply_interest = False
-        else: apply_interest = bool(cint(apply_interest))
+        if apply_interest.lower() == 'true':
+            apply_interest = True
+        elif apply_interest.lower() == 'false':
+            apply_interest = False
+        else:
+            apply_interest = bool(cint(apply_interest))
     else:
         apply_interest = bool(apply_interest)
 
-    # 2. Calcular Totales (Excluyendo la fila de Intereses para no sumar recursivamente)
-    total_amount = 0.0
-    for c in components:
-        # No sumamos la fila de intereses porque esa es la que vamos a calcular
-        if c.get('fees_category') != 'Intereses':
-            total_amount += flt(c.get('amount'))
-    
-    # 3. Definir valores fijos
-    VALOR_INSCRIPCION = 100.0
-    VALOR_TRADUCCION = 200.0
-    VALOR_GRADUACION = 200.0
-    
-    # 4. Calcular el Capital Puro
-    capital_principal = total_amount - VALOR_INSCRIPCION - VALOR_TRADUCCION - VALOR_GRADUACION
-    
+    # 2. Clasificar componentes (flexible: Fee Structure define los montos)
+    val_inscripcion, val_traduccion, val_graduacion, val_capital, optional_items = _classify_fee_components(
+        components
+    )
+
     schedule = []
     total_interest_generated = 0.0
-    
+
     # --- CUOTA 1: INSCRIPCIÓN ---
-    schedule.append({
-        "term": "Pago Inicial 1 (Inscripción)",
-        "due_date": start_date,
-        "amount": VALOR_INSCRIPCION,
-        "type": "Inscripcion"
-    })
-    
+    if val_inscripcion > 0:
+        schedule.append({
+            "term": "Pago Inicial 1 (Inscripción)",
+            "due_date": start_date,
+            "amount": flt(val_inscripcion, 2),
+            "type": "Inscripcion",
+        })
+
     # --- CUOTA 2: TRADUCCIÓN ---
-    schedule.append({
-        "term": "Pago Inicial 2 (Traducción)",
-        "due_date": add_months(start_date, 1),
-        "amount": VALOR_TRADUCCION,
-        "type": "Traduccion"
-    })
-    
+    if val_traduccion > 0:
+        schedule.append({
+            "term": "Pago Inicial 2 (Traducción)",
+            "due_date": add_months(start_date, 1),
+            "amount": flt(val_traduccion, 2),
+            "type": "Traduccion",
+        })
+
+    # --- PAGOS OPCIONALES (Certificado, etc.) - sin interés, mismo mes que primera cuota ---
+    first_capital_month = 2
+    for cat, desc, amount in optional_items:
+        if amount > 0:
+            schedule.append({
+                "term": desc or cat,
+                "due_date": add_months(start_date, first_capital_month),
+                "amount": flt(amount, 2),
+                "type": "Otros",
+                "fees_category": cat,
+                "description": desc or cat,
+            })
+
     # --- CÁLCULO DE CAPITAL E INTERESES ---
     monthly_capital = 0.0
-    
-    if capital_principal > 0:
+    if val_capital > 0:
         if apply_interest:
-            # INTERÉS COMPUESTO (1.03%)
-            r = 0.0103
+            r = INTEREST_RATE_MONTHLY
             n = capital_installments
             numerator = r * ((1 + r) ** n)
             denominator = ((1 + r) ** n) - 1
-            
             if denominator != 0:
-                monthly_capital = capital_principal * (numerator / denominator)
+                monthly_capital = val_capital * (numerator / denominator)
             else:
-                monthly_capital = capital_principal
-            
-            # Calcular cuánto interés se generó en total
-            total_pagado_capital = monthly_capital * n
-            total_interest_generated = total_pagado_capital - capital_principal
-            
+                monthly_capital = val_capital
+            total_pagado = monthly_capital * n
+            total_interest_generated = total_pagado - val_capital
         else:
-            # SIN INTERÉS
-            monthly_capital = capital_principal / capital_installments
+            monthly_capital = val_capital / capital_installments
             total_interest_generated = 0.0
 
-    # Redondear interés para evitar decimales infinitos
     total_interest_generated = flt(total_interest_generated, 2)
 
-    # --- GENERAR CUOTAS DE CAPITAL ---
-    current_date = add_months(start_date, 2)
-    
+    # --- CUOTAS DE CAPITAL ---
+    current_date = add_months(start_date, first_capital_month)
     for i in range(1, capital_installments + 1):
         is_last = (i == capital_installments)
         amount = monthly_capital
         term_name = f"Cuota {i}/{capital_installments}"
         row_type = "Capital"
-        
-        if is_last:
-            amount += VALOR_GRADUACION
+
+        if is_last and val_graduacion > 0:
+            amount += val_graduacion
             row_type = "Capital+Graduacion"
             term_name += " + Graduación"
-            
+
         schedule.append({
             "term": term_name,
             "due_date": current_date,
             "amount": flt(amount, 2),
-            "type": row_type
+            "type": row_type,
+            "graduacion_amount": flt(val_graduacion, 2) if is_last and row_type == "Capital+Graduacion" else 0,
         })
         current_date = add_months(current_date, 1)
 
-    # RETORNAMOS UN DICCIONARIO AHORA
-    return {
-        "schedule": schedule,
-        "total_interest": total_interest_generated
-    }
+    return {"schedule": schedule, "total_interest": total_interest_generated}
 
 @frappe.whitelist()
 def generate_batch_records(student_group, fee_structure, components, schedule_data):
@@ -1649,16 +1703,20 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 row_amount = flt(row.get("amount"))
 
                 if row_type == "Inscripcion":
-                    fee.append("components", {"fees_category": "Inscripción", "description": "Registration Fee", "amount": row_amount})
+                    fee.append("components", {"fees_category": CAT_INSCRIPCION, "description": "Registration Fee", "amount": row_amount})
                 elif row_type == "Traduccion":
-                    fee.append("components", {"fees_category": "Traducción y equivalencia", "description": "Translation Fee", "amount": row_amount})
+                    fee.append("components", {"fees_category": CAT_TRADUCCION, "description": "Translation Fee", "amount": row_amount})
+                elif row_type == "Otros":
+                    cat = row.get("fees_category") or "Otros"
+                    desc = row.get("description") or row.get("term") or cat
+                    fee.append("components", {"fees_category": cat, "description": desc, "amount": row_amount})
                 elif row_type == "Capital+Graduacion":
-                    val_grad = 200.0
+                    val_grad = flt(row.get("graduacion_amount"), 2) or DEFAULT_GRADUACION
                     val_cap = row_amount - val_grad
-                    fee.append("components", {"fees_category": "Costo de programa", "description": f"{row.get('term')} (Capital)", "amount": val_cap})
-                    fee.append("components", {"fees_category": "Graduación", "description": "Graduation Fee", "amount": val_grad})
+                    fee.append("components", {"fees_category": CAT_COSTO_PROGRAMA, "description": f"{row.get('term', '')} (Capital)", "amount": flt(val_cap, 2)})
+                    fee.append("components", {"fees_category": CAT_GRADUACION, "description": "Graduation Fee", "amount": val_grad})
                 else:
-                    fee.append("components", {"fees_category": "Costo de programa", "description": row.get("term"), "amount": row_amount})
+                    fee.append("components", {"fees_category": CAT_COSTO_PROGRAMA, "description": row.get("term"), "amount": row_amount})
 
                 fee.grand_total = row_amount
                 fee.outstanding_amount = row_amount
@@ -1679,6 +1737,12 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
             _("Ningún registro generado. Revisar Error Log y:\n{0}").format("\n".join(errors_detail)),
             title=_("Generar para Grupo"),
             indicator="red",
+        )
+    elif errors_detail and generated_count > 0:
+        frappe.msgprint(
+            _("Generados {0} registros. Algunos fallaron:\n{1}\nRevisar Error Log para detalles.").format(generated_count, "\n".join(errors_detail)),
+            title=_("Generar para Grupo"),
+            indicator="orange",
         )
 
     return generated_count
