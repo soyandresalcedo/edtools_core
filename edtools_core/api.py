@@ -1476,17 +1476,9 @@ def _classify_fee_components(components):
             # Montos positivos no-capital (ej. Certificado) → opcional
             optional_items.append((cat, desc, amount))
 
-    # Valores por defecto solo si la categoría NO existe en la estructura
-    has_inscripcion = any((c.get("fees_category") or "").strip() == CAT_INSCRIPCION for c in components)
-    has_traduccion = any((c.get("fees_category") or "").strip() == CAT_TRADUCCION for c in components)
-    has_graduacion = any((c.get("fees_category") or "").strip() == CAT_GRADUACION for c in components)
-
-    if not has_inscripcion and val_inscripcion == 0:
-        val_inscripcion = DEFAULT_INSCRIPCION
-    if not has_traduccion and val_traduccion == 0:
-        val_traduccion = DEFAULT_TRADUCCION
-    if not has_graduacion and val_graduacion == 0:
-        val_graduacion = DEFAULT_GRADUACION
+    # Sin valores por defecto: usar solo lo definido en componentes.
+    # Si Traducción/Graduación/Inscripción no están o tienen monto 0, se usa 0.
+    # Esto permite descuentos flexibles (ej. quitar Traducción y Graduación = -400).
 
     # Capital no puede ser negativo (beca mayor que costo)
     val_capital = max(0.0, flt(val_capital, 2))
