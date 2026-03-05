@@ -1527,41 +1527,43 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
     schedule = []
     total_interest_generated = 0.0
 
-    # --- CUOTA 1: INSCRIPCIÓN ---
-    if val_inscripcion > 0:
-        schedule.append({
-            "term": "Pago Inicial 1 (Inscripción)",
-            "due_date": start_date,
-            "amount": flt(val_inscripcion, 2),
-            "type": "Inscripcion",
-        })
+    # Validar capital_installments
+    if capital_installments < 1:
+        frappe.throw(_("El número de cuotas debe ser al menos 1."))
 
-    # --- CUOTA 2: TRADUCCIÓN ---
-    if val_traduccion > 0:
-        schedule.append({
-            "term": "Pago Inicial 2 (Traducción)",
-            "due_date": add_months(start_date, 1),
-            "amount": flt(val_traduccion, 2),
-            "type": "Traduccion",
-        })
-
-    # --- PAGOS OPCIONALES (Certificado, etc.) - sin interés, mismo mes que primera cuota ---
-    first_capital_month = 2
-    for cat, desc, amount in optional_items:
-        if amount > 0:
+    if apply_interest:
+        # --- MODO CON INTERÉS: Estructura actual ---
+        # Inscripción (mes 0), Traducción (mes 1), Cuotas capital (mes 2+), Graduación en última
+        if val_inscripcion > 0:
             schedule.append({
-                "term": desc or cat,
-                "due_date": add_months(start_date, first_capital_month),
-                "amount": flt(amount, 2),
-                "type": "Otros",
-                "fees_category": cat,
-                "description": desc or cat,
+                "term": "Pago Inicial 1 (Inscripción)",
+                "due_date": start_date,
+                "amount": flt(val_inscripcion, 2),
+                "type": "Inscripcion",
             })
 
-    # --- CÁLCULO DE CAPITAL E INTERESES ---
-    monthly_capital = 0.0
-    if val_capital > 0:
-        if apply_interest:
+        if val_traduccion > 0:
+            schedule.append({
+                "term": "Pago Inicial 2 (Traducción)",
+                "due_date": add_months(start_date, 1),
+                "amount": flt(val_traduccion, 2),
+                "type": "Traduccion",
+            })
+
+        first_capital_month = 2
+        for cat, desc, amount in optional_items:
+            if amount > 0:
+                schedule.append({
+                    "term": desc or cat,
+                    "due_date": add_months(start_date, first_capital_month),
+                    "amount": flt(amount, 2),
+                    "type": "Otros",
+                    "fees_category": cat,
+                    "description": desc or cat,
+                })
+
+        monthly_capital = 0.0
+        if val_capital > 0:
             r = INTEREST_RATE_MONTHLY
             n = capital_installments
             numerator = r * ((1 + r) ** n)
@@ -1572,33 +1574,76 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
                 monthly_capital = val_capital
             total_pagado = monthly_capital * n
             total_interest_generated = total_pagado - val_capital
-        else:
-            monthly_capital = val_capital / capital_installments
-            total_interest_generated = 0.0
 
-    total_interest_generated = flt(total_interest_generated, 2)
+        total_interest_generated = flt(total_interest_generated, 2)
+        current_date = add_months(start_date, first_capital_month)
 
-    # --- CUOTAS DE CAPITAL ---
-    current_date = add_months(start_date, first_capital_month)
-    for i in range(1, capital_installments + 1):
-        is_last = (i == capital_installments)
-        amount = monthly_capital
-        term_name = f"Cuota {i}/{capital_installments}"
-        row_type = "Capital"
+        for i in range(1, capital_installments + 1):
+            is_last = (i == capital_installments)
+            amount = monthly_capital
+            term_name = f"Cuota {i}/{capital_installments}"
+            row_type = "Capital"
 
-        if is_last and val_graduacion > 0:
-            amount += val_graduacion
-            row_type = "Capital+Graduacion"
-            term_name += " + Graduación"
+            if is_last and val_graduacion > 0:
+                amount += val_graduacion
+                row_type = "Capital+Graduacion"
+                term_name += " + Graduación"
 
-        schedule.append({
-            "term": term_name,
-            "due_date": current_date,
-            "amount": flt(amount, 2),
-            "type": row_type,
-            "graduacion_amount": flt(val_graduacion, 2) if is_last and row_type == "Capital+Graduacion" else 0,
-        })
-        current_date = add_months(current_date, 1)
+            schedule.append({
+                "term": term_name,
+                "due_date": current_date,
+                "amount": flt(amount, 2),
+                "type": row_type,
+                "graduacion_amount": flt(val_graduacion, 2) if is_last and row_type == "Capital+Graduacion" else 0,
+            })
+            current_date = add_months(current_date, 1)
+
+    else:
+        # --- MODO SIN INTERÉS (estilo Excel): Traducción + Graduación + Capital en cuotas iguales ---
+        # Inscripción aparte; el resto dividido en N cuotas uniformes
+        if val_inscripcion > 0:
+            schedule.append({
+                "term": "Pago Inicial 1 (Inscripción)",
+                "due_date": start_date,
+                "amount": flt(val_inscripcion, 2),
+                "type": "Inscripcion",
+            })
+
+        total_a_dividir = val_capital + val_traduccion + val_graduacion
+        first_cuota_month = 1  # Cuotas empiezan mes 1 (después de Inscripción en mes 0)
+
+        # Opcionales: pago aparte en mes 1
+        for cat, desc, amount in optional_items:
+            if amount > 0:
+                schedule.append({
+                    "term": desc or cat,
+                    "due_date": add_months(start_date, first_cuota_month),
+                    "amount": flt(amount, 2),
+                    "type": "Otros",
+                    "fees_category": cat,
+                    "description": desc or cat,
+                })
+
+        if total_a_dividir > 0 and capital_installments > 0:
+            cuota_uniforme = total_a_dividir / capital_installments
+            cuota_uniforme = flt(cuota_uniforme, 2)
+
+            # Ajuste por redondeo: última cuota absorbe diferencia
+            total_redondeado = cuota_uniforme * (capital_installments - 1)
+            ultima_cuota = flt(total_a_dividir - total_redondeado, 2)
+
+            current_date = add_months(start_date, first_cuota_month)
+            for i in range(1, capital_installments + 1):
+                is_last = (i == capital_installments)
+                amount = ultima_cuota if is_last else cuota_uniforme
+                schedule.append({
+                    "term": f"Cuota {i}/{capital_installments}",
+                    "due_date": current_date,
+                    "amount": amount,
+                    "type": "Capital",
+                    "graduacion_amount": 0,
+                })
+                current_date = add_months(current_date, 1)
 
     return {"schedule": schedule, "total_interest": total_interest_generated}
 
