@@ -83,12 +83,35 @@ function updatePageTitles() {
     }
 }
 
+// Reintento en 502 para search_link (evita fallo al crear Student Group en Railway)
+function initSearchLinkRetry() {
+    if (!frappe.call) return;
+    var _call = frappe.call.bind(frappe);
+    frappe.call = function(opts) {
+        var cmd = (opts.args && opts.args.cmd) || opts.method || '';
+        var isSearchLink = String(cmd).indexOf('search_link') !== -1;
+        if (!isSearchLink) return _call(opts);
+        function attempt(retriesLeft) {
+            return _call(opts).catch(function(xhr) {
+                if (xhr && xhr.status === 502 && retriesLeft > 0) {
+                    return new Promise(function(r) { setTimeout(r, 1500); }).then(function() {
+                        return attempt(retriesLeft - 1);
+                    });
+                }
+                return Promise.reject(xhr);
+            });
+        }
+        return attempt(1);
+    };
+}
+
 // Also run on app_ready event (for Frappe Desk)
 if (typeof $ !== 'undefined') {
     $(document).on('app_ready', function() {
         updatePageTitles();
         replaceTextInPage();
         initStudentLinkFormatter();
+        initSearchLinkRetry();
     });
 }
 
@@ -98,6 +121,7 @@ if (typeof frappe !== 'undefined' && frappe.ready) {
         updatePageTitles();
         replaceTextInPage();
         initStudentLinkFormatter();
+        initSearchLinkRetry();
     });
 }
 

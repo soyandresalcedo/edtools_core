@@ -6,6 +6,10 @@
  */
 frappe.ui.form.on('Student Group', {
 	onload: function (frm) {
+		// Marcar si era doc nuevo (para reload tras primer guardado; evita 502 en search_link)
+		if (frm.doc.__islocal) {
+			frm._was_new_before_save = true;
+		}
 		// Año académico y programa opcionales (EdTools)
 		if (frm.fields_dict.academic_year) frm.set_df_property('academic_year', 'reqd', 0);
 		if (frm.fields_dict.program) frm.set_df_property('program', 'reqd', 0);
@@ -27,6 +31,16 @@ frappe.ui.form.on('Student Group', {
 					filters: filters,
 				};
 			});
+		}
+	},
+
+	after_save: function (frm) {
+		// Tras crear grupo nuevo: recargar para evitar 502 en search_link (tabla Estudiantes)
+		if (frm._was_new_before_save) {
+			frm._was_new_before_save = false;
+			setTimeout(function () {
+				frm.reload_doc();
+			}, 300);
 		}
 	},
 
