@@ -14,7 +14,8 @@ app_license = "MIT"
 app_include_css = "/assets/edtools_core/css/edtools.css"
 app_include_js = [
     "/assets/edtools_core/js/edtools.js",
-    "/assets/edtools_core/js/socketio_override.js"
+    "/assets/edtools_core/js/socketio_override.js",
+    "/assets/edtools_core/js/assessment_result_tool_letter_grade.js",
 ]
 
 # include js, css files in header of web template
@@ -38,7 +39,6 @@ doctype_js = {
 	"Fee Structure": "public/js/fee_structure_custom.js",
 	"Student Group": "public/js/student_group_custom.js",
 	"Program Enrollment": "public/js/program_enrollment.js",
-	"Assessment Result Tool": "public/js/assessment_result_tool_letter_grade.js",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
