@@ -38,6 +38,7 @@ doctype_js = {
 	"Fee Structure": "public/js/fee_structure_custom.js",
 	"Student Group": "public/js/student_group_custom.js",
 	"Program Enrollment": "public/js/program_enrollment.js",
+	"Assessment Result Tool": "public/js/assessment_result_tool_letter_grade.js",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}

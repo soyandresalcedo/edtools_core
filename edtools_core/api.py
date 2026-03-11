@@ -1040,6 +1040,36 @@ def get_student_average(student, program=None, academic_year=None, academic_term
 
 
 # ------------------------------------------------------------------
+# ASSESSMENT RESULT TOOL - Letter grade support (edtools_core)
+# ------------------------------------------------------------------
+
+@frappe.whitelist()
+def get_grading_scale_letter_options(assessment_plan):
+    """Returns letter grade options from the Assessment Plan's grading scale.
+    Used by the Assessment Result Tool to show a letter dropdown instead of numeric input.
+
+    Args:
+        assessment_plan: Assessment Plan name
+
+    Returns:
+        List of {grade_code, threshold} sorted by threshold descending (A first).
+        Empty list if no grading scale or no intervals (fallback to numeric input).
+    """
+    if not assessment_plan:
+        return []
+    grading_scale = frappe.db.get_value("Assessment Plan", assessment_plan, "grading_scale")
+    if not grading_scale:
+        return []
+    intervals = frappe.get_all(
+        "Grading Scale Interval",
+        filters={"parent": grading_scale},
+        fields=["grade_code", "threshold"],
+        order_by="threshold desc",
+    )
+    return intervals
+
+
+# ------------------------------------------------------------------
 # TOOL ENDPOINTS (Ported from Education develop branch)
 # ------------------------------------------------------------------
 
