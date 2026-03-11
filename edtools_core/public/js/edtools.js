@@ -88,11 +88,19 @@ function initSearchLinkRetry() {
     if (!frappe.call) return;
     var _call = frappe.call.bind(frappe);
     frappe.call = function(opts) {
-        var cmd = (opts.args && opts.args.cmd) || opts.method || '';
+        // IMPORTANTE: frappe.call puede recibir (method, args, callback) o (opts).
+        // Hay que pasar TODOS los argumentos a _call con apply, no solo opts.
+        var callArgs = Array.prototype.slice.call(arguments);
+        var cmd = '';
+        if (typeof opts === 'string') {
+            cmd = opts;
+        } else if (opts && (opts.args || opts.method)) {
+            cmd = (opts.args && opts.args.cmd) || opts.method || '';
+        }
         var isSearchLink = String(cmd).indexOf('search_link') !== -1;
-        if (!isSearchLink) return _call(opts);
+        if (!isSearchLink) return _call.apply(frappe, callArgs);
         function attempt(retriesLeft) {
-            return _call(opts).catch(function(xhr) {
+            return _call.apply(frappe, callArgs).catch(function(xhr) {
                 if (xhr && xhr.status === 502 && retriesLeft > 0) {
                     return new Promise(function(r) { setTimeout(r, 1500); }).then(function() {
                         return attempt(retriesLeft - 1);
