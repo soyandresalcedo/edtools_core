@@ -110,7 +110,9 @@ function replace_with_letter_select(input, letter_options) {
 		$select.append($opt);
 	});
 
-	// Hide original input, add select
+	// Hide original input and the grade badge (select shows the value)
+	const $cell = $input.closest('td');
+	$cell.find('span.student-result-grade').hide();
 	$input.addClass('letter-grade-transformed').hide().after($select);
 
 	$select.on('change', function () {
