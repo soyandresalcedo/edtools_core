@@ -38,6 +38,8 @@ def patch_education_api():
 		edu_api.get_course_schedule_for_student = get_course_schedule_for_student
 		if not hasattr(edu_api, "get_student_programs"):
 			edu_api.get_student_programs = get_student_programs
+		if not hasattr(edu_api, "get_student_grades"):
+			edu_api.get_student_grades = get_student_grades
 		if not hasattr(edu_api, "get_student_invoices"):
 			edu_api.get_student_invoices = get_student_invoices
 		# get_student_attendance: siempre usar nuestra versión (validación + ignore_permissions)
@@ -317,6 +319,44 @@ def get_student_programs(student):
 		ignore_permissions=True,
 	)
 	return programs or []
+
+
+@frappe.whitelist()
+def get_student_grades(student):
+	"""Devuelve Assessment Results del estudiante con program resuelto (desde Assessment Result o Student Group).
+	Usado por el portal de estudiantes (Grades) para soportar el filtro por programa correctamente."""
+	if not student:
+		return []
+	my_student = _get_current_user_student_name()
+	if not my_student or my_student != student:
+		return []
+	results = frappe.db.get_list(
+		"Assessment Result",
+		filters={"student": student, "docstatus": 1},
+		fields=[
+			"name",
+			"student_group",
+			"course",
+			"program",
+			"assessment_group",
+			"total_score",
+			"maximum_score",
+			"grade",
+		],
+		ignore_permissions=True,
+	)
+	if not results:
+		return []
+	# Resolver program desde Student Group cuando Assessment Result no lo tiene
+	sg_cache = {}
+	for r in results:
+		prog = r.get("program")
+		if not prog and r.get("student_group"):
+			sg = r["student_group"]
+			if sg not in sg_cache:
+				sg_cache[sg] = frappe.db.get_value("Student Group", sg, "program") or ""
+			r["program"] = sg_cache[sg]
+	return results
 
 
 def _get_current_user_student_name():
