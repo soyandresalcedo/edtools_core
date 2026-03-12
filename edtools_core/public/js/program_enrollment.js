@@ -2,6 +2,43 @@
 // Edtools override: fix course filter - use server get_program_courses, avoid frm.program_courses.map when undefined
 
 frappe.ui.form.on('Program Enrollment', {
+  refresh: function (frm) {
+    // Botón para sincronizar cursos matriculados con los del programa
+    if (frm.doc.program && !frm.doc.__islocal) {
+      frm.add_custom_button(__('Actualizar cursos del programa'), function () {
+        frappe.confirm(
+          __(
+            '¿Actualizar los cursos matriculados con los que están definidos en el programa "{0}"? Los cursos actuales serán reemplazados.',
+            [frm.doc.program]
+          ),
+          function () {
+            frappe.call({
+              method: 'edtools_core.overrides.program_enrollment.sync_program_courses',
+              args: { program_enrollment: frm.doc.name },
+              freeze: true,
+              freeze_message: __('Actualizando cursos...'),
+              callback: function (r) {
+                if (r.exc) {
+                  frappe.msgprint({
+                    title: __('Error'),
+                    message: r.message || __('No se pudieron actualizar los cursos'),
+                    indicator: 'red',
+                  })
+                } else {
+                  frappe.show_alert({
+                    message: r.message && r.message.message ? r.message.message : __('Cursos actualizados'),
+                    indicator: 'green',
+                  })
+                  frm.reload_doc()
+                }
+              },
+            })
+          }
+        )
+      })
+    }
+  },
+
   onload: function (frm) {
     frm.set_query('academic_term', function () {
       return {

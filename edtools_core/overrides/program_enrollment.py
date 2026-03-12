@@ -51,6 +51,40 @@ def get_program_courses(doctype, txt, searchfield, start, page_len, filters):
     )
 
 
+@frappe.whitelist()
+def sync_program_courses(program_enrollment: str) -> dict:
+    """
+    Sincroniza los cursos matriculados del Program Enrollment con los cursos
+    definidos en el Programa seleccionado. Funciona con documentos validados (submitted).
+    """
+    if not program_enrollment:
+        frappe.throw(_("Program Enrollment es requerido"))
+
+    doc = frappe.get_doc("Program Enrollment", program_enrollment)
+
+    if not doc.program:
+        frappe.throw(_("El Program Enrollment no tiene un Programa asignado"))
+
+    # Obtener TODOS los cursos del programa (required y opcionales), ordenados por idx
+    program_courses = frappe.db.sql(
+        """SELECT course FROM `tabProgram Course`
+           WHERE parent = %s ORDER BY idx ASC""",
+        (doc.program,),
+        as_dict=True,
+    )
+
+    doc.courses = program_courses
+    doc.run_method("validate")
+    # Permite guardar en documentos submitted (la tabla courses tiene allow_on_submit)
+    doc.flags.ignore_validate_update_after_submit = True
+    doc.save()
+
+    return {
+        "courses_count": len(program_courses),
+        "message": _("Cursos actualizados correctamente a los del programa {0}").format(doc.program),
+    }
+
+
 class ProgramEnrollment(EducationProgramEnrollment):
     """
     Override de Program Enrollment: no crea ni borra Course Enrollments al enviar o cancelar.
