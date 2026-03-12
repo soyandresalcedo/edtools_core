@@ -73,7 +73,10 @@ def sync_program_courses(program_enrollment: str) -> dict:
         as_dict=True,
     )
 
-    doc.courses = program_courses
+    # Usar append() para crear filas hijas correctamente (objetos Document, no dicts)
+    doc.courses = []
+    for row in program_courses:
+        doc.append("courses", {"course": row["course"]})
     doc.run_method("validate")
     # Permite guardar en documentos submitted (la tabla courses tiene allow_on_submit)
     doc.flags.ignore_validate_update_after_submit = True
