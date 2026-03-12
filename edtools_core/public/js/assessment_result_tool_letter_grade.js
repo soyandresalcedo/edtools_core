@@ -4,10 +4,23 @@
  * Replaces numeric score inputs with letter grade dropdowns when the
  * Assessment Plan uses a grading scale with letter-style intervals (e.g. MsC: A, A-, B+, etc).
  * The user selects a letter; we convert it to the corresponding numeric score and save.
+ *
+ * Also fixes "2 selects" issue: ensures student_group is fetched from Assessment Plan
+ * and displayed read-only, so only assessment_plan appears as an editable select.
  */
 
 frappe.ui.form.on('Assessment Result Tool', {
+	setup: function (frm) {
+		// student_group always comes from assessment_plan - keep it read-only (avoids "2 selects")
+		if (frm.fields_dict.student_group) {
+			frm.set_df_property('student_group', 'read_only', 1);
+		}
+	},
+
 	refresh: function (frm) {
+		if (frm.fields_dict.student_group) {
+			frm.set_df_property('student_group', 'read_only', 1);
+		}
 		if (!frm.fields_dict.result_html) return;
 
 		// Wrap get_marks so we run our transform right after the table is rendered
@@ -39,8 +52,18 @@ frappe.ui.form.on('Assessment Result Tool', {
 	},
 
 	assessment_plan: function (frm) {
+		// Fix "2 selects": when assessment_plan is set but student_group empty (add_fetch failed/delayed),
+		// fetch student_group from Assessment Plan and load students. Education handler returns early
+		// when student_group is empty, so we handle that case here.
+		if (frm.doc.assessment_plan && !frm.doc.student_group) {
+			frappe.db.get_value('Assessment Plan', frm.doc.assessment_plan, 'student_group', function (r) {
+				if (r && r.student_group) {
+					frm.set_value('student_group', r.student_group);
+					_load_assessment_students(frm);
+				}
+			});
+		}
 		// When plan changes and table will be re-rendered, get_marks wrap handles it.
-		// This runs after table loads when coming from route_options (plan + group pre-filled)
 		if (frm.doc.assessment_plan && frm.doc.student_group) {
 			setTimeout(function () {
 				transform_inputs_to_letter_dropdown(frm);
@@ -48,6 +71,30 @@ frappe.ui.form.on('Assessment Result Tool', {
 		}
 	},
 });
+
+function _load_assessment_students(frm) {
+	frm.doc.show_submit = false;
+	frappe.call({
+		method: 'education.education.api.get_assessment_students',
+		args: {
+			assessment_plan: frm.doc.assessment_plan,
+			student_group: frm.doc.student_group,
+		},
+		callback: function (r) {
+			if (r.message) {
+				frm.doc.students = r.message;
+				frm.events.render_table(frm);
+				for (let i = 0; i < r.message.length; i++) {
+					if (!r.message[i].docstatus) {
+						frm.doc.show_submit = true;
+						break;
+					}
+				}
+				frm.events.submit_result(frm);
+			}
+		},
+	});
+}
 
 function transform_inputs_to_letter_dropdown(frm) {
 	const wrapper = frm.fields_dict.result_html?.wrapper;
