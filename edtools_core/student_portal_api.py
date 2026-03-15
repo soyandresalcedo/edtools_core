@@ -339,6 +339,8 @@ def get_student_grades(student):
 			"course",
 			"program",
 			"assessment_group",
+			"academic_year",
+			"academic_term",
 			"total_score",
 			"maximum_score",
 			"grade",
@@ -347,15 +349,23 @@ def get_student_grades(student):
 	)
 	if not results:
 		return []
-	# Resolver program desde Student Group cuando Assessment Result no lo tiene
+	# Resolver program, academic_year y academic_term desde Student Group cuando no vienen
 	sg_cache = {}
 	for r in results:
 		prog = r.get("program")
-		if not prog and r.get("student_group"):
-			sg = r["student_group"]
-			if sg not in sg_cache:
-				sg_cache[sg] = frappe.db.get_value("Student Group", sg, "program") or ""
-			r["program"] = sg_cache[sg]
+		sg = r.get("student_group")
+		if sg and sg not in sg_cache:
+			sg_cache[sg] = frappe.db.get_value(
+				"Student Group", sg, ["program", "academic_year", "academic_term"], as_dict=True
+			) or {}
+		if sg and sg_cache.get(sg):
+			info = sg_cache[sg]
+			if not prog:
+				r["program"] = info.get("program") or ""
+			if not r.get("academic_year") and info.get("academic_year"):
+				r["academic_year"] = info["academic_year"]
+			if not r.get("academic_term") and info.get("academic_term"):
+				r["academic_term"] = info["academic_term"]
 	return results
 
 
