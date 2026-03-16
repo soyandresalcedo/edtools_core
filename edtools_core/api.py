@@ -2256,3 +2256,51 @@ def webhook_create_moodle_categories(academic_year=None):
         "academic_year": f"AY_{year}",
         "term": f"TERM_{year}_SPRING_A"
     }
+
+
+@frappe.whitelist()
+def upload_grades_file(file_url, grading_scale=None):
+    """
+    Importación masiva de notas desde Excel/CSV vía API.
+
+    Flujo recomendado: primero subir el archivo con POST /api/method/upload_file,
+    luego llamar a este método con el file_url devuelto.
+
+    Args:
+        file_url: URL del archivo subido (ej. /files/notas.xlsx).
+        grading_scale: Nombre de la escala de calificaciones (opcional).
+
+    Returns:
+        dict con success, validation_errors, summary, errors.
+    """
+    from edtools_core.grade_import import process_grades
+
+    file_url = (file_url or "").strip()
+    if not file_url:
+        return {
+            "success": False,
+            "validation_errors": [{"row": None, "message": _("Se requiere file_url del archivo subido.")}],
+            "summary": None,
+            "errors": [],
+        }
+
+    import os
+    file_path = file_url
+    if file_path.startswith("/files/") or file_path.startswith("files/"):
+        file_path = frappe.get_site_path("public", file_path.lstrip("/"))
+    if not os.path.isfile(file_path):
+        return {
+            "success": False,
+            "validation_errors": [{"row": None, "message": _("No se encontró el archivo en el servidor.")}],
+            "summary": None,
+            "errors": [],
+        }
+
+    grading_scale = (grading_scale or "").strip() or None
+    result = process_grades(file_path, grading_scale, progress_callback=None)
+    return {
+        "success": result.get("success", False),
+        "validation_errors": result.get("validation_errors"),
+        "summary": result.get("summary"),
+        "errors": result.get("errors"),
+    }
