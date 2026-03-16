@@ -1,6 +1,16 @@
 /* Edtools Text-Only Branding CSS */
 /* Only replaces text, keeps Frappe's original colors and design */
 
+/* Help dropdown: Soporte de CUC University - non-clickable, disabled look */
+#toolbar-help .dropdown-item.disabled {
+    cursor: default !important;
+    opacity: 0.7;
+    pointer-events: none;
+}
+#toolbar-help .dropdown-item.disabled:hover {
+    background-color: transparent;
+}
+
 /* ============================= */
 /* HIDE FRAPPE/ERPNEXT BRANDING */
 /* ============================= */

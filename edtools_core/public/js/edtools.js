@@ -1,5 +1,44 @@
 // Edtools Text Replacement - Keep Frappe design, only change text
 
+// Help dropdown: Documentation URL, hide 3 items, Soporte non-clickable
+var DOCS_EDTOOLS_URL = "https://docs.edtools.co/api-reference/introduction";
+var HELP_LABELS_TO_HIDE = ["User Forum", "CUC University School", "Report an Issue", "Foro de usuarios", "Escuela CUC University", "Reportar un problema"];
+
+function customizeHelpDropdown() {
+    var menu = document.getElementById("toolbar-help");
+    if (!menu) return;
+
+    var items = menu.querySelectorAll(".dropdown-item");
+    items.forEach(function(el) {
+        var text = (el.textContent || "").trim();
+
+        // 1) Documentation: ensure link points to docs.edtools.co
+        if (el.tagName === "A" && el.getAttribute("href")) {
+            var href = el.getAttribute("href") || "";
+            if (href.indexOf("docs.erpnext.com") !== -1 || (href.indexOf("erpnext") !== -1 && text.toLowerCase().indexOf("documentation") !== -1)) {
+                el.setAttribute("href", DOCS_EDTOOLS_URL);
+            }
+            // 2) Soporte de CUC University: non-clickable (route is # from patch)
+            if ((href === "#" || href === "" || el.href.slice(-1) === "#") && text.indexOf("Soporte") !== -1) {
+                el.classList.add("disabled");
+                el.setAttribute("tabindex", "-1");
+                el.setAttribute("aria-disabled", "true");
+                el.style.pointerEvents = "none";
+                el.style.cursor = "default";
+                el.addEventListener("click", function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                });
+            }
+        }
+
+        // 3) Hide User Forum, CUC University School, Report an Issue (exact or translated)
+        if (HELP_LABELS_TO_HIDE.indexOf(text) !== -1) {
+            el.style.display = "none";
+        }
+    });
+}
+
 // Wait for DOM to be ready
 (function() {
     // Replace text throughout the application
@@ -7,6 +46,15 @@
 
     // Update page titles
     updatePageTitles();
+
+    // Help dropdown (navbar may be ready after a short delay)
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", function() {
+            setTimeout(customizeHelpDropdown, 500);
+        });
+    } else {
+        setTimeout(customizeHelpDropdown, 500);
+    }
 })();
 
 function replaceTextInPage() {
@@ -118,6 +166,7 @@ if (typeof $ !== 'undefined') {
     $(document).on('app_ready', function() {
         updatePageTitles();
         replaceTextInPage();
+        customizeHelpDropdown();
         initStudentLinkFormatter();
         initSearchLinkRetry();
     });
@@ -128,6 +177,7 @@ if (typeof frappe !== 'undefined' && frappe.ready) {
     frappe.ready(function() {
         updatePageTitles();
         replaceTextInPage();
+        customizeHelpDropdown();
         initStudentLinkFormatter();
         initSearchLinkRetry();
     });
