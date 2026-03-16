@@ -262,5 +262,4 @@ app_title = "CUC University"
 # Logo de login y páginas web (transparente, se ve sobre fondo claro u oscuro)
 app_logo_url = ["/assets/edtools_core/images/cuc-university-logo.png"]
 
-# Boot session - filtra menú Ayuda (Documentation, ocultar CUC School/Forum/Report, Soporte no clickeable)
-boot_session = ["edtools_core.navbar_help_customize.filter_navbar_settings_in_boot"]
+# Nota: El menú Ayuda se filtra en sessions.get() vía sessions_navbar_patch (sessions sobrescribe navbar después de boot)

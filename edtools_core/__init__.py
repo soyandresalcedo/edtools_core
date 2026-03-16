@@ -51,3 +51,15 @@ _patch_student_portal_csrf()
 _patch_education_api()
 _patch_login_context()
 _patch_email_footer()
+
+
+def _patch_sessions_navbar():
+    """Filtra menú Ayuda en boot; sessions.get() sobrescribe navbar_settings después de boot_session."""
+    try:
+        from edtools_core.sessions_navbar_patch import patch_sessions_get
+        patch_sessions_get()
+    except Exception:
+        pass
+
+
+_patch_sessions_navbar()
