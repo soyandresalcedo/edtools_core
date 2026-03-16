@@ -1,8 +1,24 @@
 // Edtools Text Replacement - Keep Frappe design, only change text
 
-// Help dropdown: Documentation URL, hide 3 items, Soporte non-clickable
+// Help dropdown: Documentation URL, hide 3 items, Soporte + CUC School non-clickable
 var DOCS_EDTOOLS_URL = "https://docs.edtools.co/api-reference/introduction";
 var HELP_LABELS_TO_HIDE = ["User Forum", "CUC University School", "Report an Issue", "Foro de usuarios", "Escuela CUC University", "Reportar un problema"];
+
+function makeLinkNonClickable(el) {
+    if (el.getAttribute("data-edtools-noclick") === "1") return;
+    el.setAttribute("data-edtools-noclick", "1");
+    el.setAttribute("href", "#");
+    el.classList.add("disabled");
+    el.setAttribute("tabindex", "-1");
+    el.setAttribute("aria-disabled", "true");
+    el.style.pointerEvents = "none";
+    el.style.cursor = "default";
+    el.addEventListener("click", function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+    });
+}
 
 function customizeHelpDropdown() {
     var menu = document.getElementById("toolbar-help");
@@ -18,25 +34,35 @@ function customizeHelpDropdown() {
             if (href.indexOf("docs.erpnext.com") !== -1 || (href.indexOf("erpnext") !== -1 && text.toLowerCase().indexOf("documentation") !== -1)) {
                 el.setAttribute("href", DOCS_EDTOOLS_URL);
             }
-            // 2) Soporte de CUC University: non-clickable (route is # from patch)
-            if ((href === "#" || href === "" || el.href.slice(-1) === "#") && text.indexOf("Soporte") !== -1) {
-                el.classList.add("disabled");
-                el.setAttribute("tabindex", "-1");
-                el.setAttribute("aria-disabled", "true");
-                el.style.pointerEvents = "none";
-                el.style.cursor = "default";
-                el.addEventListener("click", function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                });
+            // 2) Soporte de CUC University: siempre no clickeable (sin importar href actual)
+            if (text.indexOf("Soporte") !== -1 && text.indexOf("CUC") !== -1) {
+                makeLinkNonClickable(el);
+            }
+            // 3) CUC University School: no clickeable por si no se ocultó
+            if (text.indexOf("CUC University School") !== -1) {
+                makeLinkNonClickable(el);
+                el.style.display = "none";
             }
         }
 
-        // 3) Hide User Forum, CUC University School, Report an Issue (exact or translated)
-        if (HELP_LABELS_TO_HIDE.indexOf(text) !== -1) {
+        // 4) Hide User Forum, CUC University School, Report an Issue (exact or partial)
+        if (text.indexOf("User Forum") !== -1 || text.indexOf("CUC University School") !== -1 || text.indexOf("Report an Issue") !== -1 ||
+            text.indexOf("Foro de usuarios") !== -1 || text.indexOf("Reportar un problema") !== -1) {
             el.style.display = "none";
         }
     });
+}
+
+// Re-aplicar al abrir el dropdown Ayuda (por si el menú se renderiza al hacer clic)
+function bindHelpDropdownCustomize() {
+    var btn = document.querySelector(".dropdown-help .dropdown-toggle, [aria-controls='toolbar-help']");
+    var menu = document.getElementById("toolbar-help");
+    if (!btn || !menu) return;
+    btn.addEventListener("click", function() {
+        setTimeout(customizeHelpDropdown, 100);
+    });
+    // Por si el dropdown se abre por hover/focus
+    menu.addEventListener("mouseenter", function() { customizeHelpDropdown(); });
 }
 
 // Wait for DOM to be ready
@@ -48,12 +74,16 @@ function customizeHelpDropdown() {
     updatePageTitles();
 
     // Help dropdown (navbar may be ready after a short delay)
+    function runHelpCustomize() {
+        customizeHelpDropdown();
+        bindHelpDropdownCustomize();
+    }
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", function() {
-            setTimeout(customizeHelpDropdown, 500);
+            setTimeout(runHelpCustomize, 500);
         });
     } else {
-        setTimeout(customizeHelpDropdown, 500);
+        setTimeout(runHelpCustomize, 500);
     }
 })();
 
@@ -167,6 +197,7 @@ if (typeof $ !== 'undefined') {
         updatePageTitles();
         replaceTextInPage();
         customizeHelpDropdown();
+        bindHelpDropdownCustomize();
         initStudentLinkFormatter();
         initSearchLinkRetry();
     });
@@ -178,6 +209,7 @@ if (typeof frappe !== 'undefined' && frappe.ready) {
         updatePageTitles();
         replaceTextInPage();
         customizeHelpDropdown();
+        bindHelpDropdownCustomize();
         initStudentLinkFormatter();
         initSearchLinkRetry();
     });
