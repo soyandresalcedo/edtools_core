@@ -142,7 +142,9 @@ doc_events = {
 		"validate": "edtools_core.validations.enrollment.validate_student_status"
 	},
 	"Student": {
-		"before_save": "edtools_core.validations.student.track_status_change"
+		"before_save": "edtools_core.validations.student.track_status_change",
+		"on_update": "edtools_core.moodle_sync.sync_student_status_to_moodle",
+		"after_insert": "edtools_core.moodle_sync.sync_student_status_to_moodle"
 	},
 	"Fees": {
 		"before_save": "edtools_core.fees_events.update_components_description",

@@ -6,13 +6,15 @@ Responsabilidad:
 - Categorías académicas
 - Cursos
 - Matrículas
+- Estado del estudiante (suspended en Moodle según student_status en EdTools)
 
 NO contiene lógica de UI ni validaciones de formulario.
 """
 
+import os
 import frappe
 
-from edtools_core.moodle_users import ensure_moodle_user
+from edtools_core.moodle_users import ensure_moodle_user, get_user_by_email, update_moodle_user_suspended
 from edtools_core.moodle_integration import (
     ensure_academic_year_category,
     ensure_academic_term_category,
@@ -132,6 +134,76 @@ def sync_student_enrollment_to_moodle(
         "moodle_course_id": moodle_course_id,
         "already_enrolled": already_enrolled,
     }
+
+
+def sync_student_status_to_moodle(doc, method=None):
+    """
+    Sincroniza el estado del estudiante (student_status) con Moodle:
+    - Active -> usuario Moodle activo (suspended=0).
+    - Cualquier otro estado (Inactive, LOA, Suspended, Withdrawn, etc.) -> usuario Moodle suspendido (suspended=1).
+
+    Se invoca desde doc_events (Student on_update y after_insert).
+    Si Moodle falla, se registra el error pero no se bloquea el guardado en EdTools.
+    """
+    # Opcional: desactivar sync por configuración
+    sync_enabled = os.getenv("MOODLE_SYNC_STUDENT_STATUS")
+    if sync_enabled is not None and str(sync_enabled).strip().lower() in ("0", "false", "no"):
+        return
+    if frappe.conf.get("moodle_sync_student_status") is False:
+        return
+
+    # Configuración Moodle
+    try:
+        from edtools_core.moodle_integration import _get_moodle_config
+        url, token = _get_moodle_config()
+        if not url or not token:
+            return
+    except Exception:
+        return
+
+    # Student debe tener User vinculado (el email se usa para buscar en Moodle)
+    if not getattr(doc, "user", None) or not str(doc.user).strip():
+        frappe.logger().debug(
+            f"Moodle status sync: Student {doc.name} sin User vinculado, se omite."
+        )
+        return
+
+    email = frappe.db.get_value("User", doc.user, "email")
+    if not email or not str(email).strip():
+        frappe.logger().debug(
+            f"Moodle status sync: User {doc.user} sin email, se omite."
+        )
+        return
+
+    try:
+        moodle_user = get_user_by_email(email.strip().lower())
+    except Exception as e:
+        frappe.log_error(
+            title="Moodle sync student status",
+            message=f"Student {doc.name} | Error al buscar usuario en Moodle: {e}",
+        )
+        return
+
+    if not moodle_user:
+        frappe.logger().debug(
+            f"Moodle status sync: Estudiante {doc.name} no existe en Moodle (email {email}), no hay nada que actualizar."
+        )
+        return
+
+    # Active -> suspended=0; cualquier otro -> suspended=1
+    status = (getattr(doc, "student_status", None) or "").strip()
+    suspended = 0 if status == "Active" else 1
+
+    try:
+        update_moodle_user_suspended(moodle_user["id"], suspended)
+        frappe.logger().info(
+            f"Moodle status sync: Student {doc.name} -> suspended={suspended} (student_status={status!r})"
+        )
+    except Exception as e:
+        frappe.log_error(
+            title="Moodle sync student status",
+            message=f"Student {doc.name} | student_status={status!r} | Error: {e}",
+        )
 
 
 # ---------------------------------------------------------------------

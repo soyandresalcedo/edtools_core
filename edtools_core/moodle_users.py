@@ -206,6 +206,26 @@ def update_user_idnumber(user_id: int, new_idnumber: str) -> None:
         )
 
 
+def update_moodle_user_suspended(user_id: int, suspended: int) -> None:
+    """
+    Actualiza el estado suspended de un usuario en Moodle (core_user_update_users).
+    suspended: 1 = usuario suspendido (no puede acceder), 0 = activo.
+    Requiere que el token del Web Service tenga la capacidad moodle/user:update.
+    """
+    payload = {
+        "users[0][id]": user_id,
+        "users[0][suspended]": int(suspended),
+    }
+    response = _moodle_post(
+        wsfunction="core_user_update_users",
+        data=payload,
+    )
+    if isinstance(response, dict) and response.get("exception"):
+        frappe.throw(
+            f"Moodle error (update_user suspended): {response.get('message')}"
+        )
+
+
 def ensure_moodle_user(student) -> Dict:
     """
     Garantiza que el estudiante tenga usuario en Moodle.
