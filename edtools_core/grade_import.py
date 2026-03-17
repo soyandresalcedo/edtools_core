@@ -381,7 +381,7 @@ def get_or_create_assessment_group_leaf(academic_year: str, term_label: str) -> 
             frappe.db.commit()
         except Exception:
             pass
-    # Nodo periodo "YYYY - Spring A"
+    # Nodo periodo del Assessment Group (nombre interno del árbol; no es el Academic Term)
     period_name = f"{year} - {term_label}"
     if not frappe.db.exists("Assessment Group", period_name):
         try:
@@ -637,7 +637,7 @@ def process_grades(
     total_errors = len(out["errors"])
 
     for (course_frappe, year, term_label), rows in groups.items():
-        term_name = f"{year} - {term_label}"
+        term_name = f"{year} ({term_label})"
         if progress_callback:
             progress_callback(total_processed, len(data_rows), _("Procesando grupo {0} - {1}").format(course_frappe, term_name))
         leaf = get_or_create_assessment_group_leaf(year, term_label)
