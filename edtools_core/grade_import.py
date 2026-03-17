@@ -17,7 +17,7 @@ REQUIRED_COLUMNS = ["ID", "SEMESTER", "COURSE", "FINAL GRADE"]
 OPTIONAL_COLUMNS = ["FULL NAME", "COURSE TITLE"]
 
 # Mapeo código SEMESTER (últimos 2 dígitos) -> nombre del periodo para Academic Term
-# Formato esperado en Frappe: "YYYY - Spring A", "YYYY - Fall B", etc.
+# Formato del nombre en Frappe (Academic Term): "YYYY (Spring A)", "YYYY (Fall B)", etc.
 SEMESTER_SUFFIX_TO_TERM = {
     "01": "Spring A",
     "02": "Spring B",
@@ -240,7 +240,7 @@ def _grade_value_valid(grade: str, grading_scale_name: str) -> bool:
 def semester_to_academic_year_and_term(semester_code: str) -> tuple[str, str] | None:
     """
     Convierte código 202601 a (academic_year, academic_term_name).
-    academic_year = "2026", academic_term_name = "2026 - Spring A".
+    academic_year = "2026", academic_term_name = "2026 (Spring A)" (formato del DocType Academic Term).
     """
     semester_code = (semester_code or "").strip().replace(" ", "")
     if len(semester_code) != 6:
@@ -250,8 +250,8 @@ def semester_to_academic_year_and_term(semester_code: str) -> tuple[str, str] | 
         return None
     year = semester_code[:4]
     term_label = SEMESTER_SUFFIX_TO_TERM[suffix]
-    # En Frappe el Academic Term suele ser "2026 - Spring A"
-    term_name = f"{year} - {term_label}"
+    # Formato del nombre del Academic Term en Frappe: "2026 (Spring A)"
+    term_name = f"{year} ({term_label})"
     return year, term_name
 
 
