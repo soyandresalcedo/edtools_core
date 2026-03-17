@@ -453,6 +453,7 @@ def get_or_create_assessment_plan(
     assessment_group_name: str,
     course_name: str,
     grading_scale_name: str,
+    academic_term_name: str = "",
 ) -> str | None:
     """
     Obtiene o crea un Assessment Plan para el Student Group con criterio "Definitiva" 100.
@@ -471,8 +472,11 @@ def get_or_create_assessment_plan(
         return existing[0].name
     if not frappe.db.exists("Assessment Criteria", "Definitiva"):
         return None
+    course_title = frappe.db.get_value("Course", course_name, "course_name") or course_name
+    plan_title = f"Nota definitiva - {academic_term_name} - {course_title}" if academic_term_name else f"Nota definitiva - {course_title}"
     try:
         doc = frappe.new_doc("Assessment Plan")
+        doc.assessment_name = plan_title
         doc.student_group = student_group_name
         doc.assessment_group = assessment_group_name
         doc.grading_scale = grading_scale_name
@@ -609,11 +613,11 @@ def process_grades(
             "student_groups_created": 0,
             "assessment_plans_created": 0,
             "assessment_results_created": 0,
-        "assessment_results_updated": 0,
-        "assessment_results_updated_submitted": 0,
-        "rows_processed": 0,
-        "rows_with_errors": 0,
-    },
+            "assessment_results_updated": 0,
+            "assessment_results_updated_submitted": 0,
+            "rows_processed": 0,
+            "rows_with_errors": 0,
+        },
         "errors": [],
     }
 
@@ -669,7 +673,8 @@ def process_grades(
             out["errors"].append({"row": i + 2, "message": _("FINAL GRADE no puede estar vacío.")})
             continue
         try:
-            score = flt(grade_str, 2)
+            score = float(grade_str)
+            score = flt(score, 2)
         except (TypeError, ValueError):
             pct = letter_to_percentage(grading_scale_name, grade_str)
             if pct is None:
@@ -707,7 +712,7 @@ def process_grades(
             created_sg.add(sg_name)
         course_doc = frappe.get_cached_doc("Course", course_frappe)
         scale = getattr(course_doc, "default_grading_scale", None) or grading_scale_name
-        ap_name = get_or_create_assessment_plan(sg_name, leaf, course_frappe, scale)
+        ap_name = get_or_create_assessment_plan(sg_name, leaf, course_frappe, scale, academic_term_name=term_name)
         if not ap_name:
             for (row_num, __unused1, __unused2, __unused3) in rows:
                 out["errors"].append({"row": row_num, "message": _("No se pudo crear el plan de evaluación.")})
