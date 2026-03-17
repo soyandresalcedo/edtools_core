@@ -521,8 +521,25 @@ def create_or_update_assessment_result(
     plan = frappe.get_doc("Assessment Plan", assessment_plan_name)
     doc = get_assessment_result_doc(student_name, assessment_plan_name)
     if not doc:
-        return None, _("No se pudo obtener o crear el documento de resultado."), False
-    is_new = doc.get("__islocal", False)
+        # Resultado ya presentado (docstatus=1): Education devuelve None. Cancelar el anterior y crear uno nuevo con la nota actualizada.
+        existing = frappe.get_all(
+            "Assessment Result",
+            filters={
+                "student": student_name,
+                "assessment_plan": assessment_plan_name,
+                "docstatus": 1,
+            },
+            limit=1,
+        )
+        if not existing:
+            return None, _("No se pudo obtener o crear el documento de resultado."), False
+        old_doc = frappe.get_doc("Assessment Result", existing[0].name)
+        old_doc.cancel()
+        frappe.db.commit()
+        doc = frappe.new_doc("Assessment Result")
+        is_new = True
+    else:
+        is_new = doc.get("__islocal", False)
 
     # Campos que Education rellena por fetch_from al cargar desde BD; en servidor hay que setearlos
     # para que validate_grade() calcule total_score y grade correctamente.
