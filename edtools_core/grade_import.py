@@ -525,11 +525,12 @@ def create_or_update_assessment_result(
     is_new = doc.get("__islocal", False)
     doc.assessment_plan = assessment_plan_name
     doc.student = student_name
-    doc.details = [{
+    doc.clear_table("details")
+    doc.append("details", {
         "assessment_criteria": criteria_name,
         "maximum_score": 100,
         "score": flt(score, 2),
-    }]
+    })
     doc.save(ignore_permissions=True)
     if doc.docstatus == 0:
         doc.submit()
