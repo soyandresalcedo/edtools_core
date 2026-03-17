@@ -28,6 +28,35 @@ SEMESTER_SUFFIX_TO_TERM = {
 }
 
 
+def _resolve_file_path(file_path: str):
+    """
+    Convierte file_path (URL o ruta relativa) en ruta física del servidor.
+    Soporta /files/ (público) y /private/files/ (privado) para evitar errores
+    cuando el usuario sube el archivo como privado.
+    Devuelve la ruta absoluta o None si no se puede resolver o el archivo no existe.
+    """
+    import os
+    if not file_path or not isinstance(file_path, str):
+        return None
+    path = file_path.strip()
+    if path.startswith("/private/files/") or path.startswith("private/files/"):
+        rel = path.replace("/private/files/", "").replace("private/files/", "").lstrip("/")
+        if not rel:
+            return None
+        resolved = frappe.get_site_path("private", "files", rel)
+        return resolved if os.path.isfile(resolved) else None
+    if path.startswith("/files/") or path.startswith("files/"):
+        rel = path.replace("/files/", "").replace("files/", "").lstrip("/")
+        resolved = frappe.get_site_path("public", "files", rel)
+        return resolved if os.path.isfile(resolved) else None
+    if os.path.isfile(path):
+        return path
+    if not os.path.isabs(path):
+        resolved = frappe.get_site_path(path)
+        return resolved if os.path.isfile(resolved) else None
+    return None
+
+
 def _normalize_header(h: str) -> str:
     """Normaliza nombre de columna para comparación (mayúsculas, espacios)."""
     if not h or not isinstance(h, str):
@@ -125,17 +154,7 @@ def validate_format(
     """
     errors = []
 
-    import os
-    resolved = None
-    if file_path:
-        if file_path.startswith("/files/") or file_path.startswith("files/"):
-            resolved = frappe.get_site_path("public", file_path.lstrip("/"))
-        elif os.path.isfile(file_path):
-            resolved = file_path
-        else:
-            resolved = frappe.get_site_path(file_path) if not os.path.isabs(file_path) else file_path
-        if resolved and not os.path.isfile(resolved):
-            resolved = None
+    resolved = _resolve_file_path(file_path)
     if not resolved:
         errors.append({"row": None, "message": _("Se requiere un archivo Excel (.xlsx) o CSV.")})
         return False, errors
@@ -160,6 +179,14 @@ def validate_format(
 
     if not data_rows:
         errors.append({"row": None, "message": _("El archivo no tiene filas de datos.")})
+        return False, errors
+
+    # Criterio "Definitiva" requerido por el proceso de importación
+    if not frappe.db.exists("Assessment Criteria", "Definitiva"):
+        errors.append({
+            "row": None,
+            "message": _("No existe el criterio de evaluación 'Definitiva'. Créalo en Evaluación > Criterios de evaluación antes de importar."),
+        })
         return False, errors
 
     # 2) Por cada fila: ID, SEMESTER, COURSE, FINAL GRADE
@@ -406,7 +433,7 @@ def get_or_create_student_group(
         doc.program = None
         doc.max_strength = 0
         for i, stu in enumerate(student_names, 1):
-            student_name_title = frappe.db.get_value("Student", stu, "title") or stu
+            student_name_title = frappe.db.get_value("Student", stu, "student_name") or stu
             doc.append("students", {
                 "student": stu,
                 "student_name": student_name_title,
@@ -472,10 +499,11 @@ def create_or_update_assessment_result(
     student_name: str,
     score: float,
     grading_scale_name: str,
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, bool]:
     """
     Crea o actualiza el Assessment Result para (assessment_plan, student) con un solo criterio Definitiva y score.
-    Devuelve (name, error_message). Si error_message no es None, no se creó/actualizó.
+    Si el resultado ya existía y solo se actualiza la nota, no se duplican grupos ni planes.
+    Devuelve (name, error_message, created). created=True si era nuevo, False si se actualizó.
     """
     try:
         from education.education.api import get_assessment_result_doc, get_assessment_details
@@ -486,14 +514,15 @@ def create_or_update_assessment_result(
 
     details_list = get_assessment_details(assessment_plan_name)
     if not details_list or len(details_list) == 0:
-        return None, _("El plan de evaluación no tiene criterios.")
+        return None, _("El plan de evaluación no tiene criterios."), False
     criteria_name = details_list[0].get("assessment_criteria")
     if not criteria_name:
-        return None, _("Criterio Definitiva no encontrado en el plan.")
+        return None, _("Criterio Definitiva no encontrado en el plan."), False
 
     doc = get_assessment_result_doc(student_name, assessment_plan_name)
     if not doc:
-        return None, _("No se pudo obtener o crear el documento de resultado.")
+        return None, _("No se pudo obtener o crear el documento de resultado."), False
+    is_new = doc.get("__islocal", False)
     doc.assessment_plan = assessment_plan_name
     doc.student = student_name
     doc.details = [{
@@ -505,7 +534,7 @@ def create_or_update_assessment_result(
     if doc.docstatus == 0:
         doc.submit()
     frappe.db.commit()
-    return doc.name, None
+    return doc.name, None, is_new
 
 
 def process_grades(
@@ -546,13 +575,8 @@ def process_grades(
         out["validation_errors"] = validation_errors
         return out
 
-    import os
-    resolved = file_path
-    if file_path.startswith("/files/") or file_path.startswith("files/"):
-        resolved = frappe.get_site_path("public", file_path.lstrip("/"))
-    elif not os.path.isfile(file_path):
-        resolved = frappe.get_site_path(file_path) if not os.path.isabs(file_path) else file_path
-    if not resolved or not os.path.isfile(resolved):
+    resolved = _resolve_file_path(file_path)
+    if not resolved:
         out["validation_errors"] = [{"row": None, "message": _("No se pudo leer el archivo.")}]
         return out
 
@@ -608,12 +632,14 @@ def process_grades(
     created_sg = set()
     created_ap = set()
     total_processed = 0
+    total_created = 0
+    total_updated = 0
     total_errors = len(out["errors"])
 
     for (course_frappe, year, term_label), rows in groups.items():
-        if progress_callback:
-            progress_callback(total_processed, len(data_rows), _("Procesando grupo {0} - {1}").format(course_frappe, year))
         term_name = f"{year} - {term_label}"
+        if progress_callback:
+            progress_callback(total_processed, len(data_rows), _("Procesando grupo {0} - {1}").format(course_frappe, term_name))
         leaf = get_or_create_assessment_group_leaf(year, term_label)
         if not leaf:
             for (row_num, __unused1, __unused2, __unused3) in rows:
@@ -637,14 +663,22 @@ def process_grades(
         if ap_name not in created_ap:
             created_ap.add(ap_name)
         for row_num, student_name, score, __unused_course in rows:
-            ar_name, err = create_or_update_assessment_result(ap_name, student_name, score, scale)
+            if progress_callback:
+                progress_callback(total_processed, len(data_rows), _("Procesando resultado: {0}").format(student_name))
+            ar_name, err, created = create_or_update_assessment_result(ap_name, student_name, score, scale)
             if err:
                 out["errors"].append({"row": row_num, "message": err})
             else:
                 total_processed += 1
+                if created:
+                    total_created += 1
+                else:
+                    total_updated += 1
 
     out["summary"]["student_groups_created"] = len(created_sg)
     out["summary"]["assessment_plans_created"] = len(created_ap)
+    out["summary"]["assessment_results_created"] = total_created
+    out["summary"]["assessment_results_updated"] = total_updated
     out["summary"]["rows_processed"] = total_processed
     out["summary"]["rows_with_errors"] = len(out["errors"])
     out["success"] = True

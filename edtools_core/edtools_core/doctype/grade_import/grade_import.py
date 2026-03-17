@@ -14,7 +14,7 @@ class GradeImport(Document):
 		Valida el archivo adjunto y ejecuta la importación masiva de notas.
 		Usa el módulo grade_import para validación y process_grades.
 		"""
-		from edtools_core.grade_import import validate_format, process_grades
+		from edtools_core.grade_import import validate_format, process_grades, _resolve_file_path
 
 		file_url = (self.get("excel_file") or "").strip()
 		if not file_url:
@@ -22,15 +22,23 @@ class GradeImport(Document):
 
 		grading_scale = (self.get("grading_scale") or "").strip() or None
 
-		# Resolver ruta: Attach guarda URL tipo /files/xxx.xlsx
-		file_path = file_url
-		if file_path.startswith("/files/") or file_path.startswith("files/"):
-			import os
-			file_path = frappe.get_site_path("public", file_path.lstrip("/"))
-			if not os.path.isfile(file_path):
-				frappe.throw("No se encontró el archivo en el servidor. Vuelve a subirlo.")
+		# Resolver ruta (soporta /files/ y /private/files/)
+		file_path = _resolve_file_path(file_url)
+		if not file_path:
+			frappe.throw("No se encontró el archivo en el servidor. Si lo subiste como privado, se soporta; vuelve a intentar o recarga el archivo.")
 
-		result = process_grades(file_path, grading_scale, progress_callback=None)
+		def _progress(current, total, message):
+			if total and total > 0:
+				pct = min(100, round(100 * current / total, 1))
+			else:
+				pct = 0
+			frappe.publish_realtime(
+				"grade_import_progress",
+				{"progress": pct, "current": current, "total": total, "message": message or ""},
+				user=frappe.session.user,
+			)
+
+		result = process_grades(file_path, grading_scale, progress_callback=_progress)
 
 		# Formatear resumen y errores para mostrar en el formulario
 		summary_lines = []
@@ -49,6 +57,12 @@ class GradeImport(Document):
 			)
 			summary_lines.append(
 				"Planes de evaluación creados: {}".format(s.get("assessment_plans_created", 0))
+			)
+			summary_lines.append(
+				"Resultados nuevos creados: {}".format(s.get("assessment_results_created", 0))
+			)
+			summary_lines.append(
+				"Resultados existentes actualizados: {}".format(s.get("assessment_results_updated", 0))
 			)
 			summary_lines.append(
 				"Filas procesadas correctamente: {}".format(s.get("rows_processed", 0))

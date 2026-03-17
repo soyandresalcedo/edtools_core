@@ -2273,7 +2273,7 @@ def upload_grades_file(file_url, grading_scale=None):
     Returns:
         dict con success, validation_errors, summary, errors.
     """
-    from edtools_core.grade_import import process_grades
+    from edtools_core.grade_import import process_grades, _resolve_file_path
 
     file_url = (file_url or "").strip()
     if not file_url:
@@ -2284,14 +2284,11 @@ def upload_grades_file(file_url, grading_scale=None):
             "errors": [],
         }
 
-    import os
-    file_path = file_url
-    if file_path.startswith("/files/") or file_path.startswith("files/"):
-        file_path = frappe.get_site_path("public", file_path.lstrip("/"))
-    if not os.path.isfile(file_path):
+    file_path = _resolve_file_path(file_url)
+    if not file_path:
         return {
             "success": False,
-            "validation_errors": [{"row": None, "message": _("No se encontró el archivo en el servidor.")}],
+            "validation_errors": [{"row": None, "message": _("No se encontró el archivo en el servidor (soporta /files/ y /private/files/).")}],
             "summary": None,
             "errors": [],
         }
