@@ -280,16 +280,28 @@ def _normalize_course_code(code: str) -> str:
 
 
 def _resolve_course(course_code: str) -> str | None:
-    """Devuelve el name del Course en Frappe si existe (por código o nombre)."""
+    """Devuelve el name del Course en Frappe si existe (por short_name o por name)."""
     if not course_code:
         return None
+    stripped = course_code.strip()
     normalized = _normalize_course_code(course_code)
+    compact = (course_code or "").replace(" ", "")
+
+    # 1) Buscar por short_name (si el DocType tiene el campo)
+    meta = frappe.get_meta("Course")
+    if meta.has_field("short_name"):
+        for value in (stripped, normalized, compact):
+            if not value:
+                continue
+            name = frappe.db.get_value("Course", {"short_name": value}, "name")
+            if name:
+                return name
+
+    # 2) Buscar por name del registro
     if frappe.db.exists("Course", normalized):
         return normalized
-    if frappe.db.exists("Course", course_code.strip()):
-        return course_code.strip()
-    # Intentar por código sin espacios
-    compact = (course_code or "").replace(" ", "")
+    if frappe.db.exists("Course", stripped):
+        return stripped
     if frappe.db.exists("Course", compact):
         return compact
     return None
