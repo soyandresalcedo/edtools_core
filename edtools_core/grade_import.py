@@ -502,15 +502,14 @@ def create_or_update_assessment_result(
 ) -> tuple[str | None, str | None, bool]:
     """
     Crea o actualiza el Assessment Result para (assessment_plan, student) con un solo criterio Definitiva y score.
-    Si el resultado ya existía y solo se actualiza la nota, no se duplican grupos ni planes.
+    Rellena explícitamente grading_scale, student_group, assessment_group y maximum_score desde el plan
+    para que validate_grade() calcule bien la letra (grade) y la nota se muestre correctamente.
     Devuelve (name, error_message, created). created=True si era nuevo, False si se actualizó.
     """
     try:
         from education.education.api import get_assessment_result_doc, get_assessment_details
-        from education.education.api import get_grade
     except ImportError:
         from education.education.education.api import get_assessment_result_doc, get_assessment_details
-        from education.education.education.api import get_grade
 
     details_list = get_assessment_details(assessment_plan_name)
     if not details_list or len(details_list) == 0:
@@ -519,12 +518,21 @@ def create_or_update_assessment_result(
     if not criteria_name:
         return None, _("Criterio Definitiva no encontrado en el plan."), False
 
+    plan = frappe.get_doc("Assessment Plan", assessment_plan_name)
     doc = get_assessment_result_doc(student_name, assessment_plan_name)
     if not doc:
         return None, _("No se pudo obtener o crear el documento de resultado."), False
     is_new = doc.get("__islocal", False)
+
+    # Campos que Education rellena por fetch_from al cargar desde BD; en servidor hay que setearlos
+    # para que validate_grade() calcule total_score y grade correctamente.
     doc.assessment_plan = assessment_plan_name
     doc.student = student_name
+    doc.student_group = plan.student_group
+    doc.assessment_group = plan.assessment_group
+    doc.grading_scale = plan.grading_scale or grading_scale_name
+    doc.maximum_score = flt(plan.maximum_assessment_score, 2)
+
     doc.set("details", [])
     doc.append("details", {
         "assessment_criteria": criteria_name,
