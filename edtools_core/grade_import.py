@@ -525,7 +525,7 @@ def create_or_update_assessment_result(
     is_new = doc.get("__islocal", False)
     doc.assessment_plan = assessment_plan_name
     doc.student = student_name
-    doc.clear_table("details")
+    doc.set("details", [])
     doc.append("details", {
         "assessment_criteria": criteria_name,
         "maximum_score": 100,
