@@ -556,6 +556,7 @@ def create_or_update_assessment_result(
         frappe.db.set_value("Assessment Result", result_name, "total_score", score_val)
         frappe.db.set_value("Assessment Result", result_name, "grade", grade_letter or "")
         frappe.db.commit()
+        frappe.clear_document_cache("Assessment Result", result_name)
         return result_name, None, False, True
     doc = get_assessment_result_doc(student_name, assessment_plan_name)
     if not doc:
