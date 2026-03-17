@@ -604,13 +604,13 @@ def process_grades(
         term_name = f"{year} - {term_label}"
         leaf = get_or_create_assessment_group_leaf(year, term_label)
         if not leaf:
-            for (row_num, _, _, _) in rows:
+            for (row_num, __unused1, __unused2, __unused3) in rows:
                 out["errors"].append({"row": row_num, "message": _("No se pudo crear el grupo de evaluación para {0}.").format(term_name)})
             continue
         student_names = list({r[1] for r in rows})
         sg_name = get_or_create_student_group(course_frappe, year, term_name, student_names)
         if not sg_name:
-            for (row_num, _, _, _) in rows:
+            for (row_num, __unused1, __unused2, __unused3) in rows:
                 out["errors"].append({"row": row_num, "message": _("No se pudo crear el grupo de estudiantes.")})
             continue
         if sg_name not in created_sg:
@@ -619,12 +619,12 @@ def process_grades(
         scale = getattr(course_doc, "default_grading_scale", None) or grading_scale_name
         ap_name = get_or_create_assessment_plan(sg_name, leaf, course_frappe, scale)
         if not ap_name:
-            for (row_num, _, _, _) in rows:
+            for (row_num, __unused1, __unused2, __unused3) in rows:
                 out["errors"].append({"row": row_num, "message": _("No se pudo crear el plan de evaluación.")})
             continue
         if ap_name not in created_ap:
             created_ap.add(ap_name)
-        for row_num, student_name, score, _ in rows:
+        for row_num, student_name, score, __unused_course in rows:
             ar_name, err = create_or_update_assessment_result(ap_name, student_name, score, scale)
             if err:
                 out["errors"].append({"row": row_num, "message": err})
