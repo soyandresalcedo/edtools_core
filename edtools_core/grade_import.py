@@ -499,50 +499,70 @@ def create_or_update_assessment_result(
     student_name: str,
     score: float,
     grading_scale_name: str,
-) -> tuple[str | None, str | None, bool]:
+) -> tuple[str | None, str | None, bool, bool]:
     """
     Crea o actualiza el Assessment Result para (assessment_plan, student) con un solo criterio Definitiva y score.
-    Rellena explícitamente grading_scale, student_group, assessment_group y maximum_score desde el plan
-    para que validate_grade() calcule bien la letra (grade) y la nota se muestre correctamente.
-    Devuelve (name, error_message, created). created=True si era nuevo, False si se actualizó.
+    Devuelve (name, error_message, created, updated_submitted).
+    updated_submitted=True cuando se actualizó un resultado que ya estaba presentado (sin cancelar).
     """
     try:
-        from education.education.api import get_assessment_result_doc, get_assessment_details
+        from education.education.api import (
+            get_assessment_result_doc,
+            get_assessment_details,
+            get_grade,
+        )
     except ImportError:
-        from education.education.education.api import get_assessment_result_doc, get_assessment_details
+        from education.education.education.api import (
+            get_assessment_result_doc,
+            get_assessment_details,
+            get_grade,
+        )
 
     details_list = get_assessment_details(assessment_plan_name)
     if not details_list or len(details_list) == 0:
-        return None, _("El plan de evaluación no tiene criterios."), False
+        return None, _("El plan de evaluación no tiene criterios."), False, False
     criteria_name = details_list[0].get("assessment_criteria")
     if not criteria_name:
-        return None, _("Criterio Definitiva no encontrado en el plan."), False
+        return None, _("Criterio Definitiva no encontrado en el plan."), False, False
 
     plan = frappe.get_doc("Assessment Plan", assessment_plan_name)
-    doc = get_assessment_result_doc(student_name, assessment_plan_name)
-    if not doc:
-        # Resultado ya presentado (docstatus=1): Education devuelve None. Cancelar el anterior y crear uno nuevo con la nota actualizada.
-        existing = frappe.get_all(
-            "Assessment Result",
-            filters={
-                "student": student_name,
-                "assessment_plan": assessment_plan_name,
-                "docstatus": 1,
-            },
+    # Comprobar primero si ya existe resultado presentado: así no llamamos a get_assessment_result_doc
+    # y evitamos el msgprint "Result already Submitted" de Education; mostramos el dato en el resumen.
+    existing_submitted = frappe.get_all(
+        "Assessment Result",
+        filters={
+            "student": student_name,
+            "assessment_plan": assessment_plan_name,
+            "docstatus": 1,
+        },
+        limit=1,
+    )
+    if existing_submitted:
+        result_name = existing_submitted[0]["name"]
+        grading_scale = plan.grading_scale or grading_scale_name
+        score_val = flt(score, 2)
+        percentage = (score_val / 100.0) * 100 if score_val else 0
+        grade_letter = get_grade(grading_scale, percentage)
+        details = frappe.get_all(
+            "Assessment Result Detail",
+            filters={"parent": result_name, "assessment_criteria": criteria_name},
+            fields=["name"],
             limit=1,
         )
-        if not existing:
-            return None, _("No se pudo obtener o crear el documento de resultado."), False
-        old_doc = frappe.get_doc("Assessment Result", existing[0].name)
-        old_doc.cancel()
+        if not details:
+            return None, _("No se encontró el criterio Definitiva en el resultado existente."), False, False
+        frappe.db.set_value("Assessment Result Detail", details[0]["name"], "score", score_val)
+        frappe.db.set_value("Assessment Result Detail", details[0]["name"], "grade", grade_letter or "")
+        frappe.db.set_value("Assessment Result", result_name, "total_score", score_val)
+        frappe.db.set_value("Assessment Result", result_name, "grade", grade_letter or "")
         frappe.db.commit()
-        doc = frappe.new_doc("Assessment Result")
-        is_new = True
-    else:
-        is_new = doc.get("__islocal", False)
+        return result_name, None, False, True
+    doc = get_assessment_result_doc(student_name, assessment_plan_name)
+    if not doc:
+        return None, _("No se pudo obtener o crear el documento de resultado."), False, False
+    is_new = doc.get("__islocal", False)
 
-    # Campos que Education rellena por fetch_from al cargar desde BD; en servidor hay que setearlos
-    # para que validate_grade() calcule total_score y grade correctamente.
+    # Borrador: rellenar campos y guardar/presentar
     doc.assessment_plan = assessment_plan_name
     doc.student = student_name
     doc.student_group = plan.student_group
@@ -560,7 +580,7 @@ def create_or_update_assessment_result(
     if doc.docstatus == 0:
         doc.submit()
     frappe.db.commit()
-    return doc.name, None, is_new
+    return doc.name, None, is_new, False
 
 
 def process_grades(
@@ -577,7 +597,7 @@ def process_grades(
         {
             "success": bool,
             "validation_errors": [{"row": N, "message": "..."}],
-            "summary": {"student_groups_created": 0, "assessment_plans_created": 0, "assessment_results_created": 0, "assessment_results_updated": 0, "rows_processed": 0, "rows_with_errors": 0},
+            "summary": {"student_groups_created": 0, "assessment_plans_created": 0, "assessment_results_created": 0, "assessment_results_updated": 0, "assessment_results_updated_submitted": 0, "rows_processed": 0, "rows_with_errors": 0},
             "errors": [{"row": N, "message": "..."}],
         }
     """
@@ -588,10 +608,11 @@ def process_grades(
             "student_groups_created": 0,
             "assessment_plans_created": 0,
             "assessment_results_created": 0,
-            "assessment_results_updated": 0,
-            "rows_processed": 0,
-            "rows_with_errors": 0,
-        },
+        "assessment_results_updated": 0,
+        "assessment_results_updated_submitted": 0,
+        "rows_processed": 0,
+        "rows_with_errors": 0,
+    },
         "errors": [],
     }
 
@@ -643,6 +664,9 @@ def process_grades(
             out["errors"].append({"row": i + 2, "message": _("Estudiante no encontrado: {0}").format(student_id)})
             continue
         grade_str = (row.get("FINAL GRADE") or "").strip()
+        if not grade_str:
+            out["errors"].append({"row": i + 2, "message": _("FINAL GRADE no puede estar vacío.")})
+            continue
         try:
             score = flt(grade_str, 2)
         except (TypeError, ValueError):
@@ -660,6 +684,7 @@ def process_grades(
     total_processed = 0
     total_created = 0
     total_updated = 0
+    total_updated_submitted = 0
     total_errors = len(out["errors"])
 
     for (course_frappe, year, term_label), rows in groups.items():
@@ -688,10 +713,15 @@ def process_grades(
             continue
         if ap_name not in created_ap:
             created_ap.add(ap_name)
+        # Una sola fila por estudiante por grupo: la última en el archivo gana (evita que una fila con 0 o vacía sobrescriba la nota correcta).
+        seen_student = {}
         for row_num, student_name, score, __unused_course in rows:
+            seen_student[student_name] = (row_num, student_name, score, __unused_course)
+        unique_rows = list(seen_student.values())
+        for row_num, student_name, score, __unused_course in unique_rows:
             if progress_callback:
                 progress_callback(total_processed, len(data_rows), _("Procesando resultado: {0}").format(student_name))
-            ar_name, err, created = create_or_update_assessment_result(ap_name, student_name, score, scale)
+            ar_name, err, created, updated_submitted = create_or_update_assessment_result(ap_name, student_name, score, scale)
             if err:
                 out["errors"].append({"row": row_num, "message": err})
             else:
@@ -700,11 +730,14 @@ def process_grades(
                     total_created += 1
                 else:
                     total_updated += 1
+                    if updated_submitted:
+                        total_updated_submitted += 1
 
     out["summary"]["student_groups_created"] = len(created_sg)
     out["summary"]["assessment_plans_created"] = len(created_ap)
     out["summary"]["assessment_results_created"] = total_created
     out["summary"]["assessment_results_updated"] = total_updated
+    out["summary"]["assessment_results_updated_submitted"] = total_updated_submitted
     out["summary"]["rows_processed"] = total_processed
     out["summary"]["rows_with_errors"] = len(out["errors"])
     out["success"] = True

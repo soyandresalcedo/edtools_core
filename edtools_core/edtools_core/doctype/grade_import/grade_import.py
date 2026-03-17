@@ -64,6 +64,11 @@ class GradeImport(Document):
 			summary_lines.append(
 				"Resultados existentes actualizados: {}".format(s.get("assessment_results_updated", 0))
 			)
+			updated_sub = s.get("assessment_results_updated_submitted", 0)
+			if updated_sub:
+				summary_lines.append(
+					"  (de los cuales ya estaban presentados, actualizados en sitio: {})".format(updated_sub)
+				)
 			summary_lines.append(
 				"Filas procesadas correctamente: {}".format(s.get("rows_processed", 0))
 			)
