@@ -103,7 +103,13 @@ def is_provisioning_enabled() -> bool:
 	return str(val).strip() in ("1", "true", "True", "yes")
 
 
-def _log_azure_response(operation: str, resp, *, extra: str = "") -> None:
+def _log_azure_response(
+	operation: str,
+	resp,
+	*,
+	extra: str = "",
+	non_error_statuses: Optional[set[int]] = None,
+) -> None:
 	"""
 	Log completo de respuestas Azure: en 2xx preview corto; en 4xx/5xx cuerpo completo.
 	Imprime a stdout (Railway) y a frappe.logger para trazabilidad.
@@ -111,6 +117,8 @@ def _log_azure_response(operation: str, resp, *, extra: str = "") -> None:
 	status = resp.status_code
 	body = resp.text or ""
 	is_error = status >= 400
+	if non_error_statuses and status in non_error_statuses:
+		is_error = False
 	pref = f"[Azure DEBUG] {operation} → HTTP {status}"
 	if extra:
 		pref = f"{pref} | {extra}"
@@ -225,7 +233,13 @@ def assign_microsoft_license(user_id: str, sku_id: Optional[str] = None) -> None
 	"""
 	Asigna licencia Microsoft 365 al usuario.
 	En sandbox, simula sin llamar a Azure.
-	Si la licencia ya está asignada (400), no falla (idempotente).
+
+	Modo recomendado (licenciamiento por grupos):
+	- Quitar membresía de `students_prospect_group_id`
+	- Agregar membresía a `students_group_id`
+
+	Fallback (si no hay group ids configurados):
+	- asignar directo por `skuId` vía `POST /users/{id}/assignLicense`
 	"""
 	if is_sandbox_mode():
 		msg = f"[Azure Sandbox] Simulando asignación de licencia para: {user_id}"
@@ -235,6 +249,67 @@ def assign_microsoft_license(user_id: str, sku_id: Optional[str] = None) -> None
 
 	import requests
 	token = _get_graph_token()
+	headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+	# 1) Licenciamiento por grupos (recomendado)
+	students_group_id = _get_config("students_group_id")
+	students_prospect_group_id = _get_config("students_prospect_group_id")
+	if students_group_id and students_prospect_group_id:
+		# 1a) Remover de students_prospect
+		delete_url = (
+			f"https://graph.microsoft.com/v1.0/groups/{students_prospect_group_id}/members/{user_id}/$ref"
+		)
+		print(f"[Azure DEBUG] DELETE {delete_url} | user_id={user_id}", flush=True)
+		del_resp = requests.delete(delete_url, headers=headers, timeout=30)
+		_log_azure_response(
+			"remove_from_students_prospect_group",
+			del_resp,
+			extra=f"students_prospect_group_id={students_prospect_group_id}, user_id={user_id}",
+			non_error_statuses={404},
+		)
+		# 404 = idempotente (ya no era miembro)
+		if del_resp.status_code not in (204, 404):
+			del_resp.raise_for_status()
+
+		# 1b) Agregar a students
+		post_url = f"https://graph.microsoft.com/v1.0/groups/{students_group_id}/members/$ref"
+		body = {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{user_id}"}
+		print(
+			f"[Azure DEBUG] POST {post_url} | user_id={user_id} | students_group_id={students_group_id}",
+			flush=True,
+		)
+		post_resp = requests.post(post_url, json=body, headers=headers, timeout=30)
+
+		# Idempotencia: ya era miembro
+		if post_resp.status_code == 400:
+			try:
+				post_body = post_resp.json() if post_resp.text else {}
+			except Exception:
+				post_body = {}
+			msg = (post_body.get("error", {}).get("message") or "").lower()
+			if ("already" in msg and "exist" in msg) or "already exists" in msg:
+				_log_azure_response(
+					"add_to_students_group",
+					post_resp,
+					extra=f"students_group_id={students_group_id}, user_id={user_id}",
+					non_error_statuses={400},
+				)
+				print(f"[Azure DEBUG] Ya era miembro del grupo students. user_id={user_id}", flush=True)
+				frappe.logger().info(f"Ya era miembro del grupo students. user_id={user_id}")
+				return
+
+		_log_azure_response(
+			"add_to_students_group",
+			post_resp,
+			extra=f"students_group_id={students_group_id}, user_id={user_id}",
+		)
+		if post_resp.status_code not in (204, 201):
+			post_resp.raise_for_status()
+
+		print(f"[Azure DEBUG] Grupo members sync OK para user_id={user_id}", flush=True)
+		return
+
+	# 2) Fallback: licenciamiento directo por skuId
 	url = f"https://graph.microsoft.com/v1.0/users/{user_id}/assignLicense"
 	sku = sku_id or _get_config("sku_id") or DEFAULT_SKU_ID
 	payload = {
@@ -242,18 +317,20 @@ def assign_microsoft_license(user_id: str, sku_id: Optional[str] = None) -> None
 		"removeLicenses": [],
 	}
 	print(f"[Azure DEBUG] POST {url} | user_id={user_id} | sku={sku}", flush=True)
-	resp = requests.post(url, json=payload, headers={
-		"Authorization": f"Bearer {token}",
-		"Content-Type": "application/json",
-	}, timeout=30)
+	resp = requests.post(url, json=payload, headers=headers, timeout=30)
 	_log_azure_response("assign_microsoft_license", resp, extra=f"user_id={user_id}")
 	if resp.status_code == 400:
 		body = resp.json() if resp.text else {}
 		msg = (body.get("error", {}).get("message") or "").lower()
 		# Licencia ya asignada o conflicto: no fallar
 		if "already assigned" in msg or "license" in msg:
-			print(f"[Azure DEBUG] Licencia ya asignada o sin cambios para user_id={user_id}", flush=True)
-			frappe.logger().info(f"Licencia ya asignada o sin cambios para user_id={user_id}")
+			print(
+				f"[Azure DEBUG] Licencia ya asignada o sin cambios para user_id={user_id}",
+				flush=True,
+			)
+			frappe.logger().info(
+				f"Licencia ya asignada o sin cambios para user_id={user_id}"
+			)
 			return
 		resp.raise_for_status()
 	resp.raise_for_status()
