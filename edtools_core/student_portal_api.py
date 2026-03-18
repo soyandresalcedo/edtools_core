@@ -88,10 +88,12 @@ def get_student_curriculum(student, program_enrollment=None):
 			"courses": [],
 			"summary": {"total": 0, "completed": 0, "in_progress": 0, "upcoming": 0},
 		}
-	# Assessment Results del estudiante en este programa (para marcar completed)
+	# Assessment Results del estudiante (para marcar completed).
+	# Nota: no filtramos por program porque en algunas instalaciones el campo puede estar vacío o inconsistente;
+	# el matching final se restringe a cursos que existan en el pensum (Program.courses).
 	assessment_results = frappe.db.get_list(
 		"Assessment Result",
-		filters={"student": student, "program": program_name, "docstatus": 1},
+		filters={"student": student, "docstatus": 1},
 		fields=["course", "grade", "total_score", "maximum_score", "academic_term"],
 		ignore_permissions=True,
 	)
@@ -100,18 +102,27 @@ def get_student_curriculum(student, program_enrollment=None):
 		c = ar.get("course")
 		if c and c not in results_by_course:
 			results_by_course[c] = ar
-	# Course Enrollments del estudiante (para in_progress)
+	# Course Enrollments del estudiante (para in_progress).
+	# In progress se restringe al término actual (custom_academic_term) si existe.
 	ce_meta = frappe.get_meta("Course Enrollment")
 	has_custom_term = ce_meta.has_field("custom_academic_term")
-	ce_fields = ["course", "enrollment_date", "program_enrollment"]
+	ce_fields = ["course", "enrollment_date", "program_enrollment", "modified"]
 	if has_custom_term:
 		ce_fields.append("custom_academic_term")
 	ce_list = frappe.db.get_list(
 		"Course Enrollment",
 		filters={"student": student, "docstatus": 1},
 		fields=ce_fields,
+		order_by="modified desc",
 		ignore_permissions=True,
 	)
+	current_term = None
+	if has_custom_term:
+		for ce in ce_list or []:
+			term = (ce.get("custom_academic_term") or "").strip()
+			if term:
+				current_term = term
+				break
 	enrollments_by_course = {}
 	for ce in ce_list or []:
 		c = ce.get("course")
@@ -133,7 +144,7 @@ def get_student_curriculum(student, program_enrollment=None):
 			total_score = ar.get("total_score")
 			maximum_score = ar.get("maximum_score")
 			enrollment_date = ce.get("enrollment_date") if ce else None
-		elif ce:
+		elif ce and (not current_term or not has_custom_term or (ce.get("custom_academic_term") or "").strip() == current_term):
 			status = "in_progress"
 			summary["in_progress"] += 1
 			academic_term = ce.get("custom_academic_term") if has_custom_term else None
@@ -165,6 +176,7 @@ def get_student_curriculum(student, program_enrollment=None):
 		"program_name": program_name,
 		"program_enrollment": pe["name"],
 		"enrollment_date": pe.get("enrollment_date"),
+		"current_term": current_term,
 		"courses": courses_out,
 		"summary": summary,
 	}
