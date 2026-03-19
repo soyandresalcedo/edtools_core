@@ -6,7 +6,7 @@ import frappe
 import requests
 from edtools_core.moodle_sync import sync_student_enrollment_to_moodle
 from frappe import _
-from frappe.utils import cstr, flt, getdate, today, add_months, nowdate
+from frappe.utils import cint, cstr, flt, getdate, today, add_months, nowdate
 from frappe.utils.dateutils import get_dates_from_timegrain
 
 # ------------------------------------------------------------------
@@ -1043,6 +1043,18 @@ def get_student_average(student, program=None, academic_year=None, academic_term
 # ASSESSMENT RESULT TOOL - Letter grade support (edtools_core)
 # ------------------------------------------------------------------
 
+def _get_grading_scale_intervals(grading_scale):
+    """Intervals for a Grading Scale (child table Grading Scale Interval)."""
+    if not grading_scale:
+        return []
+    return frappe.get_all(
+        "Grading Scale Interval",
+        filters={"parent": grading_scale},
+        fields=["grade_code", "threshold"],
+        order_by="threshold desc",
+    )
+
+
 @frappe.whitelist()
 def get_grading_scale_letter_options(assessment_plan):
     """Returns letter grade options from the Assessment Plan's grading scale.
@@ -1058,15 +1070,53 @@ def get_grading_scale_letter_options(assessment_plan):
     if not assessment_plan:
         return []
     grading_scale = frappe.db.get_value("Assessment Plan", assessment_plan, "grading_scale")
-    if not grading_scale:
-        return []
-    intervals = frappe.get_all(
+    return _get_grading_scale_intervals(grading_scale)
+
+
+@frappe.whitelist()
+def get_grading_scale_letter_options_for_scale(grading_scale):
+    """Same as letter options but by grading scale name (for Assessment Result form)."""
+    return _get_grading_scale_intervals(grading_scale)
+
+
+@frappe.whitelist()
+def get_score_for_grade_code(grading_scale, grade_code, maximum_score):
+    """Numeric score on the row (0..maximum_score) that matches the scale threshold for this letter.
+
+    Uses the lowest threshold among intervals with the same grade_code (minimum points for that grade).
+    Used when the user picks a letter in Assessment Result; server validate_grade still derives letter from score.
+    """
+    if not grading_scale or grade_code is None:
+        return None
+    code = cstr(grade_code).strip()
+    if not code:
+        return None
+    maximum_score = flt(maximum_score)
+    if maximum_score <= 0:
+        return None
+
+    rows = frappe.get_all(
         "Grading Scale Interval",
-        filters={"parent": grading_scale},
-        fields=["grade_code", "threshold"],
-        order_by="threshold desc",
+        filters={"parent": grading_scale, "grade_code": code},
+        fields=["threshold"],
+        order_by="threshold asc",
     )
-    return intervals
+    if not rows:
+        for row in frappe.get_all(
+            "Grading Scale Interval",
+            filters={"parent": grading_scale},
+            fields=["grade_code", "threshold"],
+        ):
+            if cstr(row.grade_code).strip().upper() == code.upper():
+                rows = [{"threshold": row.threshold}]
+                break
+    if not rows:
+        return None
+
+    threshold = flt(rows[0].threshold)
+    raw = threshold / 100.0 * maximum_score
+    precision = cint(frappe.get_system_settings("float_precision")) or 3
+    return flt(raw, precision)
 
 
 # ------------------------------------------------------------------
