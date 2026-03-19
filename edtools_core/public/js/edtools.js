@@ -2,7 +2,7 @@
 
 // Help dropdown: Documentation URL, hide 3 items, Soporte + CUC School non-clickable
 var DOCS_EDTOOLS_URL = "https://docs.edtools.co/api-reference/introduction";
-var HELP_LABELS_TO_HIDE = ["User Forum", "CUC University School", "Report an Issue", "Foro de usuarios", "Escuela CUC University", "Reportar un problema"];
+var HELP_LABELS_TO_HIDE = ["About", "Acerca de", "User Forum", "CUC University School", "Report an Issue", "Foro de usuarios", "Escuela CUC University", "Reportar un problema"];
 
 function makeLinkNonClickable(el) {
     if (el.getAttribute("data-edtools-noclick") === "1") return;
@@ -45,9 +45,12 @@ function customizeHelpDropdown() {
             }
         }
 
-        // 4) Hide User Forum, CUC University School, Report an Issue (exact or partial)
-        if (text.indexOf("User Forum") !== -1 || text.indexOf("CUC University School") !== -1 || text.indexOf("Report an Issue") !== -1 ||
-            text.indexOf("Foro de usuarios") !== -1 || text.indexOf("Reportar un problema") !== -1) {
+        // 4) Hide About, User Forum, CUC University School, Report an Issue (exact or partial)
+        var t = text.trim();
+        var hide = (t === "About" || t === "Acerca de") ||
+            text.indexOf("User Forum") !== -1 || text.indexOf("CUC University School") !== -1 || text.indexOf("Report an Issue") !== -1 ||
+            text.indexOf("Foro de usuarios") !== -1 || text.indexOf("Reportar un problema") !== -1;
+        if (hide) {
             el.style.display = "none";
         }
     });

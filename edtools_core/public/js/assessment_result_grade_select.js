@@ -23,9 +23,35 @@ function _num(v) {
 	return Number.isFinite(n) ? n : 0;
 }
 
+function update_total_score_and_grade(frm) {
+	if (!frm.doc.details || !frm.doc.details.length || !frm.doc.grading_scale || !frm.doc.maximum_score) {
+		return;
+	}
+	let total = 0;
+	frm.doc.details.forEach(function (row) {
+		const sc = _num(row.score);
+		total += sc;
+	});
+	const pct = frm.doc.maximum_score > 0 ? (total / frm.doc.maximum_score) * 100 : 0;
+	frappe.call({
+		method: 'education.education.api.get_grade',
+		args: {
+			grading_scale: frm.doc.grading_scale,
+			percentage: pct,
+		},
+		callback: function (r) {
+			if (r.message != null) {
+				frm.set_value('total_score', total);
+				frm.set_value('grade', r.message);
+			}
+		},
+	});
+}
+
 frappe.ui.form.on('Assessment Result', {
 	refresh: function (frm) {
 		_schedule_grade_ui(frm);
+		update_total_score_and_grade(frm);
 	},
 	assessment_plan: function (frm) {
 		_schedule_grade_ui(frm);
@@ -86,6 +112,9 @@ function setup_assessment_result_grade_ui(frm) {
 }
 
 frappe.ui.form.on('Assessment Result Detail', {
+	score: function (frm) {
+		update_total_score_and_grade(frm);
+	},
 	grade: function (frm, cdt, cdn) {
 		const row = locals[cdt][cdn];
 		if (!frm.doc.grading_scale || !row.maximum_score) {
@@ -121,6 +150,7 @@ frappe.ui.form.on('Assessment Result Detail', {
 					callback: function (r2) {
 						if (r2.message !== undefined && r2.message !== null) {
 							frappe.model.set_value(cdt, cdn, 'score', r2.message);
+							update_total_score_and_grade(frm);
 						}
 					},
 				});

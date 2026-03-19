@@ -9,6 +9,8 @@ DOCUMENTATION_URL = "https://docs.edtools.co/api-reference/introduction"
 
 # Item labels to hide (English and Spanish as stored in DB)
 LABELS_TO_HIDE = [
+    "About",
+    "Acerca de",
     "User Forum",
     "CUC University School",
     "Report an Issue",
