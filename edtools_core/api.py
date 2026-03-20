@@ -2354,6 +2354,23 @@ def upload_grades_file(file_url, grading_scale=None):
 
 
 # =====================================================================
+# Sincronización estado estudiante → Moodle (diagnóstico)
+# =====================================================================
+
+@frappe.whitelist()
+def sync_student_status_to_moodle_manual(student_id):
+    """Sincroniza manualmente el estado de un estudiante con Moodle.
+    Útil para diagnóstico: llama a sync_student_status_to_moodle con el doc actual.
+    """
+    if not frappe.db.exists("Student", student_id):
+        frappe.throw(f"Estudiante {student_id} no encontrado")
+    doc = frappe.get_doc("Student", student_id)
+    from edtools_core.moodle_sync import sync_student_status_to_moodle
+    sync_student_status_to_moodle(doc)
+    return {"ok": True, "student": student_id, "student_status": doc.student_status}
+
+
+# =====================================================================
 # Desmatriculación de Moodle
 # =====================================================================
 

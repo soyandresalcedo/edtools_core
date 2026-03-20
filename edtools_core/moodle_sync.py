@@ -160,8 +160,12 @@ def sync_student_status_to_moodle(doc, method=None):
         from edtools_core.moodle_integration import _get_moodle_config
         url, token = _get_moodle_config()
         if not url or not token:
+            frappe.logger().info(
+                "Moodle status sync: MOODLE_URL o MOODLE_TOKEN no configurados, se omite."
+            )
             return
-    except Exception:
+    except Exception as ex:
+        frappe.log_error(title="Moodle sync config", message=f"Error al obtener config: {ex}")
         return
 
     if not getattr(doc, "user", None) or not str(doc.user).strip():
@@ -195,17 +199,18 @@ def sync_student_status_to_moodle(doc, method=None):
     moodle_user_id = int(moodle_user["id"])
     status = (getattr(doc, "student_status", None) or "").strip()
 
-    # Withdrawn (Retirado): suspender usuario completo
-    if status == "Withdrawn":
+    # Withdrawn / Retired / Retirado: suspender usuario completo
+    STATUS_WITHDRAWN = frozenset({"Withdrawn", "Retired", "Retirado"})
+    if status in STATUS_WITHDRAWN:
         try:
             update_moodle_user_suspended(moodle_user_id, 1)
             frappe.logger().info(
-                f"Moodle status sync: Student {doc.name} -> usuario suspended=1 (Withdrawn)"
+                f"Moodle status sync: Student {doc.name} -> usuario suspended=1 (status={status!r})"
             )
         except Exception as e:
             frappe.log_error(
                 title="Moodle sync student status",
-                message=f"Student {doc.name} | Withdrawn | Error al suspender usuario: {e}",
+                message=f"Student {doc.name} | status={status!r} | Error al suspender usuario: {e}",
             )
         return
 
