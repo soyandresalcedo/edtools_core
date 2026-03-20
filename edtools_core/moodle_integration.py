@@ -283,6 +283,11 @@ def _find_course_in_category_case_insensitive(
             return True
         if short_norm and (c_idnum == short_norm or c_short == short_norm):
             return True
+        # Match por shortname que CONTIENE el course code (ej. "202545, MIB570, 1, ..." contiene "mib570")
+        short_no_spaces = short_norm.replace(" ", "")
+        c_short_no_spaces = c_short.replace(" ", "")
+        if short_no_spaces and short_no_spaces in c_short_no_spaces:
+            return True
         return False
 
     def _search_in_category(cat_id: int) -> int | None:
@@ -315,6 +320,72 @@ def _find_course_in_category_case_insensitive(
     except Exception:
         pass
 
+    return None
+
+
+def _find_course_in_year_categories(
+    *,
+    year_category_id: int,
+    course_idnumber: str,
+    course_shortname: str,
+) -> int | None:
+    """Busca el curso en todas las subcategorías del año (hijas directas o descendientes)."""
+    idnum_norm = (course_idnumber or "").strip().lower()
+    short_norm = (course_shortname or "").strip().lower()
+    short_no_spaces = short_norm.replace(" ", "")
+
+    def _match(c: Dict[str, Any]) -> bool:
+        c_idnum = (c.get("idnumber") or "").strip().lower()
+        c_short = (c.get("shortname") or "").strip().lower()
+        c_short_no_spaces = c_short.replace(" ", "")
+        if idnum_norm and (c_idnum == idnum_norm or c_short == idnum_norm):
+            return True
+        if short_norm and (c_idnum == short_norm or c_short == short_norm):
+            return True
+        if short_no_spaces and short_no_spaces in c_short_no_spaces:
+            return True
+        return False
+
+    categories = get_all_categories()
+    # Subcategorías del año: parent == year_category_id
+    child_ids = [int(c["id"]) for c in categories if int(c.get("parent") or 0) == year_category_id]
+    for cat_id in child_ids:
+        try:
+            courses = get_courses_by_field(field="category", value=str(cat_id))
+            for c in courses or []:
+                if _match(c):
+                    return int(c.get("id"))
+        except Exception:
+            pass
+    return None
+
+
+def _find_course_by_shortname_contains(course_shortcode: str, course_idnumber: str) -> int | None:
+    """Busca un curso cuyo shortname contenga el course_shortcode. Itera categorías (máx 50)."""
+    short_norm = (course_shortcode or "").strip().lower().replace(" ", "")
+    idnum_norm = (course_idnumber or "").strip().lower()
+    if not short_norm:
+        return None
+
+    categories = get_all_categories()[:50]  # límite para evitar muchas llamadas API
+    seen_course_ids = set()
+    for cat in categories:
+        cat_id = cat.get("id")
+        if not cat_id:
+            continue
+        try:
+            courses = get_courses_by_field(field="category", value=str(cat_id))
+            for c in courses or []:
+                cid = c.get("id")
+                if not cid or cid in seen_course_ids:
+                    continue
+                seen_course_ids.add(cid)
+                c_short = (c.get("shortname") or "").lower().replace(" ", "")
+                c_idnum = (c.get("idnumber") or "").strip().lower()
+                if short_norm in c_short or (idnum_norm and idnum_norm in c_short):
+                    return int(cid)
+        except Exception:
+            pass
     return None
 
 
@@ -486,29 +557,41 @@ MOODLE_ROLE_EDITING_TEACHER = 3
 def get_user_enrolled_course_ids(user_id: int) -> List[int]:
     """
     Obtiene los IDs de cursos donde el usuario está matriculado (solo matrículas activas).
-    Usa core_enrol_get_users_courses. Retorna lista vacía si la API no está disponible.
+    Usa core_enrol_get_users_courses. Incluye cursos antiguos (pre Spring B 2026).
+    Retorna lista vacía si la API no está disponible.
     """
-    try:
-        resp = _moodle_post(
-            "core_enrol_get_users_courses",
-            {"userid": user_id, "returnusercount": 0},
-            timeout=30,
-        )
-    except Exception as e:
-        frappe.logger().debug(
-            f"Moodle get_user_enrolled_courses: API no disponible o error: {e}"
-        )
-        return []
-    if isinstance(resp, dict) and resp.get("exception"):
-        frappe.logger().debug(
-            f"Moodle get_user_enrolled_courses: {resp.get('message')}"
-        )
-        return []
-    # Respuesta: lista de cursos o dict con key "courses"
-    courses = resp if isinstance(resp, list) else (resp.get("courses") or [])
-    if not isinstance(courses, list):
-        return []
-    return [int(c.get("id")) for c in courses if c and c.get("id") is not None]
+    for wsfunc in ("core_enrol_get_users_courses", "enrol_get_users_courses"):
+        try:
+            resp = _moodle_post(
+                wsfunc,
+                {"userid": user_id, "returnusercount": 0},
+                timeout=30,
+            )
+        except Exception as e:
+            if wsfunc == "core_enrol_get_users_courses":
+                frappe.log_error(
+                    title="Moodle LOA trace: core_enrol_get_users_courses falló",
+                    message=f"userid={user_id} | error={e}",
+                )
+            continue
+        if isinstance(resp, dict) and resp.get("exception"):
+            if wsfunc == "core_enrol_get_users_courses":
+                frappe.log_error(
+                    title="Moodle LOA trace: core_enrol_get_users_courses exception",
+                    message=f"userid={user_id} | {resp.get('message')} | code={resp.get('errorcode')}",
+                )
+            continue
+        courses = resp if isinstance(resp, list) else (resp.get("courses") or [])
+        if not isinstance(courses, list):
+            continue
+        ids = [int(c.get("id")) for c in courses if c and c.get("id") is not None]
+        if not ids and wsfunc == "core_enrol_get_users_courses":
+            frappe.log_error(
+                title="Moodle LOA trace: core_enrol retornó 0 cursos",
+                message=f"userid={user_id} | resp_type={type(resp).__name__} | len(courses)={len(courses) if isinstance(courses, list) else 0}",
+            )
+        return ids
+    return []
 
 
 def get_enrolled_user_ids(course_id: int) -> set:
@@ -594,6 +677,47 @@ def unenrol_user_from_course(user_id: int, course_id: int) -> Dict[str, Any]:
     return {"unenrolled": True}
 
 
+# Sufijos del formato antiguo de Moodle (pre Spring B 2026).
+# Ej: 202532=Spring A, 202545=Summer B, 202622=Fall A (año siguiente para Fall).
+_OLD_TERM_SUFFIX_BY_LABEL = {
+    "Spring A": "32",
+    "Spring B": "35",
+    "Summer A": "42",
+    "Summer B": "45",
+    "Fall A": "22",   # usa año+1: 2025 Fall A -> 202622
+    "Fall B": "25",   # usa año+1: 2025 Fall B -> 202625
+}
+
+
+def _get_old_moodle_term_id(academic_term: str | None) -> str | None:
+    """Obtiene el term ID antiguo de Moodle para un período académico.
+
+    Regla computable:
+    - Spring A=32, Spring B=35, Summer A=42, Summer B=45, Fall A=22, Fall B=25
+    - Spring/Summer: YYYY + sufijo (ej. 2025 Summer B -> 202545)
+    - Fall A/B: (YYYY+1) + sufijo (ej. 2025 Fall A -> 202622)
+
+    Prioridad: moodle_old_term_ids en site_config (override por período).
+    """
+    if not academic_term or not str(academic_term).strip():
+        return None
+    term = str(academic_term).strip()
+    custom = frappe.conf.get("moodle_old_term_ids") or {}
+    if isinstance(custom, dict) and term in custom:
+        return str(custom[term]).strip()
+    m = re.fullmatch(r"(\d{4})\s*\((Spring A|Spring B|Summer A|Summer B|Fall A|Fall B)\)", term)
+    if not m:
+        return None
+    year = int(m.group(1))
+    season = m.group(2)
+    suffix = _OLD_TERM_SUFFIX_BY_LABEL.get(season)
+    if not suffix:
+        return None
+    if season in ("Fall A", "Fall B"):
+        year += 1
+    return f"{year}{suffix}"
+
+
 def find_moodle_course_for_enrollment(
     *,
     course_name: str,
@@ -601,11 +725,9 @@ def find_moodle_course_for_enrollment(
 ) -> int | None:
     """Busca un curso en Moodle usando múltiples estrategias.
 
-    Prioridad:
-    1. Course ID number con formato ``YYYYMM::course_shortcode`` (Monitor de César)
-    2. idnumber = course_name (formato EdTools sync)
-    3. shortname que contenga el course_shortcode en la categoría del periodo
-    4. Búsqueda case-insensitive en categoría + hermanas
+    Formatos soportados:
+    - Nuevo (Spring B 2026+): idnumber YYYYMM::code, shortname con comas.
+    - Antiguo (pre Spring B 2026): idnumber TERMID-CODE, shortname TERMID-CODE-1.
 
     Retorna el moodle course id o None si no se encuentra.
     """
@@ -640,6 +762,21 @@ def find_moodle_course_for_enrollment(
     if courses:
         return int(courses[0].get("id"))
 
+    # 2b. Formato ANTIGUO (pre Spring B 2026): idnumber TERMID-CODE, shortname TERMID-CODE-1
+    old_term_id = _get_old_moodle_term_id(academic_term)
+    if old_term_id and course_shortcode:
+        code_normalized = course_shortcode.replace(" ", "").strip()
+        for idnumber_val, shortname_val in [
+            (f"{old_term_id}-{code_normalized}", f"{old_term_id}-{code_normalized}-1"),
+            (f"{old_term_id}-{course_shortcode.strip()}", f"{old_term_id}-{course_shortcode.strip()}-1"),
+        ]:
+            courses = get_courses_by_field(field="idnumber", value=idnumber_val)
+            if courses:
+                return int(courses[0].get("id"))
+            courses = get_courses_by_field(field="shortname", value=shortname_val)
+            if courses:
+                return int(courses[0].get("id"))
+
     # 3. Buscar por shortname con formato fullname de EdTools
     if term_code and course_shortcode:
         course_title = (
@@ -660,7 +797,7 @@ def find_moodle_course_for_enrollment(
             if courses:
                 return int(courses[0].get("id"))
 
-    # 4. Buscar en categoría del periodo y hermanas (case-insensitive)
+    # 4. Buscar en categoría del periodo, hermanas y subcategorías del año (case-insensitive + shortname contains)
     if academic_term:
         try:
             year_name = academic_term.split("(")[0].strip()
@@ -676,7 +813,21 @@ def find_moodle_course_for_enrollment(
             )
             if found is not None:
                 return found
+            # 4b. Buscar en TODAS las subcategorías del año (202545, 202546, etc. vs 202504)
+            found = _find_course_in_year_categories(
+                year_category_id=year_cat_id,
+                course_idnumber=course_doc.name,
+                course_shortname=course_shortcode,
+            )
+            if found is not None:
+                return found
         except Exception:
             pass
+
+    # 5. Buscar en toda Moodle por shortname que contenga el course code (último recurso)
+    if course_shortcode:
+        found = _find_course_by_shortname_contains(course_shortcode, course_doc.name)
+        if found is not None:
+            return found
 
     return None
