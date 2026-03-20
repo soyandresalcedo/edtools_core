@@ -483,6 +483,34 @@ MOODLE_ROLE_STUDENT = 5
 MOODLE_ROLE_EDITING_TEACHER = 3
 
 
+def get_user_enrolled_course_ids(user_id: int) -> List[int]:
+    """
+    Obtiene los IDs de cursos donde el usuario está matriculado (solo matrículas activas).
+    Usa core_enrol_get_users_courses. Retorna lista vacía si la API no está disponible.
+    """
+    try:
+        resp = _moodle_post(
+            "core_enrol_get_users_courses",
+            {"userid": user_id, "returnusercount": 0},
+            timeout=30,
+        )
+    except Exception as e:
+        frappe.logger().debug(
+            f"Moodle get_user_enrolled_courses: API no disponible o error: {e}"
+        )
+        return []
+    if isinstance(resp, dict) and resp.get("exception"):
+        frappe.logger().debug(
+            f"Moodle get_user_enrolled_courses: {resp.get('message')}"
+        )
+        return []
+    # Respuesta: lista de cursos o dict con key "courses"
+    courses = resp if isinstance(resp, list) else (resp.get("courses") or [])
+    if not isinstance(courses, list):
+        return []
+    return [int(c.get("id")) for c in courses if c and c.get("id") is not None]
+
+
 def get_enrolled_user_ids(course_id: int) -> set:
     """
     Devuelve los userid de Moodle que ya están matriculados en el curso.
