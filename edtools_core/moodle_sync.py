@@ -153,35 +153,36 @@ def sync_student_status_to_moodle(doc, method=None):
     Se invoca desde doc_events (Student on_update y after_insert).
     Si Moodle falla, se registra el error pero no se bloquea el guardado en EdTools.
     """
+    status = (getattr(doc, "student_status", None) or "").strip()
+    # Trace solo para LOA/Inactive/Suspended (evita spam en cada guardado de Active)
+    if status and status not in ("Active", "Withdrawn", "Retired", "Retirado"):
+        _log_moodle_sync_trace("ENTRY (hook llamado)", student=doc.name, status=status)
+
     sync_enabled = os.getenv("MOODLE_SYNC_STUDENT_STATUS")
     if sync_enabled is not None and str(sync_enabled).strip().lower() in ("0", "false", "no"):
+        _log_moodle_sync_trace("sync EXIT: MOODLE_SYNC_STUDENT_STATUS desactivado", student=doc.name)
         return
     if frappe.conf.get("moodle_sync_student_status") is False:
+        _log_moodle_sync_trace("sync EXIT: moodle_sync_student_status=False en site config", student=doc.name)
         return
 
     try:
         from edtools_core.moodle_integration import _get_moodle_config
         url, token = _get_moodle_config()
         if not url or not token:
-            frappe.logger().info(
-                "Moodle status sync: MOODLE_URL o MOODLE_TOKEN no configurados, se omite."
-            )
+            _log_moodle_sync_trace("sync EXIT: MOODLE_URL o MOODLE_TOKEN no configurados", student=doc.name)
             return
     except Exception as ex:
         frappe.log_error(title="Moodle sync config", message=f"Error al obtener config: {ex}")
         return
 
     if not getattr(doc, "user", None) or not str(doc.user).strip():
-        frappe.logger().debug(
-            f"Moodle status sync: Student {doc.name} sin User vinculado, se omite."
-        )
+        _log_moodle_sync_trace("sync EXIT: Student sin User vinculado", student=doc.name)
         return
 
     email = frappe.db.get_value("User", doc.user, "email")
     if not email or not str(email).strip():
-        frappe.logger().debug(
-            f"Moodle status sync: User {doc.user} sin email, se omite."
-        )
+        _log_moodle_sync_trace("sync EXIT: User sin email", student=doc.name)
         return
 
     try:
@@ -194,9 +195,7 @@ def sync_student_status_to_moodle(doc, method=None):
         return
 
     if not moodle_user:
-        frappe.logger().debug(
-            f"Moodle status sync: Estudiante {doc.name} no existe en Moodle (email {email}), no hay nada que actualizar."
-        )
+        _log_moodle_sync_trace("sync EXIT: Usuario no existe en Moodle", student=doc.name, email=email)
         return
 
     moodle_user_id = int(moodle_user["id"])
@@ -229,10 +228,25 @@ def sync_student_status_to_moodle(doc, method=None):
 
     # Sincronizar matrículas: Active = reactivar, otros = suspender
     suspend_enrolments = status != "Active"
+    _log_moodle_sync_trace(
+        "sync LOA/otros: entrando a sincronizar matrículas",
+        student=doc.name,
+        moodle_user_id=moodle_user_id,
+        suspend=suspend_enrolments,
+    )
     _sync_student_course_enrolments_status(
         student=doc.name,
         moodle_user_id=moodle_user_id,
         suspend=suspend_enrolments,
+    )
+
+
+def _log_moodle_sync_trace(msg: str, **kwargs):
+    """Registra traza de diagnóstico en Error Log para depurar LOA. Siempre activo."""
+    parts = [f"{k}={v}" for k, v in kwargs.items()]
+    frappe.log_error(
+        title=f"Moodle LOA trace: {msg}",
+        message=" | ".join(parts) if parts else msg,
     )
 
 
@@ -253,6 +267,12 @@ def _sync_student_course_enrolments_status(
     if suspend:
         # SUSPENDER: obtener cursos directamente desde Moodle (incluye solo matrículas activas)
         course_ids_to_update = get_user_enrolled_course_ids(moodle_user_id)
+        _log_moodle_sync_trace(
+            f"get_user_enrolled_course_ids retornó {len(course_ids_to_update)} cursos",
+            student=student,
+            moodle_user_id=moodle_user_id,
+            count=len(course_ids_to_update),
+        )
         if not course_ids_to_update:
             frappe.logger().debug(
                 f"Moodle enrolments sync: core_enrol_get_users_courses vacío para user {moodle_user_id}, "
@@ -262,21 +282,27 @@ def _sync_student_course_enrolments_status(
     if not course_ids_to_update:
         # Fallback: usar Course Enrollments de EdTools (para reactivar o si Moodle API vacía)
         course_ids_to_update = _get_moodle_course_ids_from_edtools_enrollments(student)
+        _log_moodle_sync_trace(
+            "fallback EdTools CE",
+            student=student,
+            count=len(course_ids_to_update) if course_ids_to_update else 0,
+        )
         if not course_ids_to_update:
-            frappe.logger().debug(
-                f"Moodle enrolments sync: Student {student} sin cursos a sincronizar."
-            )
             return
 
     for moodle_course_id in course_ids_to_update:
         try:
-            suspend_user_enrolment_in_course(
+            result = suspend_user_enrolment_in_course(
                 user_id=moodle_user_id,
                 course_id=moodle_course_id,
                 suspend=1 if suspend else 0,
             )
-            frappe.logger().info(
-                f"Moodle enrolments sync: Student {student} | Moodle course id {moodle_course_id} -> suspend={suspend}"
+            _log_moodle_sync_trace(
+                "suspend_user_enrolment_in_course OK",
+                student=student,
+                moodle_course_id=moodle_course_id,
+                suspend=suspend,
+                result=str(result),
             )
         except Exception as e:
             frappe.log_error(
