@@ -2375,6 +2375,58 @@ def sync_student_status_to_moodle_manual(student_id):
 # =====================================================================
 
 @frappe.whitelist()
+def reactivate_moodle_courses(student_id, moodle_course_ids):
+    """Reactiva matrículas específicas en Moodle para un estudiante.
+
+    Útil cuando el estudiante fue puesto en LOA antes de que se guardaran
+    los IDs en un Comment, y al volver a Active no se reactivaron.
+
+    Args:
+        student_id: ej. "EDU-STU-2025-02806"
+        moodle_course_ids: lista de IDs numéricos de Moodle, ej. "204,205,221,227,247,251,263,265"
+    """
+    import json as _json
+    from edtools_core.moodle_integration import suspend_user_enrolment_in_course
+    from edtools_core.moodle_users import get_user_by_email
+
+    if not frappe.db.exists("Student", student_id):
+        frappe.throw(f"Estudiante {student_id} no encontrado")
+
+    if isinstance(moodle_course_ids, str):
+        moodle_course_ids = [int(x.strip()) for x in moodle_course_ids.split(",") if x.strip()]
+    elif isinstance(moodle_course_ids, list):
+        moodle_course_ids = [int(x) for x in moodle_course_ids]
+    else:
+        moodle_course_ids = _json.loads(moodle_course_ids)
+
+    student_doc = frappe.get_doc("Student", student_id)
+    if not student_doc.user:
+        frappe.throw(f"Estudiante {student_id} no tiene User vinculado")
+    email = frappe.db.get_value("User", student_doc.user, "email")
+    if not email:
+        frappe.throw(f"User {student_doc.user} no tiene email")
+
+    moodle_user = get_user_by_email(email.strip().lower())
+    if not moodle_user:
+        frappe.throw(f"No se encontró usuario en Moodle con email {email}")
+
+    moodle_user_id = int(moodle_user["id"])
+    results = []
+    for cid in moodle_course_ids:
+        try:
+            r = suspend_user_enrolment_in_course(user_id=moodle_user_id, course_id=cid, suspend=0)
+            results.append({"course_id": cid, "ok": True, "result": r})
+        except Exception as e:
+            results.append({"course_id": cid, "ok": False, "error": str(e)})
+
+    return {
+        "student": student_id,
+        "moodle_user_id": moodle_user_id,
+        "reactivated": results,
+    }
+
+
+@frappe.whitelist()
 def unenrol_from_moodle(course_enrollment):
     """Desmatricula un estudiante de Moodle a partir de un Course Enrollment.
 
