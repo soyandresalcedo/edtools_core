@@ -526,5 +526,106 @@ def enrol_user_in_course(
             return {"already_enrolled": True}
         frappe.log_error(message=str(resp), title="Moodle enrol_user error")
         frappe.throw(f"Moodle error (enrol_user): {resp.get('message') or resp.get('errorcode')}")
-    # Moodle puede devolver lista vacía o de resultados; sin exception = éxito
     return {"enrolled": True}
+
+
+def unenrol_user_from_course(user_id: int, course_id: int) -> Dict[str, Any]:
+    """Desmatricula un usuario de un curso Moodle (enrol_manual_unenrol_users)."""
+    payload = {
+        "enrolments[0][userid]": user_id,
+        "enrolments[0][courseid]": course_id,
+    }
+    resp = _moodle_post("enrol_manual_unenrol_users", data=payload, timeout=20)
+    if isinstance(resp, dict) and resp.get("exception"):
+        msg = resp.get("message") or ""
+        frappe.log_error(message=str(resp), title="Moodle unenrol_user error")
+        frappe.throw(f"Moodle error (unenrol_user): {msg or resp.get('errorcode')}")
+    return {"unenrolled": True}
+
+
+def find_moodle_course_for_enrollment(
+    *,
+    course_name: str,
+    academic_term: str | None = None,
+) -> int | None:
+    """Busca un curso en Moodle usando múltiples estrategias.
+
+    Prioridad:
+    1. Course ID number con formato ``YYYYMM::course_shortcode`` (Monitor de César)
+    2. idnumber = course_name (formato EdTools sync)
+    3. shortname que contenga el course_shortcode en la categoría del periodo
+    4. Búsqueda case-insensitive en categoría + hermanas
+
+    Retorna el moodle course id o None si no se encuentra.
+    """
+    course_doc = frappe.get_doc("Course", course_name)
+    course_shortcode = (
+        getattr(course_doc, "course_code", None)
+        or getattr(course_doc, "short_name", None)
+        or ""
+    )
+    if isinstance(course_shortcode, str):
+        course_shortcode = course_shortcode.strip()
+    if not course_shortcode and course_doc.course_name:
+        course_shortcode = course_doc.course_name.split(" - ", 1)[0].strip()
+    course_shortcode = course_shortcode or course_doc.course_name
+
+    term_code = None
+    if academic_term:
+        try:
+            term_code = get_term_category_name(academic_term)
+        except Exception:
+            pass
+
+    # 1. Buscar por idnumber = YYYYMM::course_shortcode (formato Monitor de César)
+    if term_code and course_shortcode:
+        idnumber_monitor = f"{term_code}::{course_shortcode}"
+        courses = get_courses_by_field(field="idnumber", value=idnumber_monitor)
+        if courses:
+            return int(courses[0].get("id"))
+
+    # 2. Buscar por idnumber = course_doc.name (formato EdTools sync)
+    courses = get_courses_by_field(field="idnumber", value=course_doc.name)
+    if courses:
+        return int(courses[0].get("id"))
+
+    # 3. Buscar por shortname con formato fullname de EdTools
+    if term_code and course_shortcode:
+        course_title = (
+            course_doc.course_name.split(" - ", 1)[1].strip()
+            if " - " in (course_doc.course_name or "")
+            else (course_doc.course_name or "")
+        )
+        if academic_term:
+            try:
+                from edtools_core.moodle_sync import _get_term_start_date_mdy
+                term_start_mdy = _get_term_start_date_mdy(academic_term)
+            except Exception:
+                term_start_mdy = ""
+            fullname_shortname = (
+                f"{term_code},{course_shortcode}, 1, {course_title} {academic_term} {term_start_mdy}"
+            )
+            courses = get_courses_by_field(field="shortname", value=fullname_shortname.strip())
+            if courses:
+                return int(courses[0].get("id"))
+
+    # 4. Buscar en categoría del periodo y hermanas (case-insensitive)
+    if academic_term:
+        try:
+            year_name = academic_term.split("(")[0].strip()
+            year_cat_id = ensure_academic_year_category(year_name)
+            term_cat_id = ensure_academic_term_category(
+                academic_term_label=academic_term,
+                parent_year_category_id=year_cat_id,
+            )
+            found = _find_course_in_category_case_insensitive(
+                category_id=term_cat_id,
+                course_idnumber=course_doc.name,
+                course_shortname=course_shortcode,
+            )
+            if found is not None:
+                return found
+        except Exception:
+            pass
+
+    return None

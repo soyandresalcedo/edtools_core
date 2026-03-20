@@ -40,6 +40,7 @@ doctype_js = {
 	"Student Group": "public/js/student_group_custom.js",
 	"Program Enrollment": "public/js/program_enrollment.js",
 	"Assessment Result": "public/js/assessment_result_grade_select.js",
+	"Course Enrollment": "public/js/course_enrollment.js",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -140,7 +141,8 @@ doc_events = {
 		"validate": "edtools_core.validations.enrollment.validate_student_status"
 	},
 	"Course Enrollment": {
-		"validate": "edtools_core.validations.enrollment.validate_student_status"
+		"validate": "edtools_core.validations.enrollment.validate_student_status",
+		"on_trash": "edtools_core.moodle_sync.on_course_enrollment_trash"
 	},
 	"Student": {
 		"before_save": "edtools_core.validations.student.track_status_change",

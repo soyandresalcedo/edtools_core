@@ -2351,3 +2351,28 @@ def upload_grades_file(file_url, grading_scale=None):
         "summary": result.get("summary"),
         "errors": result.get("errors"),
     }
+
+
+# =====================================================================
+# Desmatriculación de Moodle
+# =====================================================================
+
+@frappe.whitelist()
+def unenrol_from_moodle(course_enrollment):
+    """Desmatricula un estudiante de Moodle a partir de un Course Enrollment.
+
+    Llamado desde el botón 'Desmatricular de Moodle' en el formulario.
+    """
+    from edtools_core.moodle_sync import unenrol_student_from_moodle_course
+
+    doc = frappe.get_doc("Course Enrollment", course_enrollment)
+    academic_term = (
+        getattr(doc, "custom_academic_term", None)
+        or getattr(doc, "academic_term", None)
+    )
+    result = unenrol_student_from_moodle_course(
+        student=doc.student,
+        course=doc.course,
+        academic_term=academic_term,
+    )
+    return result

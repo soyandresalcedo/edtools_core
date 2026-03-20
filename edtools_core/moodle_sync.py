@@ -21,6 +21,9 @@ from edtools_core.moodle_integration import (
     ensure_course,
     get_term_category_name,
     enrol_user_in_course,
+    unenrol_user_from_course,
+    find_moodle_course_for_enrollment,
+    get_enrolled_user_ids,
     MOODLE_ROLE_STUDENT,
 )
 
@@ -235,3 +238,151 @@ def _get_term_start_date_mdy(academic_term: str) -> str:
         )
     d = term.term_start_date
     return f"{d.month}/{d.day}/{str(d.year)[2:]}"
+
+
+# =====================================================================
+# Desmatriculación de Moodle
+# =====================================================================
+
+def unenrol_student_from_moodle_course(
+    *,
+    student: str,
+    course: str,
+    academic_term: str | None = None,
+) -> dict:
+    """Desmatricula un estudiante de un curso en Moodle.
+
+    Pasos:
+    1. Obtener email del estudiante (dominio @cucusa.org)
+    2. Buscar usuario en Moodle por email
+    3. Buscar curso en Moodle (prioridad: Course ID number)
+    4. Verificar que el estudiante está matriculado
+    5. Desmatricular
+
+    Retorna dict con detalles del resultado para logging.
+    """
+    from edtools_core.moodle_users import get_user_by_email
+
+    student_doc = frappe.get_doc("Student", student)
+    if not student_doc.user or not str(student_doc.user).strip():
+        raise ValueError(f"El estudiante {student} no tiene User vinculado.")
+
+    email = frappe.db.get_value("User", student_doc.user, "email")
+    if not email or not str(email).strip():
+        raise ValueError(f"El User {student_doc.user} del estudiante {student} no tiene email.")
+
+    email = email.strip().lower()
+    log_details = {
+        "student": student,
+        "student_name": student_doc.student_name,
+        "email": email,
+        "course": course,
+        "academic_term": academic_term,
+    }
+
+    moodle_user = get_user_by_email(email)
+    if not moodle_user:
+        log_details["status"] = "user_not_found"
+        _log_moodle_unenrol(log_details)
+        frappe.throw(
+            f"No se encontró el usuario {email} en Moodle. "
+            "Puede que el estudiante no exista en Moodle o que el correo no coincida."
+        )
+
+    moodle_user_id = int(moodle_user["id"])
+    log_details["moodle_user_id"] = moodle_user_id
+
+    moodle_course_id = find_moodle_course_for_enrollment(
+        course_name=course,
+        academic_term=academic_term,
+    )
+    if moodle_course_id is None:
+        log_details["status"] = "course_not_found"
+        _log_moodle_unenrol(log_details)
+        frappe.throw(
+            f"No se encontró el curso '{course}' (periodo: {academic_term or 'N/A'}) en Moodle. "
+            "Verifique que el curso exista en Moodle con el Course ID number o shortname correcto."
+        )
+
+    log_details["moodle_course_id"] = moodle_course_id
+
+    enrolled_ids = get_enrolled_user_ids(moodle_course_id)
+    if moodle_user_id not in enrolled_ids:
+        log_details["status"] = "not_enrolled"
+        _log_moodle_unenrol(log_details)
+        return {
+            "success": True,
+            "already_unenrolled": True,
+            "message": f"El estudiante {student_doc.student_name} ({email}) no estaba matriculado en el curso de Moodle (id={moodle_course_id}).",
+            **log_details,
+        }
+
+    unenrol_user_from_course(user_id=moodle_user_id, course_id=moodle_course_id)
+
+    log_details["status"] = "unenrolled"
+    _log_moodle_unenrol(log_details)
+    return {
+        "success": True,
+        "already_unenrolled": False,
+        "message": (
+            f"Se desmatriculó a {student_doc.student_name} ({email}) "
+            f"del curso Moodle id={moodle_course_id}."
+        ),
+        **log_details,
+    }
+
+
+def on_course_enrollment_trash(doc, method=None):
+    """doc_event on_trash para Course Enrollment: desmatricula automáticamente de Moodle.
+
+    Si Moodle no está configurado o falla, se registra el error
+    pero NO se bloquea la eliminación en EdTools.
+    """
+    sync_enabled = os.getenv("MOODLE_SYNC_STUDENT_STATUS")
+    if sync_enabled is not None and str(sync_enabled).strip().lower() in ("0", "false", "no"):
+        return
+    if frappe.conf.get("moodle_sync_student_status") is False:
+        return
+
+    try:
+        from edtools_core.moodle_integration import _get_moodle_config
+        url, token = _get_moodle_config()
+        if not url or not token:
+            return
+    except Exception:
+        return
+
+    try:
+        result = unenrol_student_from_moodle_course(
+            student=doc.student,
+            course=doc.course,
+            academic_term=getattr(doc, "custom_academic_term", None) or getattr(doc, "academic_term", None),
+        )
+        frappe.logger().info(
+            f"Moodle unenrol (on_trash): Course Enrollment {doc.name} -> {result.get('status', result.get('message', ''))}"
+        )
+    except Exception as e:
+        frappe.log_error(
+            title="Moodle unenrol on Course Enrollment delete",
+            message=(
+                f"Course Enrollment: {doc.name}\n"
+                f"Student: {doc.student}\n"
+                f"Course: {doc.course}\n"
+                f"Error: {e}"
+            ),
+        )
+        frappe.msgprint(
+            f"Aviso: No se pudo desmatricular automáticamente de Moodle. "
+            f"Error: {e}<br>El registro en EdTools se eliminará de igual forma.",
+            indicator="orange",
+            alert=True,
+        )
+
+
+def _log_moodle_unenrol(details: dict):
+    """Registra un log detallado de la operación de desmatriculación en Moodle."""
+    import json
+    frappe.log_error(
+        title=f"Moodle Unenrol Log: {details.get('status', 'unknown')}",
+        message=json.dumps(details, indent=2, default=str),
+    )
