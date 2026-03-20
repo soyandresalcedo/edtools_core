@@ -258,14 +258,24 @@ def _sync_student_course_enrolments_status(
 ) -> None:
     """
     Suspende o reactiva las matrículas de curso del estudiante en Moodle.
-    - Para SUSPENDER (LOA): usa core_enrol_get_users_courses para obtener cursos desde Moodle
-      (evita problemas de mapeo EdTools↔Moodle). Si la API no devuelve cursos, hace fallback a EdTools CE.
-    - Para REACTIVAR (Active): usa Course Enrollments de EdTools + find_moodle_course.
+
+    SUSPENDER (LOA):
+      1. core_enrol_get_users_courses (cursos activos desde Moodle, incluye antiguos).
+      2. Fallback: Course Enrollments de EdTools.
+      3. Guarda los IDs suspendidos en un Comment para poder reactivarlos después
+         (core_enrol solo devuelve matrículas activas; las suspendidas desaparecen).
+
+    REACTIVAR (Active):
+      1. Lee los IDs guardados del Comment de la suspensión anterior.
+      2. Complementa con core_enrol_get_users_courses (por si hay nuevos cursos activos).
+      3. Complementa con Course Enrollments de EdTools.
+      4. Reactiva todos, borra el Comment.
     """
-    course_ids_to_update = []
+    import json
+
+    course_ids_to_update: list[int] = []
 
     if suspend:
-        # SUSPENDER: obtener cursos directamente desde Moodle (incluye solo matrículas activas)
         course_ids_to_update = get_user_enrolled_course_ids(moodle_user_id)
         _log_moodle_sync_trace(
             f"get_user_enrolled_course_ids retornó {len(course_ids_to_update)} cursos",
@@ -274,22 +284,55 @@ def _sync_student_course_enrolments_status(
             count=len(course_ids_to_update),
         )
         if not course_ids_to_update:
-            frappe.logger().debug(
-                f"Moodle enrolments sync: core_enrol_get_users_courses vacío para user {moodle_user_id}, "
-                "fallback a Course Enrollments de EdTools."
+            course_ids_to_update = _get_moodle_course_ids_from_edtools_enrollments(student)
+            _log_moodle_sync_trace(
+                "fallback EdTools CE (suspend)",
+                student=student,
+                count=len(course_ids_to_update),
+            )
+    else:
+        # REACTIVAR: recuperar los IDs guardados cuando se suspendió
+        stored_ids = _get_stored_loa_course_ids(student)
+        if stored_ids:
+            course_ids_to_update = stored_ids
+            _log_moodle_sync_trace(
+                f"stored LOA course IDs recuperados: {len(stored_ids)}",
+                student=student,
+                ids=str(stored_ids[:20]),
             )
 
-    if not course_ids_to_update:
-        # Fallback: usar Course Enrollments de EdTools (para reactivar o si Moodle API vacía)
-        course_ids_to_update = _get_moodle_course_ids_from_edtools_enrollments(student)
-        _log_moodle_sync_trace(
-            "fallback EdTools CE",
-            student=student,
-            count=len(course_ids_to_update) if course_ids_to_update else 0,
-        )
-        if not course_ids_to_update:
-            return
+        # Complementar con Moodle API (cursos que aún estén activos)
+        moodle_active = get_user_enrolled_course_ids(moodle_user_id)
+        if moodle_active:
+            _log_moodle_sync_trace(
+                f"moodle active complementario: {len(moodle_active)}",
+                student=student,
+            )
 
+        # Complementar con EdTools CE
+        edtools_ids = _get_moodle_course_ids_from_edtools_enrollments(student)
+        if edtools_ids:
+            _log_moodle_sync_trace(
+                f"EdTools CE complementario: {len(edtools_ids)}",
+                student=student,
+            )
+
+        # Merge sin duplicados, preservando orden
+        seen = set(course_ids_to_update)
+        for cid in moodle_active + edtools_ids:
+            if cid not in seen:
+                seen.add(cid)
+                course_ids_to_update.append(cid)
+
+    if not course_ids_to_update:
+        _log_moodle_sync_trace(
+            "sin cursos para actualizar",
+            student=student,
+            suspend=suspend,
+        )
+        return
+
+    succeeded_ids: list[int] = []
     for moodle_course_id in course_ids_to_update:
         try:
             result = suspend_user_enrolment_in_course(
@@ -297,6 +340,7 @@ def _sync_student_course_enrolments_status(
                 course_id=moodle_course_id,
                 suspend=1 if suspend else 0,
             )
+            succeeded_ids.append(moodle_course_id)
             _log_moodle_sync_trace(
                 "suspend_user_enrolment_in_course OK",
                 student=student,
@@ -312,6 +356,71 @@ def _sync_student_course_enrolments_status(
                     f"suspend={suspend} | Error: {e}"
                 ),
             )
+
+    if suspend and succeeded_ids:
+        _store_loa_course_ids(student, succeeded_ids)
+    elif not suspend:
+        _clear_loa_course_ids(student)
+
+
+_LOA_COMMENT_MARKER = "moodle_loa_suspended_courses"
+
+
+def _store_loa_course_ids(student: str, course_ids: list[int]) -> None:
+    """Persiste los IDs de cursos suspendidos como Comment en el Student."""
+    import json
+    _clear_loa_course_ids(student)
+    payload = json.dumps({_LOA_COMMENT_MARKER: course_ids})
+    frappe.get_doc({
+        "doctype": "Comment",
+        "comment_type": "Info",
+        "reference_doctype": "Student",
+        "reference_name": student,
+        "content": payload,
+    }).insert(ignore_permissions=True)
+    frappe.db.commit()
+
+
+def _get_stored_loa_course_ids(student: str) -> list[int]:
+    """Recupera los IDs de cursos suspendidos guardados previamente."""
+    import json
+    comments = frappe.get_all(
+        "Comment",
+        filters={
+            "reference_doctype": "Student",
+            "reference_name": student,
+            "comment_type": "Info",
+            "content": ["like", f"%{_LOA_COMMENT_MARKER}%"],
+        },
+        fields=["content"],
+        order_by="creation desc",
+        limit=1,
+    )
+    if not comments:
+        return []
+    try:
+        data = json.loads(comments[0].content)
+        return [int(cid) for cid in data.get(_LOA_COMMENT_MARKER, [])]
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return []
+
+
+def _clear_loa_course_ids(student: str) -> None:
+    """Elimina los Comments de cursos LOA suspendidos del Student."""
+    old = frappe.get_all(
+        "Comment",
+        filters={
+            "reference_doctype": "Student",
+            "reference_name": student,
+            "comment_type": "Info",
+            "content": ["like", f"%{_LOA_COMMENT_MARKER}%"],
+        },
+        fields=["name"],
+    )
+    for c in old:
+        frappe.delete_doc("Comment", c.name, ignore_permissions=True, force=True)
+    if old:
+        frappe.db.commit()
 
 
 def _get_moodle_course_ids_from_edtools_enrollments(student: str) -> List[int]:
