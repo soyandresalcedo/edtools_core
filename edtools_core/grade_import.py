@@ -306,31 +306,61 @@ def _normalize_course_code(code: str) -> str:
     return " ".join((code or "").strip().split())
 
 
+def _expand_course_code_without_spaces(code: str) -> str | None:
+    """
+    Convierte código sin espacios a formato con espacio antes de los dígitos.
+    Ej: STA530 -> STA 530, MIB650 -> MIB 650.
+    Permite recibir STA530 cuando el Course tiene short_name = "STA 530".
+    """
+    if not code or not isinstance(code, str):
+        return None
+    code = code.strip().replace(" ", "")
+    if not code:
+        return None
+    # Insertar espacio entre letras y dígitos: "STA530" -> "STA 530"
+    m = re.match(r"^([A-Za-z]+)(\d.*)$", code)
+    if m:
+        return f"{m.group(1)} {m.group(2)}".strip()
+    return None
+
+
 def _resolve_course(course_code: str) -> str | None:
-    """Devuelve el name del Course en Frappe si existe (por short_name o por name)."""
+    """
+    Devuelve el name del Course en Frappe si existe (por short_name o por name).
+    Acepta códigos con o sin espacios: "STA 530" y "STA530" funcionan igual.
+    """
     if not course_code:
         return None
     stripped = course_code.strip()
     normalized = _normalize_course_code(course_code)
     compact = (course_code or "").replace(" ", "")
+    expanded = _expand_course_code_without_spaces(course_code)
 
     # 1) Buscar por short_name (si el DocType tiene el campo)
     meta = frappe.get_meta("Course")
     if meta.has_field("short_name"):
-        for value in (stripped, normalized, compact):
+        values_to_try = [stripped, normalized, compact]
+        if expanded and expanded not in values_to_try:
+            values_to_try.append(expanded)
+        for value in values_to_try:
             if not value:
                 continue
             name = frappe.db.get_value("Course", {"short_name": value}, "name")
             if name:
                 return name
 
-    # 2) Buscar por name del registro
-    if frappe.db.exists("Course", normalized):
-        return normalized
-    if frappe.db.exists("Course", stripped):
-        return stripped
-    if frappe.db.exists("Course", compact):
-        return compact
+    # 2) Búsqueda flexible: comparar short_name sin espacios (para DB con "STA 530", input "STA530")
+    if meta.has_field("short_name") and compact:
+        courses = frappe.get_all("Course", fields=["name", "short_name"])
+        for c in courses or []:
+            sn = (c.get("short_name") or "").strip().replace(" ", "")
+            if sn == compact:
+                return c.get("name")
+
+    # 3) Buscar por name del registro
+    for value in (normalized, stripped, compact, expanded):
+        if value and frappe.db.exists("Course", value):
+            return value
     return None
 
 
@@ -586,6 +616,280 @@ def create_or_update_assessment_result(
         doc.submit()
     frappe.db.commit()
     return doc.name, None, is_new, False
+
+
+# ---------------------------------------------------------------------------
+# Importación individual (endpoint por estudiante)
+# ---------------------------------------------------------------------------
+
+# Campos esperados en el JSON del endpoint individual (equivalente al Excel)
+SINGLE_GRADE_REQUIRED_FIELDS = ["student_id", "semester", "course", "final_grade"]
+SINGLE_GRADE_OPTIONAL_FIELDS = ["full_name", "course_title", "grading_scale"]
+SEMESTER_RE = re.compile(r"^\d{6}$")
+
+
+def _normalize_single_grade_data(data: dict) -> dict:
+    """Acepta nombres de Excel (ID, SEMESTER, etc.) o API (student_id, semester, etc.)."""
+    aliases = {
+        "ID": "student_id",
+        "SEMESTER": "semester",
+        "COURSE": "course",
+        "FINAL GRADE": "final_grade",
+        "FULL NAME": "full_name",
+        "COURSE TITLE": "course_title",
+        "GRADING SCALE": "grading_scale",
+    }
+    out = dict(data)
+    for excel_name, api_name in aliases.items():
+        if excel_name in out and api_name not in out:
+            out[api_name] = out[excel_name]
+    return out
+
+
+def validate_grade_single_input(data: dict) -> tuple[bool, list[dict]]:
+    """
+    Valida los campos de una importación individual de nota.
+    Devuelve (True, []) si todo es correcto, (False, errores) si hay problemas.
+
+    Errores detallados por campo: faltante, formato incorrecto, valor inválido.
+    Acepta nombres de Excel (ID, SEMESTER, COURSE, FINAL GRADE) o API (student_id, etc.).
+    """
+    errors: list[dict] = []
+    if not isinstance(data, dict):
+        return False, [{"field": None, "message": _("Se requiere un objeto JSON con los campos.")}]
+
+    data = _normalize_single_grade_data(data)
+
+    # 1) Campos requeridos faltantes
+    for field in SINGLE_GRADE_REQUIRED_FIELDS:
+        val = data.get(field)
+        if val is None or (isinstance(val, str) and not str(val).strip()):
+            errors.append({
+                "field": field,
+                "message": _("Campo obligatorio '{0}' no puede estar vacío.").format(field),
+            })
+    if errors:
+        return False, errors
+
+    student_id = str(data.get("student_id", "")).strip()
+    semester = str(data.get("semester", "")).strip().replace(" ", "")
+    course = str(data.get("course", "")).strip()
+    final_grade = str(data.get("final_grade", "")).strip()
+    grading_scale_name = (data.get("grading_scale") or "").strip() or None
+
+    # 2) Formato SEMESTER: 6 dígitos, sufijo 01-06
+    if not SEMESTER_RE.match(semester):
+        errors.append({
+            "field": "semester",
+            "message": _("Debe ser 6 dígitos (YYYY01 a YYYY06, ej. 202601)."),
+        })
+    elif semester[-2:] not in SEMESTER_SUFFIX_TO_TERM:
+        errors.append({
+            "field": "semester",
+            "message": _("Los dos últimos dígitos deben ser 01-06 (01=Spring A, 02=Spring B, etc.)."),
+        })
+
+    # 3) COURSE no vacío (el formato con/sin espacios se tolera en _resolve_course)
+    if not course:
+        errors.append({
+            "field": "course",
+            "message": _("No puede estar vacío. Ej: STA 530 o STA530."),
+        })
+
+    # 4) FINAL GRADE: no vacío, y si hay escala, válido
+    if not final_grade:
+        errors.append({
+            "field": "final_grade",
+            "message": _("No puede estar vacío. Debe ser un número (0-100) o una letra de la escala (A, B+, etc.)."),
+        })
+    else:
+        scale = grading_scale_name or frappe.db.get_single_value("Education Settings", "default_grading_scale")
+        if scale and not _grade_value_valid(final_grade, scale):
+            errors.append({
+                "field": "final_grade",
+                "message": _("'{0}' no es válido. Debe ser un número o una letra de la escala de calificaciones.").format(final_grade),
+            })
+
+    # 5) Criterio Definitiva
+    if not frappe.db.exists("Assessment Criteria", "Definitiva"):
+        errors.append({
+            "field": None,
+            "message": _("No existe el criterio de evaluación 'Definitiva'. Créalo en Evaluación > Criterios de evaluación."),
+        })
+
+    # 6) Escala por defecto si no se indicó
+    if not grading_scale_name:
+        scale = frappe.db.get_single_value("Education Settings", "default_grading_scale")
+        if not scale:
+            scales = frappe.get_all("Grading Scale", limit=1)
+            scale = scales[0].name if scales else None
+        if not scale:
+            errors.append({
+                "field": "grading_scale",
+                "message": _("No hay escala de calificaciones configurada. Indica 'grading_scale' o configura Education Settings."),
+            })
+
+    return len(errors) == 0, errors
+
+
+def process_grade_single(data: dict) -> dict[str, Any]:
+    """
+    Procesa una sola nota (un estudiante, un curso, un período).
+    Usa la misma lógica que process_grades pero para un único registro.
+
+    Args:
+        data: {
+            "student_id": "EDU-STU-2025-02806" (obligatorio),
+            "semester": "202601" (obligatorio, 6 dígitos),
+            "course": "STA 530" o "STA530" (obligatorio),
+            "final_grade": "85" o "A" (obligatorio),
+            "full_name": "..." (opcional),
+            "course_title": "..." (opcional),
+            "grading_scale": "..." (opcional),
+        }
+
+    Returns:
+        {
+            "success": bool,
+            "message": str,
+            "validation_errors": [{"field": ..., "message": ...}],
+            "assessment_result": nombre del documento creado/actualizado,
+            "created": bool (True si nuevo, False si actualizado),
+            "error_detail": str (si success=False por error de procesamiento),
+        }
+    """
+    data = _normalize_single_grade_data(data)
+    ok, validation_errors = validate_grade_single_input(data)
+    if not ok:
+        return {
+            "success": False,
+            "message": _("Errores de validación"),
+            "validation_errors": validation_errors,
+            "assessment_result": None,
+            "created": False,
+            "error_detail": "; ".join(e.get("message", "") for e in validation_errors),
+        }
+
+    student_id = str(data.get("student_id", "")).strip()
+    semester = str(data.get("semester", "")).strip().replace(" ", "")
+    course_code = str(data.get("course", "")).strip()
+    final_grade_str = str(data.get("final_grade", "")).strip()
+    grading_scale_name = (data.get("grading_scale") or "").strip() or None
+
+    if not grading_scale_name:
+        grading_scale_name = frappe.db.get_single_value("Education Settings", "default_grading_scale")
+        if not grading_scale_name:
+            scales = frappe.get_all("Grading Scale", limit=1)
+            grading_scale_name = scales[0].name if scales else None
+
+    parsed = semester_to_academic_year_and_term(semester)
+    if not parsed:
+        return {
+            "success": False,
+            "message": _("SEMESTER inválido"),
+            "validation_errors": [],
+            "assessment_result": None,
+            "created": False,
+            "error_detail": _("Semester debe ser 6 dígitos (ej. 202601)."),
+        }
+
+    year, term_label = parsed
+    term_name = f"{year} ({term_label})"
+
+    course_frappe = _resolve_course(course_code)
+    if not course_frappe:
+        return {
+            "success": False,
+            "message": _("Curso no encontrado"),
+            "validation_errors": [{"field": "course", "message": _("Curso '{0}' no existe. Prueba con o sin espacios (STA 530 / STA530).").format(course_code)}],
+            "assessment_result": None,
+            "created": False,
+            "error_detail": _("Curso no existe: {0}").format(course_code),
+        }
+
+    student_name = get_student_name_by_id(student_id)
+    if not student_name:
+        return {
+            "success": False,
+            "message": _("Estudiante no encontrado"),
+            "validation_errors": [{"field": "student_id", "message": _("Estudiante '{0}' no existe.").format(student_id)}],
+            "assessment_result": None,
+            "created": False,
+            "error_detail": _("Estudiante no encontrado: {0}").format(student_id),
+        }
+
+    try:
+        score = float(final_grade_str)
+        score = flt(score, 2)
+    except (TypeError, ValueError):
+        pct = letter_to_percentage(grading_scale_name, final_grade_str)
+        if pct is None:
+            return {
+                "success": False,
+                "message": _("Calificación no válida"),
+                "validation_errors": [{"field": "final_grade", "message": _("'{0}' no es un número ni una letra de la escala.").format(final_grade_str)}],
+                "assessment_result": None,
+                "created": False,
+                "error_detail": _("Calificación no válida: {0}").format(final_grade_str),
+            }
+        score = (pct / 100.0) * 100
+
+    leaf = get_or_create_assessment_group_leaf(year, term_label)
+    if not leaf:
+        return {
+            "success": False,
+            "message": _("Error al crear grupo de evaluación"),
+            "validation_errors": [],
+            "assessment_result": None,
+            "created": False,
+            "error_detail": _("No se pudo crear el grupo de evaluación para {0}.").format(term_name),
+        }
+
+    sg_name = get_or_create_student_group(course_frappe, year, term_name, [student_name])
+    if not sg_name:
+        return {
+            "success": False,
+            "message": _("Error al crear grupo de estudiantes"),
+            "validation_errors": [],
+            "assessment_result": None,
+            "created": False,
+            "error_detail": _("No se pudo crear el grupo de estudiantes."),
+        }
+
+    course_doc = frappe.get_cached_doc("Course", course_frappe)
+    scale = getattr(course_doc, "default_grading_scale", None) or grading_scale_name
+    ap_name = get_or_create_assessment_plan(sg_name, leaf, course_frappe, scale, academic_term_name=term_name)
+    if not ap_name:
+        return {
+            "success": False,
+            "message": _("Error al crear plan de evaluación"),
+            "validation_errors": [],
+            "assessment_result": None,
+            "created": False,
+            "error_detail": _("No se pudo crear el plan de evaluación."),
+        }
+
+    ar_name, err, created, _updated_submitted = create_or_update_assessment_result(
+        ap_name, student_name, score, scale
+    )
+    if err:
+        return {
+            "success": False,
+            "message": _("Error al guardar resultado"),
+            "validation_errors": [],
+            "assessment_result": None,
+            "created": False,
+            "error_detail": err,
+        }
+
+    return {
+        "success": True,
+        "message": _("Nota importada correctamente"),
+        "validation_errors": [],
+        "assessment_result": ar_name,
+        "created": created,
+        "error_detail": None,
+    }
 
 
 def process_grades(

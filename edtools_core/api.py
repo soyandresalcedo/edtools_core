@@ -2353,6 +2353,48 @@ def upload_grades_file(file_url, grading_scale=None):
     }
 
 
+@frappe.whitelist(allow_guest=False)
+def import_grade_single(**kwargs):
+    """
+    Importa una sola nota (un estudiante, un curso, un período).
+
+    Diseñado para que el Monitor de Moodle (u otro integrador) itere y envíe
+    un registro por petición, con feedback inmediato por estudiante.
+
+    Campos (POST JSON o args):
+        - student_id (obligatorio): ID del estudiante (ej. EDU-STU-2025-02806).
+        - semester (obligatorio): 6 dígitos, ej. 202601 (Spring A), 202602 (Spring B).
+        - course (obligatorio): short name del curso, con o sin espacios (STA 530, STA530).
+        - final_grade (obligatorio): número (0-100) o letra de la escala (A, B+, etc.).
+        - full_name (opcional): solo visual.
+        - course_title (opcional): solo visual.
+        - grading_scale (opcional): nombre de la escala; si no, usa la por defecto.
+
+    Retorna:
+        {
+            "success": bool,
+            "message": str,
+            "validation_errors": [{"field": "...", "message": "..."}],
+            "assessment_result": "ASS-...",
+            "created": bool,
+            "error_detail": str | null
+        }
+
+    Errores de validación indican qué campo falta o tiene formato incorrecto.
+    """
+    from edtools_core.grade_import import process_grade_single
+
+    if kwargs:
+        data = dict(kwargs)
+    else:
+        data = frappe.parse_json(frappe.request.data) if frappe.request.data else {}
+    if not data and frappe.form_dict:
+        data = dict(frappe.form_dict)
+
+    result = process_grade_single(data)
+    return result
+
+
 # =====================================================================
 # Sincronización estado estudiante → Moodle (diagnóstico)
 # =====================================================================
