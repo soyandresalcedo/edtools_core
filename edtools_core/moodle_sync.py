@@ -24,6 +24,7 @@ from edtools_core.moodle_integration import (
     unenrol_user_from_course,
     find_moodle_course_for_enrollment,
     get_enrolled_user_ids,
+    suspend_user_enrolment_in_course,
     MOODLE_ROLE_STUDENT,
 )
 
@@ -142,20 +143,19 @@ def sync_student_enrollment_to_moodle(
 def sync_student_status_to_moodle(doc, method=None):
     """
     Sincroniza el estado del estudiante (student_status) con Moodle:
-    - Active -> usuario Moodle activo (suspended=0).
-    - Cualquier otro estado (Inactive, LOA, Suspended, Withdrawn, etc.) -> usuario Moodle suspendido (suspended=1).
+    - Active: usuario Moodle activo (suspended=0) + reactivar todas las matrículas de curso.
+    - Withdrawn (Retirado): usuario Moodle suspendido (suspended=1).
+    - LOA, Inactive, Suspended, etc.: usuario activo (suspended=0) + suspender todas las matrículas de curso.
 
     Se invoca desde doc_events (Student on_update y after_insert).
     Si Moodle falla, se registra el error pero no se bloquea el guardado en EdTools.
     """
-    # Opcional: desactivar sync por configuración
     sync_enabled = os.getenv("MOODLE_SYNC_STUDENT_STATUS")
     if sync_enabled is not None and str(sync_enabled).strip().lower() in ("0", "false", "no"):
         return
     if frappe.conf.get("moodle_sync_student_status") is False:
         return
 
-    # Configuración Moodle
     try:
         from edtools_core.moodle_integration import _get_moodle_config
         url, token = _get_moodle_config()
@@ -164,7 +164,6 @@ def sync_student_status_to_moodle(doc, method=None):
     except Exception:
         return
 
-    # Student debe tener User vinculado (el email se usa para buscar en Moodle)
     if not getattr(doc, "user", None) or not str(doc.user).strip():
         frappe.logger().debug(
             f"Moodle status sync: Student {doc.name} sin User vinculado, se omite."
@@ -193,20 +192,102 @@ def sync_student_status_to_moodle(doc, method=None):
         )
         return
 
-    # Active -> suspended=0; cualquier otro -> suspended=1
+    moodle_user_id = int(moodle_user["id"])
     status = (getattr(doc, "student_status", None) or "").strip()
-    suspended = 0 if status == "Active" else 1
 
+    # Withdrawn (Retirado): suspender usuario completo
+    if status == "Withdrawn":
+        try:
+            update_moodle_user_suspended(moodle_user_id, 1)
+            frappe.logger().info(
+                f"Moodle status sync: Student {doc.name} -> usuario suspended=1 (Withdrawn)"
+            )
+        except Exception as e:
+            frappe.log_error(
+                title="Moodle sync student status",
+                message=f"Student {doc.name} | Withdrawn | Error al suspender usuario: {e}",
+            )
+        return
+
+    # Active, LOA, Inactive, Suspended, etc.: usuario activo; matrículas según status
     try:
-        update_moodle_user_suspended(moodle_user["id"], suspended)
-        frappe.logger().info(
-            f"Moodle status sync: Student {doc.name} -> suspended={suspended} (student_status={status!r})"
-        )
+        update_moodle_user_suspended(moodle_user_id, 0)
     except Exception as e:
         frappe.log_error(
             title="Moodle sync student status",
-            message=f"Student {doc.name} | student_status={status!r} | Error: {e}",
+            message=f"Student {doc.name} | Error al reactivar usuario: {e}",
         )
+        return
+
+    # Sincronizar matrículas: Active = reactivar, otros = suspender
+    suspend_enrolments = status != "Active"
+    _sync_student_course_enrolments_status(
+        student=doc.name,
+        moodle_user_id=moodle_user_id,
+        suspend=suspend_enrolments,
+    )
+
+
+def _sync_student_course_enrolments_status(
+    *,
+    student: str,
+    moodle_user_id: int,
+    suspend: bool,
+) -> None:
+    """
+    Suspende o reactiva las matrículas de curso del estudiante en Moodle.
+    Usa Course Enrollments de EdTools como fuente para saber en qué cursos está.
+    """
+    ce_list = frappe.get_all(
+        "Course Enrollment",
+        filters={"student": student},
+        fields=["name", "course", "program_enrollment", "custom_academic_term"],
+    )
+    if not ce_list:
+        frappe.logger().debug(
+            f"Moodle enrolments sync: Student {student} sin Course Enrollments, nada que sincronizar."
+        )
+        return
+
+    ce_meta = frappe.get_meta("Course Enrollment")
+    has_custom_term = ce_meta.has_field("custom_academic_term") if ce_meta else False
+
+    for ce in ce_list:
+        academic_term = None
+        if has_custom_term and ce.get("custom_academic_term"):
+            academic_term = ce.get("custom_academic_term")
+        elif ce.get("program_enrollment"):
+            academic_term = frappe.db.get_value(
+                "Program Enrollment", ce.program_enrollment, "academic_term"
+            )
+
+        moodle_course_id = find_moodle_course_for_enrollment(
+            course_name=ce.course,
+            academic_term=academic_term,
+        )
+        if moodle_course_id is None:
+            frappe.logger().debug(
+                f"Moodle enrolments sync: Curso {ce.course} (term={academic_term}) no encontrado en Moodle, se omite."
+            )
+            continue
+
+        try:
+            suspend_user_enrolment_in_course(
+                user_id=moodle_user_id,
+                course_id=moodle_course_id,
+                suspend=1 if suspend else 0,
+            )
+            frappe.logger().info(
+                f"Moodle enrolments sync: Student {student} | course {ce.course} (Moodle id={moodle_course_id}) -> suspend={suspend}"
+            )
+        except Exception as e:
+            frappe.log_error(
+                title="Moodle sync course enrolment status",
+                message=(
+                    f"Student {student} | Course {ce.course} | Moodle course id {moodle_course_id} | "
+                    f"suspend={suspend} | Error: {e}"
+                ),
+            )
 
 
 # ---------------------------------------------------------------------

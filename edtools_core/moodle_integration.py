@@ -507,10 +507,12 @@ def enrol_user_in_course(
     user_id: int,
     course_id: int,
     roleid: int = MOODLE_ROLE_STUDENT,
+    suspend: int = 0,
 ) -> Dict[str, Any]:
     """
     Matricula un usuario en un curso Moodle (enrol_manual_enrol_users).
     roleid: 5 = Student, 3 = Editing teacher.
+    suspend: 0 = activo, 1 = matrícula suspendida (no puede acceder al curso).
 
     Retorna {"enrolled": True} si se matriculó, {"already_enrolled": True} si ya estaba.
     """
@@ -518,6 +520,7 @@ def enrol_user_in_course(
         "enrolments[0][userid]": user_id,
         "enrolments[0][courseid]": course_id,
         "enrolments[0][roleid]": roleid,
+        "enrolments[0][suspend]": int(suspend),
     }
     resp = _moodle_post("enrol_manual_enrol_users", data=payload, timeout=20)
     if isinstance(resp, dict) and resp.get("exception"):
@@ -527,6 +530,26 @@ def enrol_user_in_course(
         frappe.log_error(message=str(resp), title="Moodle enrol_user error")
         frappe.throw(f"Moodle error (enrol_user): {resp.get('message') or resp.get('errorcode')}")
     return {"enrolled": True}
+
+
+def suspend_user_enrolment_in_course(
+    user_id: int,
+    course_id: int,
+    suspend: int = 1,
+) -> Dict[str, Any]:
+    """
+    Suspende o reactiva la matrícula de un usuario en un curso Moodle.
+    Usa enrol_manual_enrol_users con suspend=1 (suspender) o suspend=0 (reactivar).
+    En Moodle, si el usuario ya está matriculado, algunas versiones actualizan la matrícula.
+    Si falla con 'already enrolled', la actualización no es posible sin plugin custom en Moodle.
+    """
+    result = enrol_user_in_course(
+        user_id=user_id,
+        course_id=course_id,
+        roleid=MOODLE_ROLE_STUDENT,
+        suspend=int(suspend),
+    )
+    return {"suspended": suspend, **result}
 
 
 def unenrol_user_from_course(user_id: int, course_id: int) -> Dict[str, Any]:
