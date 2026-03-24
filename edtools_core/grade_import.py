@@ -28,6 +28,27 @@ SEMESTER_SUFFIX_TO_TERM = {
 }
 
 
+def _get_default_grading_scale() -> str | None:
+    """
+    Obtiene la escala por defecto de forma segura entre versiones:
+    - Si Education Settings tiene default_grading_scale, la usa.
+    - Si no existe el campo o falla la lectura, usa la primera Grading Scale disponible.
+    """
+    scale = None
+    try:
+        meta = frappe.get_meta("Education Settings")
+        if meta and meta.has_field("default_grading_scale"):
+            scale = frappe.db.get_single_value("Education Settings", "default_grading_scale")
+    except Exception:
+        scale = None
+
+    if not scale:
+        scales = frappe.get_all("Grading Scale", limit=1)
+        scale = scales[0].name if scales else None
+
+    return scale
+
+
 def _resolve_file_path(file_path: str):
     """
     Convierte file_path (URL o ruta relativa) en ruta física del servidor.
@@ -703,7 +724,7 @@ def validate_grade_single_input(data: dict) -> tuple[bool, list[dict]]:
             "message": _("No puede estar vacío. Debe ser un número (0-100) o una letra de la escala (A, B+, etc.)."),
         })
     else:
-        scale = grading_scale_name or frappe.db.get_single_value("Education Settings", "default_grading_scale")
+        scale = grading_scale_name or _get_default_grading_scale()
         if scale and not _grade_value_valid(final_grade, scale):
             errors.append({
                 "field": "final_grade",
@@ -719,10 +740,7 @@ def validate_grade_single_input(data: dict) -> tuple[bool, list[dict]]:
 
     # 6) Escala por defecto si no se indicó
     if not grading_scale_name:
-        scale = frappe.db.get_single_value("Education Settings", "default_grading_scale")
-        if not scale:
-            scales = frappe.get_all("Grading Scale", limit=1)
-            scale = scales[0].name if scales else None
+        scale = _get_default_grading_scale()
         if not scale:
             errors.append({
                 "field": "grading_scale",
@@ -777,10 +795,7 @@ def process_grade_single(data: dict) -> dict[str, Any]:
     grading_scale_name = (data.get("grading_scale") or "").strip() or None
 
     if not grading_scale_name:
-        grading_scale_name = frappe.db.get_single_value("Education Settings", "default_grading_scale")
-        if not grading_scale_name:
-            scales = frappe.get_all("Grading Scale", limit=1)
-            grading_scale_name = scales[0].name if scales else None
+        grading_scale_name = _get_default_grading_scale()
 
     parsed = semester_to_academic_year_and_term(semester)
     if not parsed:
@@ -943,10 +958,7 @@ def process_grades(
 
     # Grading scale por defecto: primer Course que usemos o primer escala en el sistema
     if not grading_scale_name:
-        grading_scale_name = frappe.db.get_single_value("Education Settings", "default_grading_scale")
-        if not grading_scale_name:
-            scales = frappe.get_all("Grading Scale", limit=1)
-            grading_scale_name = scales[0].name if scales else None
+        grading_scale_name = _get_default_grading_scale()
     if not grading_scale_name:
         out["validation_errors"] = [{"row": None, "message": _("No hay escala de calificaciones configurada.")}]
         return out
