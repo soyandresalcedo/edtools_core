@@ -808,8 +808,10 @@ def process_grade_single(data: dict) -> dict[str, Any]:
             "error_detail": _("Semester debe ser 6 dígitos (ej. 202601)."),
         }
 
-    year, term_label = parsed
-    term_name = f"{year} ({term_label})"
+    # semester_to_academic_year_and_term ya devuelve (year, academic_term_name)
+    # ejemplo: ("2026", "2026 (Spring A)")
+    year, term_name = parsed
+    term_label = SEMESTER_SUFFIX_TO_TERM.get(semester[-2:], "")
 
     course_frappe = _resolve_course(course_code)
     if not course_frappe:
