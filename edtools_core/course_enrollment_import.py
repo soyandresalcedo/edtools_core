@@ -8,9 +8,11 @@ import re
 from collections import defaultdict
 from typing import Any, Callable
 
+import datetime
+
 import frappe
 from frappe import _
-from frappe.utils import nowdate
+from frappe.utils import getdate, nowdate
 
 from edtools_core.grade_import import (
 	SEMESTER_SUFFIX_TO_TERM,
@@ -25,6 +27,32 @@ REQUIRED_COLUMNS = ["ID", "SEMESTER", "COURSE"]
 OPTIONAL_COLUMNS = ["ENROLLMENT DATE"]
 
 SEMESTER_RE = re.compile(r"^\d{6}$")
+
+
+def coerce_enrollment_date_str(val) -> str | None:
+	"""
+	Normaliza fechas desde el formulario Single (Date puede ser date/datetime/str),
+	desde Excel (openpyxl devuelve datetime.date) o desde CSV (str).
+	Devuelve 'YYYY-MM-DD' o None.
+	"""
+	if val is None or val == "":
+		return None
+	if isinstance(val, str):
+		s = val.strip()
+		if not s:
+			return None
+		try:
+			return str(getdate(s))
+		except Exception:
+			return None
+	if isinstance(val, datetime.datetime):
+		return str(val.date())
+	if isinstance(val, datetime.date):
+		return str(val)
+	try:
+		return str(getdate(val))
+	except Exception:
+		return None
 
 
 def _parse_import_csv(file_path: str) -> tuple[dict[str, int], list[dict[str, Any]]]:
@@ -74,7 +102,11 @@ def _parse_import_xlsx(file_path: str) -> tuple[dict[str, int], list[dict[str, A
 		for name, idx in col_index.items():
 			if idx < len(r):
 				val = r[idx]
-				row_dict[name] = (str(val).strip() if val is not None else "")
+				if name == "ENROLLMENT DATE" and val is not None and val != "":
+					coerced = coerce_enrollment_date_str(val)
+					row_dict[name] = coerced or ""
+				else:
+					row_dict[name] = (str(val).strip() if val is not None else "")
 			else:
 				row_dict[name] = ""
 		data_rows.append(row_dict)
@@ -243,7 +275,9 @@ def ensure_student_group_for_course_import(
 				existing.add(stu)
 				appended = True
 		if appended:
-			doc.save(ignore_permissions=True)
+			# validate_course en Student Group exige que el alumno ya esté en el curso en el PE;
+			# en import masivo aún no existe Course Enrollment → omitir validación.
+			doc.save(ignore_permissions=True, ignore_validate=True)
 		return group_name
 
 	doc = frappe.new_doc("Student Group")
@@ -265,7 +299,7 @@ def ensure_student_group_for_course_import(
 				"active": 1,
 			},
 		)
-	doc.insert(ignore_permissions=True)
+	doc.insert(ignore_permissions=True, ignore_validate=True)
 	return doc.name
 
 
@@ -314,7 +348,8 @@ def process_enrollments(
 		return out
 
 	_, data_rows = parse_import_file(resolved)
-	default_date = (default_enrollment_date or "").strip() or nowdate()
+	coerced_default = coerce_enrollment_date_str(default_enrollment_date)
+	default_date = coerced_default or nowdate()
 
 	groups: dict[tuple[str, str, str], list[tuple[int, str, str, str]]] = defaultdict(list)
 	for i, row in enumerate(data_rows):
@@ -340,8 +375,7 @@ def process_enrollments(
 				{"row": row_num, "message": _("Estudiante no encontrado: {0}").format(student_raw)}
 			)
 			continue
-		row_date = (row.get("ENROLLMENT DATE") or "").strip()
-		enroll_date = row_date or default_date
+		enroll_date = coerce_enrollment_date_str(row.get("ENROLLMENT DATE")) or default_date
 		key = (course_frappe, year, term_label)
 		groups[key].append((row_num, student_name, student_raw, enroll_date))
 

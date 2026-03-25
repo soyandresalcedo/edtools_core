@@ -115,14 +115,20 @@ def sync_student_enrollment_to_moodle(
     )
     moodle_course_shortname = moodle_fullname  # mismo formato, único por periodo
 
+    # Mismo idnumber que Course Enrollment Tool / prepare_moodle_course_for_enrollment_tool
+    # (YYYYMM::nombre completo del curso en EdTools), no course_doc.name — evita curso duplicado
+    # en Moodle y matrícula en un curso vacío distinto al creado por el import/CET.
+    course_display_name = (course_doc.course_name or course or "").strip()
+    moodle_course_idnumber = f"{term_category_name_ym}::{course_display_name}"
+
     moodle_course_id = ensure_course(
         category_id=term_category_id,
-        term_category_name=academic_term,
+        term_category_name=term_category_name_ym,
         term_idnumber=academic_term,
-        term_start_date_str=_get_term_start_date(academic_term),
+        term_start_date_str=term_start_date_str,
         course_fullname=moodle_fullname,
         course_shortname=moodle_course_shortname,
-        course_idnumber=course_doc.name,
+        course_idnumber=moodle_course_idnumber,
     )
 
     # ===============================

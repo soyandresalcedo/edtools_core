@@ -7,7 +7,7 @@ import frappe
 from frappe.model.document import Document
 from frappe import _
 
-from edtools_core.course_enrollment_import import process_enrollments
+from edtools_core.course_enrollment_import import coerce_enrollment_date_str, process_enrollments
 from edtools_core.grade_import import _resolve_file_path
 
 
@@ -26,7 +26,7 @@ class CourseEnrollmentImport(Document):
 				)
 			)
 
-		default_date = (self.get("enrollment_date") or "").strip() or None
+		default_date = coerce_enrollment_date_str(self.get("enrollment_date"))
 
 		def _progress(current, total, message):
 			if total and total > 0:
@@ -39,11 +39,21 @@ class CourseEnrollmentImport(Document):
 				user=frappe.session.user,
 			)
 
-		result = process_enrollments(
-			file_path,
-			default_enrollment_date=default_date,
-			progress_callback=_progress,
-		)
+		try:
+			result = process_enrollments(
+				file_path,
+				default_enrollment_date=default_date,
+				progress_callback=_progress,
+			)
+		except Exception as e:
+			frappe.log_error(
+				title="Course Enrollment Import — error no controlado",
+				message=frappe.get_traceback(),
+			)
+			frappe.throw(
+				_("Error al procesar la importación: {0}").format(str(e)),
+				title=_("Importación"),
+			)
 
 		summary_lines = []
 		error_lines = []
