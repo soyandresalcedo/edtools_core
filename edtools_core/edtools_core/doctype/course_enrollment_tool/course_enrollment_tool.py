@@ -2,7 +2,6 @@
 # For license information, please see license.txt
 
 import frappe
-from frappe.utils import getdate
 from frappe.model.document import Document
 from frappe.utils import nowdate
 
@@ -109,140 +108,27 @@ class CourseEnrollmentTool(Document):
 		if not self.academic_term:
 			frappe.throw("❌ Academic Term es obligatorio para sincronizar con Moodle")
 		try:
-			from edtools_core.moodle_integration import (
-				ensure_course,
-				ensure_academic_term_category,
-				ensure_academic_year_category,
-				get_term_category_name,
+			from edtools_core.course_enrollment_moodle import (
+				enroll_moodle_instructors_from_student_group,
+				prepare_moodle_course_for_enrollment_tool,
 			)
 
-			moodle_year_category_id = ensure_academic_year_category(str(self.academic_year))
-			frappe.msgprint(
-				f"🎓 Moodle OK: categoría Academic Year '{self.academic_year}' (id={moodle_year_category_id})",
-				indicator="blue",
-			)
-
-			moodle_term_category_id = ensure_academic_term_category(
-				academic_term_label=str(self.academic_term),
-				parent_year_category_id=moodle_year_category_id,
-			)
-			frappe.msgprint(
-				f"📚 Moodle OK: categoría Academic Term '{self.academic_term}' (id={moodle_term_category_id})",
-				indicator="blue",
-			)
-
-			# ------------------------------------------------------------------
-			# MOODLE: asegurar Course dentro de la categoría hija (fase 2)
-			# ------------------------------------------------------------------
-			# Validación por idnumber (único): Course.course_name
-			course_doc = frappe.get_doc("Course", self.course)
-			course_name = (course_doc.course_name or self.course or "").strip()
-			course_shortname = (getattr(course_doc, "short_name", None) or "").strip()
-			if not course_shortname:
-				# Fallback: derivar de la parte izquierda de " - "
-				course_shortname = course_name.split(" - ", 1)[0].strip()
-
-			# Título (parte derecha) para el fullname en Moodle
-			course_title = course_name.split(" - ", 1)[1].strip() if " - " in course_name else course_name
-
-			term_start_date = frappe.db.get_value("Academic Term", self.academic_term, "term_start_date")
-			if not term_start_date:
-				frappe.throw("No se encontró term_start_date para el Academic Term seleccionado")
-			term_start_date = getdate(term_start_date)
-			term_start_date_str = f"{term_start_date.month}/{term_start_date.day}/{str(term_start_date.year)[2:]}"
-
-			term_end_date = frappe.db.get_value("Academic Term", self.academic_term, "term_end_date")
-			if not term_end_date:
-				frappe.throw("No se encontró term_end_date para el Academic Term seleccionado")
-			term_end_date = getdate(term_end_date)
-
-			# Convertir a Unix timestamp para Moodle (sumar 12h para evitar desfase de zona horaria)
-			import datetime
-			import calendar
-			term_start_date_noon = datetime.datetime.combine(term_start_date, datetime.time(12, 0))
-			term_end_date_noon = datetime.datetime.combine(term_end_date, datetime.time(12, 0))
-			startdate_timestamp = int(calendar.timegm(term_start_date_noon.timetuple()))
-			enddate_timestamp = int(calendar.timegm(term_end_date_noon.timetuple()))
-
-			term_category_name = get_term_category_name(str(self.academic_term))
-			term_idnumber = str(self.academic_term)
-
-			# Idnumber debe ser único por PERIODO para permitir el mismo curso en distintos términos.
-			moodle_course_idnumber = f"{term_category_name}::{course_name}"
-
-			# Formato cliente (core_course_create_courses): fullname = nombre categoría hija, short_name, 1, nombre del curso, idnumber categoría hija, fecha inicio término
-			# Ej: "202601,STA 530, 1, RESEARCH 2026 (Spring A) 1/5/26"
-			moodle_fullname = f"{term_category_name},{course_shortname}, 1, {course_title} {term_idnumber} {term_start_date_str}"
-
-			# Shortname mismo formato (único por periodo para evitar "nombre corto ya utilizado" en Moodle)
-			moodle_course_shortname = moodle_fullname
-
-			moodle_course_id = ensure_course(
-				category_id=moodle_term_category_id,
-				term_category_name=term_category_name,
-				term_idnumber=term_idnumber,
-				term_start_date_str=term_start_date_str,
-				course_fullname=moodle_fullname,
-				course_shortname=moodle_course_shortname,
-				course_idnumber=moodle_course_idnumber,
-				startdate=startdate_timestamp,
-				enddate=enddate_timestamp,
-			)
-			frappe.msgprint(
-				f"🎯 Moodle OK: Course '{course_name}' (id={moodle_course_id})",
-				indicator="blue",
+			moodle_course_id = prepare_moodle_course_for_enrollment_tool(
+				str(self.academic_year),
+				str(self.academic_term),
+				self.course,
+				show_progress_msgs=True,
 			)
 		except Exception as e:
 			frappe.throw(
 				f"❌ Error sincronizando Moodle (categorías/curso): {str(e)}"
 			)
 
-		# ------------------------------------------------------------------
-		# MOODLE: usuarios de instructores + matrícula en el curso (rol 3 = profesor)
-		# ------------------------------------------------------------------
-		from edtools_core.moodle_integration import (
-			get_enrolled_user_ids,
-			enrol_user_in_course,
-			MOODLE_ROLE_EDITING_TEACHER,
+		already_enrolled_instructors, enrolled_ids = enroll_moodle_instructors_from_student_group(
+			self.student_group,
+			moodle_course_id,
+			log_context="Course Enrollment Tool",
 		)
-		enrolled_ids = set(get_enrolled_user_ids(moodle_course_id))
-		already_enrolled_instructors = []
-
-		if self.student_group:
-			try:
-				from edtools_core.moodle_users import ensure_moodle_user_instructor
-				group_doc = frappe.get_doc("Student Group", self.student_group)
-				if group_doc.get("instructors"):
-					for row in group_doc.instructors:
-						if not row.get("instructor"):
-							continue
-						try:
-							instructor = frappe.get_doc("Instructor", row.instructor)
-							moodle_user = ensure_moodle_user_instructor(instructor)
-							uid = moodle_user["id"]
-							instructor_label = getattr(row, "instructor_name", None) or row.instructor
-							if uid in enrolled_ids:
-								already_enrolled_instructors.append(instructor_label)
-							else:
-								result = enrol_user_in_course(
-									user_id=uid,
-									course_id=moodle_course_id,
-									roleid=MOODLE_ROLE_EDITING_TEACHER,
-								)
-								if result.get("already_enrolled"):
-									already_enrolled_instructors.append(instructor_label)
-								else:
-									enrolled_ids.add(uid)
-						except Exception as instr_err:
-							frappe.log_error(
-								title="Moodle: error al asegurar usuario de instructor",
-								message=f"Course Enrollment Tool | Student Group {self.student_group} | Instructor {row.instructor}: {instr_err}",
-							)
-			except Exception as e:
-				frappe.log_error(
-					title="Moodle: error al cargar instructores del Student Group",
-					message=f"Course Enrollment Tool | Student Group {self.student_group}: {e}",
-				)
 
 		# ✅ VALIDACIÓN 1: Curso obligatorio
 		if not self.course or self.course.strip() == "":
