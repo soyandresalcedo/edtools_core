@@ -2396,6 +2396,24 @@ def import_grade_single(**kwargs):
 
 
 # =====================================================================
+# Inscripción Student Applicant (con Azure provisioning)
+# =====================================================================
+
+@frappe.whitelist()
+def enroll_student_from_applicant(source_name: str):
+    """
+    Crea Student + Program Enrollment desde `Student Applicant`.
+    Si Azure provisioning está habilitado, ejecuta la lógica completa que ya usa
+    la Program Enrollment Tool (crear usuario en Azure, asignar licencia,
+    setear flags para que Education cree User correctamente en Frappe,
+    y enviar credenciales al correo personal).
+    """
+    from edtools_core.overrides.enrollment import enroll_student_with_azure_provisioning
+
+    return enroll_student_with_azure_provisioning(source_name)
+
+
+# =====================================================================
 # Sincronización estado estudiante → Moodle (diagnóstico)
 # =====================================================================
 
