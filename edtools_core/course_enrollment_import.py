@@ -192,7 +192,7 @@ def validate_import_format(file_path: str) -> tuple[bool, list[dict[str, Any]]]:
 			else:
 				parsed = semester_to_academic_year_and_term(semester)
 				if parsed:
-					_, term_name = parsed
+					_year_part, term_name = parsed
 					if not frappe.db.exists("Academic Term", term_name):
 						errors.append(
 							{
@@ -277,7 +277,8 @@ def ensure_student_group_for_course_import(
 		if appended:
 			# validate_course en Student Group exige que el alumno ya esté en el curso en el PE;
 			# en import masivo aún no existe Course Enrollment → omitir validación.
-			doc.save(ignore_permissions=True, ignore_validate=True)
+			doc.flags.ignore_validate = True
+			doc.save(ignore_permissions=True)
 		return group_name
 
 	doc = frappe.new_doc("Student Group")
@@ -299,7 +300,8 @@ def ensure_student_group_for_course_import(
 				"active": 1,
 			},
 		)
-	doc.insert(ignore_permissions=True, ignore_validate=True)
+	doc.flags.ignore_validate = True
+	doc.insert(ignore_permissions=True)
 	return doc.name
 
 
@@ -347,7 +349,7 @@ def process_enrollments(
 		out["validation_errors"] = [{"row": None, "message": _("No se pudo leer el archivo.")}]
 		return out
 
-	_, data_rows = parse_import_file(resolved)
+	_unused_col_index, data_rows = parse_import_file(resolved)
 	coerced_default = coerce_enrollment_date_str(default_enrollment_date)
 	default_date = coerced_default or nowdate()
 
