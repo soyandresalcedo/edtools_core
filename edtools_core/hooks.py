@@ -146,8 +146,14 @@ doc_events = {
 	},
 	"Student": {
 		"before_save": "edtools_core.validations.student.track_status_change",
-		"on_update": "edtools_core.moodle_sync.sync_student_status_to_moodle",
-		"after_insert": "edtools_core.moodle_sync.sync_student_status_to_moodle"
+		"on_update": [
+			"edtools_core.moodle_sync.sync_student_status_to_moodle",
+			"edtools_core.azure_provisioning.sync_student_azure_license_by_status",
+		],
+		"after_insert": [
+			"edtools_core.moodle_sync.sync_student_status_to_moodle",
+			"edtools_core.azure_provisioning.sync_student_azure_license_by_status",
+		],
 	},
 	"Fees": {
 		"before_save": "edtools_core.fees_events.update_components_description",

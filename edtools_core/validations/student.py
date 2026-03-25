@@ -26,6 +26,7 @@ def track_status_change(doc, method=None):
 		- Student: before_save event
 	"""
 	if doc.is_new():
+		frappe.flags.student_old_status_before_save = None
 		# New student document
 		if doc.student_status:
 			doc.status_change_date = today()
@@ -34,8 +35,13 @@ def track_status_change(doc, method=None):
 			)
 		return
 
+	# Estado previo (misma request) para hooks post-save: Azure licencia, etc.
+	frappe.flags.student_old_status_before_save = frappe.db.get_value(
+		"Student", doc.name, "student_status"
+	)
+
 	# Existing student - check if status changed
-	old_status = frappe.db.get_value("Student", doc.name, "student_status")
+	old_status = frappe.flags.student_old_status_before_save
 
 	if old_status != doc.student_status:
 		doc.status_change_date = today()
