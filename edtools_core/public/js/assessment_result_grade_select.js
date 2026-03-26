@@ -18,6 +18,14 @@ function _schedule_grade_ui(frm) {
 	}, 200);
 }
 
+function _schedule_grade_ui_retry(frm, remaining) {
+	const left = remaining == null ? 8 : remaining;
+	if (left <= 0) return;
+	setTimeout(function () {
+		setup_assessment_result_grade_ui(frm, { retry_left: left - 1 });
+	}, 150);
+}
+
 function _num(v) {
 	const n = parseFloat(v);
 	return Number.isFinite(n) ? n : 0;
@@ -53,6 +61,10 @@ frappe.ui.form.on('Assessment Result', {
 	refresh: function (frm) {
 		_schedule_grade_ui(frm);
 		update_total_score_and_grade(frm);
+
+		// En navegación SPA, el grid puede renderizarse después del refresh.
+		// Reintenta unos ciclos para evitar que el usuario tenga que recargar manualmente.
+		_schedule_grade_ui_retry(frm);
 	},
 	assessment_plan: function (frm) {
 		_schedule_grade_ui(frm);
@@ -60,11 +72,16 @@ frappe.ui.form.on('Assessment Result', {
 	grading_scale: function (frm) {
 		_schedule_grade_ui(frm);
 	},
+	onload_post_render: function (frm) {
+		// Hook post-render: cuando el formulario ya pintó campos, es buen momento para ajustar la grilla.
+		_schedule_grade_ui(frm);
+	},
 });
 
-function setup_assessment_result_grade_ui(frm) {
+function setup_assessment_result_grade_ui(frm, opts) {
 	const grid = frm.fields_dict.details && frm.fields_dict.details.grid;
 	if (!grid || !grid.update_docfield_property) {
+		_schedule_grade_ui_retry(frm, opts && opts.retry_left);
 		return;
 	}
 
@@ -88,8 +105,8 @@ function setup_assessment_result_grade_ui(frm) {
 		return;
 	}
 
-	// Evita re-render innecesario al recargar el form.
-	if (state.scale === gradingScale && state.mode === 'select') return;
+	// En algunos casos el grid existe pero aún no ha terminado de renderizar columnas;
+	// evitamos "cachear" el estado demasiado pronto.
 
 	frappe.call({
 		method: 'edtools_core.api.get_grading_scale_letter_options_for_scale',
@@ -124,10 +141,17 @@ function setup_assessment_result_grade_ui(frm) {
 				grid.update_docfield_property('grade', 'options', options);
 			} catch (e3) {
 				console.error('assessment_result_grade_select: grid update failed', e3);
+				_schedule_grade_ui_retry(frm, opts && opts.retry_left);
+				return;
 			}
+
+			// Si ya estábamos en modo select con esta escala, evitamos refrescar en bucle.
+			const already = state.scale === gradingScale && state.mode === 'select';
 			state.scale = gradingScale;
 			state.mode = 'select';
-			frm.refresh_field('details');
+			if (!already) {
+				frm.refresh_field('details');
+			}
 		},
 	});
 }
