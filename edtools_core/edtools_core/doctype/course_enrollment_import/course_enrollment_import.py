@@ -13,6 +13,15 @@ from edtools_core.grade_import import _resolve_file_path
 
 class CourseEnrollmentImport(Document):
 	@frappe.whitelist()
+	def clear_import_results(self):
+		"""Limpia únicamente los campos de resultados de importación."""
+		self.result_summary = ""
+		self.result_errors = ""
+		self.flags.ignore_permissions = True
+		self.save()
+		return {"ok": True}
+
+	@frappe.whitelist()
 	def process_import(self):
 		file_url = (self.get("excel_file") or "").strip()
 		if not file_url:
