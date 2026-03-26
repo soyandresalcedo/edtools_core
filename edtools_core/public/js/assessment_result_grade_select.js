@@ -24,7 +24,8 @@ function _num(v) {
 }
 
 function update_total_score_and_grade(frm) {
-	if (!frm.doc.details || !frm.doc.details.length || !frm.doc.grading_scale || !frm.doc.maximum_score) {
+	const gradingScale = (frm.doc.grading_scale || '').toString().trim();
+	if (!frm.doc.details || !frm.doc.details.length || !gradingScale || !frm.doc.maximum_score) {
 		return;
 	}
 	let total = 0;
@@ -36,7 +37,7 @@ function update_total_score_and_grade(frm) {
 	frappe.call({
 		method: 'education.education.api.get_grade',
 		args: {
-			grading_scale: frm.doc.grading_scale,
+			grading_scale: gradingScale,
 			percentage: pct,
 		},
 		callback: function (r) {
@@ -67,7 +68,13 @@ function setup_assessment_result_grade_ui(frm) {
 		return;
 	}
 
-	if (!frm.doc.grading_scale) {
+	const gradingScale = (frm.doc.grading_scale || '').toString().trim();
+	const state = (frm._edtools_assessment_result_grade_ui_state ||= {
+		scale: null,
+		mode: null, // 'select' | 'data'
+	});
+	if (!gradingScale) {
+		if (state.scale === gradingScale && state.mode === 'data') return;
 		try {
 			grid.update_docfield_property('grade', 'read_only', 1);
 			grid.update_docfield_property('grade', 'fieldtype', 'Data');
@@ -75,12 +82,18 @@ function setup_assessment_result_grade_ui(frm) {
 		} catch (e) {
 			/* grid vacío al inicio */
 		}
+		state.scale = gradingScale;
+		state.mode = 'data';
+		frm.refresh_field('details');
 		return;
 	}
 
+	// Evita re-render innecesario al recargar el form.
+	if (state.scale === gradingScale && state.mode === 'select') return;
+
 	frappe.call({
 		method: 'edtools_core.api.get_grading_scale_letter_options_for_scale',
-		args: { grading_scale: frm.doc.grading_scale },
+		args: { grading_scale: gradingScale },
 		callback: function (r) {
 			const intervals = r.message || [];
 			if (!intervals.length) {
@@ -89,6 +102,11 @@ function setup_assessment_result_grade_ui(frm) {
 					grid.update_docfield_property('grade', 'fieldtype', 'Data');
 				} catch (e2) {
 					/* ignore */
+				}
+				if (state.scale !== gradingScale || state.mode !== 'data') {
+					state.scale = gradingScale;
+					state.mode = 'data';
+					frm.refresh_field('details');
 				}
 				return;
 			}
@@ -107,6 +125,9 @@ function setup_assessment_result_grade_ui(frm) {
 			} catch (e3) {
 				console.error('assessment_result_grade_select: grid update failed', e3);
 			}
+			state.scale = gradingScale;
+			state.mode = 'select';
+			frm.refresh_field('details');
 		},
 	});
 }
@@ -117,7 +138,8 @@ frappe.ui.form.on('Assessment Result Detail', {
 	},
 	grade: function (frm, cdt, cdn) {
 		const row = locals[cdt][cdn];
-		if (!frm.doc.grading_scale || !row.maximum_score) {
+		const gradingScale = (frm.doc.grading_scale || '').toString().trim();
+		if (!gradingScale || !row.maximum_score) {
 			return;
 		}
 		if (row.grade === '' || row.grade == null || row.grade === undefined) {
@@ -131,7 +153,7 @@ frappe.ui.form.on('Assessment Result Detail', {
 		frappe.call({
 			method: 'education.education.api.get_grade',
 			args: {
-				grading_scale: frm.doc.grading_scale,
+				grading_scale: gradingScale,
 				percentage: pct,
 			},
 			callback: function (r) {
@@ -143,7 +165,7 @@ frappe.ui.form.on('Assessment Result Detail', {
 				frappe.call({
 					method: 'edtools_core.api.get_score_for_grade_code',
 					args: {
-						grading_scale: frm.doc.grading_scale,
+						grading_scale: gradingScale,
 						grade_code: row.grade,
 						maximum_score: row.maximum_score,
 					},

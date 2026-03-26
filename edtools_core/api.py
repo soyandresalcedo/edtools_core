@@ -1045,6 +1045,7 @@ def get_student_average(student, program=None, academic_year=None, academic_term
 
 def _get_grading_scale_intervals(grading_scale):
     """Intervals for a Grading Scale (child table Grading Scale Interval)."""
+    grading_scale = (grading_scale or "").strip()
     if not grading_scale:
         return []
     return frappe.get_all(
@@ -1086,6 +1087,7 @@ def get_score_for_grade_code(grading_scale, grade_code, maximum_score):
     Uses the lowest threshold among intervals with the same grade_code (minimum points for that grade).
     Used when the user picks a letter in Assessment Result; server validate_grade still derives letter from score.
     """
+    grading_scale = (grading_scale or "").strip()
     if not grading_scale or grade_code is None:
         return None
     code = cstr(grade_code).strip()
