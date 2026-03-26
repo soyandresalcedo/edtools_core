@@ -10,12 +10,58 @@
 
 let _grade_ui_timer = null;
 
+// Cache de opciones de letra por escala para evitar condiciones de carrera al abrir una fila
+const _letterOptionsCache = Object.create(null); // { [gradingScale]: { intervals, optionsString, ts } }
+const _pendingFetch = Object.create(null); // { [gradingScale]: Promise }
+const _CACHE_TTL_MS = 5 * 60 * 1000;
+
 function _schedule_grade_ui(frm) {
 	if (_grade_ui_timer) clearTimeout(_grade_ui_timer);
 	_grade_ui_timer = setTimeout(function () {
 		_grade_ui_timer = null;
 		setup_assessment_result_grade_ui(frm);
 	}, 200);
+}
+
+function _is_cache_fresh(entry) {
+	return !!entry && typeof entry.ts === 'number' && Date.now() - entry.ts < _CACHE_TTL_MS;
+}
+
+function _fetch_letter_intervals(gradingScale) {
+	const scale = (gradingScale || '').toString().trim();
+	if (!scale) return Promise.resolve([]);
+
+	const cached = _letterOptionsCache[scale];
+	if (_is_cache_fresh(cached)) return Promise.resolve(cached.intervals || []);
+
+	if (_pendingFetch[scale]) return _pendingFetch[scale];
+
+	_pendingFetch[scale] = new Promise(function (resolve) {
+		frappe.call({
+			method: 'edtools_core.api.get_grading_scale_letter_options_for_scale',
+			args: { grading_scale: scale },
+			callback: function (r) {
+				const intervals = (r && r.message) || [];
+				const optionsString = (intervals || [])
+					.map(function (i) {
+						return i.grade_code;
+					})
+					.filter(Boolean)
+					.join('\n');
+
+				_letterOptionsCache[scale] = { intervals: intervals || [], optionsString, ts: Date.now() };
+				resolve(intervals || []);
+			},
+			error: function () {
+				resolve([]);
+			},
+			always: function () {
+				delete _pendingFetch[scale];
+			},
+		});
+	});
+
+	return _pendingFetch[scale];
 }
 
 function _schedule_grade_ui_retry(frm, remaining) {
@@ -87,6 +133,10 @@ frappe.ui.form.on('Assessment Result', {
 		_schedule_grade_ui(frm);
 		update_total_score_and_grade(frm);
 
+		// Prefetch: así al abrir la fila normalmente ya hay opciones en cache
+		const gradingScale = (frm.doc.grading_scale || '').toString().trim();
+		if (gradingScale) _fetch_letter_intervals(gradingScale);
+
 		// En navegación SPA, el grid puede renderizarse después del refresh.
 		// Reintenta unos ciclos para evitar que el usuario tenga que recargar manualmente.
 		_schedule_grade_ui_retry(frm);
@@ -96,10 +146,14 @@ frappe.ui.form.on('Assessment Result', {
 	},
 	grading_scale: function (frm) {
 		_schedule_grade_ui(frm);
+		const gradingScale = (frm.doc.grading_scale || '').toString().trim();
+		if (gradingScale) _fetch_letter_intervals(gradingScale);
 	},
 	onload_post_render: function (frm) {
 		// Hook post-render: cuando el formulario ya pintó campos, es buen momento para ajustar la grilla.
 		_schedule_grade_ui(frm);
+		const gradingScale = (frm.doc.grading_scale || '').toString().trim();
+		if (gradingScale) _fetch_letter_intervals(gradingScale);
 	},
 });
 
@@ -128,11 +182,7 @@ function setup_assessment_result_grade_ui(frm, opts) {
 	// En algunos casos el grid existe pero aún no ha terminado de renderizar columnas;
 	// evitamos "cachear" el estado demasiado pronto.
 
-	frappe.call({
-		method: 'edtools_core.api.get_grading_scale_letter_options_for_scale',
-		args: { grading_scale: gradingScale },
-		callback: function (r) {
-			const intervals = r.message || [];
+	_fetch_letter_intervals(gradingScale).then(function (intervals) {
 			if (!intervals.length) {
 				_apply_grade_field_props(grid, { read_only: true, fieldtype: 'Data' });
 				if (state.scale !== gradingScale || state.mode !== 'data') {
@@ -144,10 +194,9 @@ function setup_assessment_result_grade_ui(frm, opts) {
 				return;
 			}
 
-			const options = intervals
-				.map(function (i) {
-					return i.grade_code;
-				})
+			const cached = _letterOptionsCache[gradingScale];
+			const options = (cached && cached.optionsString) || intervals
+				.map(function (i) { return i.grade_code; })
 				.filter(Boolean)
 				.join('\n');
 
@@ -161,7 +210,6 @@ function setup_assessment_result_grade_ui(frm, opts) {
 				if (grid.refresh) grid.refresh();
 				frm.refresh_field('details');
 			}
-		},
 	});
 }
 
