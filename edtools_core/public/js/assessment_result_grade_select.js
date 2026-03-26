@@ -26,6 +26,31 @@ function _schedule_grade_ui_retry(frm, remaining) {
 	}, 150);
 }
 
+function _apply_grade_field_props(grid, props) {
+	try {
+		if (props.read_only !== undefined) grid.update_docfield_property('grade', 'read_only', props.read_only ? 1 : 0);
+		if (props.fieldtype) grid.update_docfield_property('grade', 'fieldtype', props.fieldtype);
+		if (props.options !== undefined) grid.update_docfield_property('grade', 'options', props.options);
+	} catch (e) {
+		/* ignore - grid aún no listo */
+	}
+
+	// Cuando se abre "Editando fila #n", Frappe usa un grid_form con su propio DF.
+	// Si no lo actualizamos, puede quedar en Data/read-only hasta re-entrar o recargar.
+	try {
+		const gf = grid.grid_form;
+		const gradeField = gf && gf.fields_dict && gf.fields_dict.grade;
+		if (gradeField && gradeField.df) {
+			if (props.read_only !== undefined) gradeField.df.read_only = props.read_only ? 1 : 0;
+			if (props.fieldtype) gradeField.df.fieldtype = props.fieldtype;
+			if (props.options !== undefined) gradeField.df.options = props.options;
+			if (gf.refresh_field) gf.refresh_field('grade');
+		}
+	} catch (e2) {
+		/* ignore */
+	}
+}
+
 function _num(v) {
 	const n = parseFloat(v);
 	return Number.isFinite(n) ? n : 0;
@@ -92,15 +117,10 @@ function setup_assessment_result_grade_ui(frm, opts) {
 	});
 	if (!gradingScale) {
 		if (state.scale === gradingScale && state.mode === 'data') return;
-		try {
-			grid.update_docfield_property('grade', 'read_only', 1);
-			grid.update_docfield_property('grade', 'fieldtype', 'Data');
-			grid.update_docfield_property('grade', 'options', '');
-		} catch (e) {
-			/* grid vacío al inicio */
-		}
+		_apply_grade_field_props(grid, { read_only: true, fieldtype: 'Data', options: '' });
 		state.scale = gradingScale;
 		state.mode = 'data';
+		if (grid.refresh) grid.refresh();
 		frm.refresh_field('details');
 		return;
 	}
@@ -114,15 +134,11 @@ function setup_assessment_result_grade_ui(frm, opts) {
 		callback: function (r) {
 			const intervals = r.message || [];
 			if (!intervals.length) {
-				try {
-					grid.update_docfield_property('grade', 'read_only', 1);
-					grid.update_docfield_property('grade', 'fieldtype', 'Data');
-				} catch (e2) {
-					/* ignore */
-				}
+				_apply_grade_field_props(grid, { read_only: true, fieldtype: 'Data' });
 				if (state.scale !== gradingScale || state.mode !== 'data') {
 					state.scale = gradingScale;
 					state.mode = 'data';
+					if (grid.refresh) grid.refresh();
 					frm.refresh_field('details');
 				}
 				return;
@@ -135,26 +151,28 @@ function setup_assessment_result_grade_ui(frm, opts) {
 				.filter(Boolean)
 				.join('\n');
 
-			try {
-				grid.update_docfield_property('grade', 'read_only', 0);
-				grid.update_docfield_property('grade', 'fieldtype', 'Select');
-				grid.update_docfield_property('grade', 'options', options);
-			} catch (e3) {
-				console.error('assessment_result_grade_select: grid update failed', e3);
-				_schedule_grade_ui_retry(frm, opts && opts.retry_left);
-				return;
-			}
+			_apply_grade_field_props(grid, { read_only: false, fieldtype: 'Select', options: options });
 
 			// Si ya estábamos en modo select con esta escala, evitamos refrescar en bucle.
 			const already = state.scale === gradingScale && state.mode === 'select';
 			state.scale = gradingScale;
 			state.mode = 'select';
 			if (!already) {
+				if (grid.refresh) grid.refresh();
 				frm.refresh_field('details');
 			}
 		},
 	});
 }
+
+// Cuando el usuario abre una fila del child table, este evento es el más confiable
+// para asegurar que el campo grade ya esté en Select y editable.
+frappe.ui.form.on('Assessment Result Detail', {
+	form_render: function (frm) {
+		_schedule_grade_ui(frm);
+		_schedule_grade_ui_retry(frm, 6);
+	},
+});
 
 frappe.ui.form.on('Assessment Result Detail', {
 	score: function (frm) {
