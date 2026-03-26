@@ -11,6 +11,15 @@ from frappe.model.document import Document
 
 class GradeImport(Document):
 	@frappe.whitelist()
+	def clear_import_results(self):
+		"""Limpia únicamente los campos de resultados de importación."""
+		self.result_summary = ""
+		self.result_errors = ""
+		self.flags.ignore_permissions = True
+		self.save()
+		return {"ok": True}
+
+	@frappe.whitelist()
 	def process_import(self):
 		"""
 		Valida el archivo adjunto y ejecuta la importación masiva de notas.

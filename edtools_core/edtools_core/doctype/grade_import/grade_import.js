@@ -81,5 +81,26 @@ frappe.ui.form.on("Grade Import", {
 				);
 			}
 		).addClass("btn-primary");
+
+		frm.add_custom_button(
+			__("Limpiar resultados"),
+			function () {
+				frappe.confirm(
+					__("¿Deseas limpiar solo los resultados de importación?"),
+					function () {
+						frm.call({
+							method: "clear_import_results",
+							doc: frm.doc,
+							freeze: true,
+							freeze_message: __("Limpiando resultados..."),
+							callback: function () {
+								frm.reload_doc();
+								frappe.msgprint(__("Resultados limpiados."), { indicator: "blue" });
+							},
+						});
+					}
+				);
+			}
+		);
 	},
 });
