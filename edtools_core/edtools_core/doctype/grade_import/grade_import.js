@@ -61,12 +61,8 @@ frappe.ui.form.on("Grade Import", {
 									progress_dialog.$wrapper.find(".btn-primary").show();
 								}
 								if (r.message && r.message.message) {
-									var lines = r.message.message.split(/\n/).filter(function (s) {
-										return s.length > 0;
-									});
 									frappe.msgprint({
-										message: lines,
-										as_list: true,
+										message: __("Importación finalizada. Revisa el bloque de resultados en el formulario."),
 										indicator: r.message.success ? "green" : "orange",
 										title: __("Resultado"),
 									});

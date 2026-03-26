@@ -927,6 +927,32 @@ def process_grades(
             "errors": [{"row": N, "message": "..."}],
         }
     """
+    results: list[dict[str, Any]] = []
+
+    def _add_result(
+        *,
+        row: int | None,
+        student_id: str = "",
+        student: str = "",
+        course_input: str = "",
+        course: str = "",
+        academic_term: str = "",
+        status: str = "",
+        detail: str = "",
+    ) -> None:
+        results.append(
+            {
+                "row": row,
+                "student_id": student_id or "",
+                "student": student or "",
+                "course_input": course_input or "",
+                "course": course or "",
+                "academic_term": academic_term or "",
+                "status": status or "",
+                "detail": detail or "",
+            }
+        )
+
     out = {
         "success": False,
         "validation_errors": [],
@@ -940,22 +966,31 @@ def process_grades(
             "rows_with_errors": 0,
         },
         "errors": [],
+        "results": results,
     }
 
     # 1) Validación previa
     ok, validation_errors = validate_format(file_path, grading_scale_name)
     if not ok:
         out["validation_errors"] = validation_errors
+        for e in validation_errors:
+            _add_result(
+                row=e.get("row"),
+                status="ErrorValidacion",
+                detail=e.get("message", ""),
+            )
         return out
 
     resolved = _resolve_file_path(file_path)
     if not resolved:
         out["validation_errors"] = [{"row": None, "message": _("No se pudo leer el archivo.")}]
+        _add_result(row=None, status="ErrorValidacion", detail=_("No se pudo leer el archivo."))
         return out
 
     col_index, data_rows = parse_file(resolved)
     if not data_rows:
         out["validation_errors"] = [{"row": None, "message": _("El archivo no tiene filas de datos.")}]
+        _add_result(row=None, status="ErrorValidacion", detail=_("El archivo no tiene filas de datos."))
         return out
 
     # Grading scale por defecto: primer Course que usemos o primer escala en el sistema
@@ -963,6 +998,11 @@ def process_grades(
         grading_scale_name = _get_default_grading_scale()
     if not grading_scale_name:
         out["validation_errors"] = [{"row": None, "message": _("No hay escala de calificaciones configurada.")}]
+        _add_result(
+            row=None,
+            status="ErrorValidacion",
+            detail=_("No hay escala de calificaciones configurada."),
+        )
         return out
 
     # 2) Agrupar por (course, academic_year, academic_term)
@@ -972,23 +1012,61 @@ def process_grades(
         semester = (row.get("SEMESTER") or "").strip().replace(" ", "")
         parsed = semester_to_academic_year_and_term(semester)
         if not parsed:
-            out["errors"].append({"row": i + 2, "message": _("SEMESTER inválido: {0}").format(row.get("SEMESTER"))})
+            msg = _("SEMESTER inválido: {0}").format(row.get("SEMESTER"))
+            out["errors"].append({"row": i + 2, "message": msg})
+            _add_result(
+                row=i + 2,
+                student_id=(row.get("ID") or "").strip(),
+                course_input=(row.get("COURSE") or "").strip(),
+                status="ErrorValidacion",
+                detail=msg,
+            )
             continue
         year, term_name = parsed
         term_label = SEMESTER_SUFFIX_TO_TERM.get(semester[-2:], "")
         course_code = (row.get("COURSE") or "").strip()
         course_frappe = _resolve_course(course_code)
         if not course_frappe:
-            out["errors"].append({"row": i + 2, "message": _("Curso no existe: {0}").format(course_code)})
+            msg = _("Curso no existe: {0}").format(course_code)
+            out["errors"].append({"row": i + 2, "message": msg})
+            _add_result(
+                row=i + 2,
+                student_id=(row.get("ID") or "").strip(),
+                course_input=course_code,
+                academic_term=term_name,
+                status="ErrorValidacion",
+                detail=msg,
+            )
             continue
         student_id = (row.get("ID") or "").strip()
         student_name = get_student_name_by_id(student_id)
         if not student_name:
-            out["errors"].append({"row": i + 2, "message": _("Estudiante no encontrado: {0}").format(student_id)})
+            msg = _("Estudiante no encontrado: {0}").format(student_id)
+            out["errors"].append({"row": i + 2, "message": msg})
+            _add_result(
+                row=i + 2,
+                student_id=student_id,
+                course_input=course_code,
+                course=course_frappe,
+                academic_term=term_name,
+                status="ErrorValidacion",
+                detail=msg,
+            )
             continue
         grade_str = (row.get("FINAL GRADE") or "").strip()
         if not grade_str:
-            out["errors"].append({"row": i + 2, "message": _("FINAL GRADE no puede estar vacío.")})
+            msg = _("FINAL GRADE no puede estar vacío.")
+            out["errors"].append({"row": i + 2, "message": msg})
+            _add_result(
+                row=i + 2,
+                student_id=student_id,
+                student=student_name,
+                course_input=course_code,
+                course=course_frappe,
+                academic_term=term_name,
+                status="ErrorValidacion",
+                detail=msg,
+            )
             continue
         try:
             score = float(grade_str)
@@ -996,7 +1074,18 @@ def process_grades(
         except (TypeError, ValueError):
             pct = letter_to_percentage(grading_scale_name, grade_str)
             if pct is None:
-                out["errors"].append({"row": i + 2, "message": _("Calificación no válida: {0}").format(grade_str)})
+                msg = _("Calificación no válida: {0}").format(grade_str)
+                out["errors"].append({"row": i + 2, "message": msg})
+                _add_result(
+                    row=i + 2,
+                    student_id=student_id,
+                    student=student_name,
+                    course_input=course_code,
+                    course=course_frappe,
+                    academic_term=term_name,
+                    status="ErrorValidacion",
+                    detail=msg,
+                )
                 continue
             score = (pct / 100.0) * 100
         key = (course_frappe, year, term_label)
@@ -1018,13 +1107,31 @@ def process_grades(
         leaf = get_or_create_assessment_group_leaf(year, term_label)
         if not leaf:
             for (row_num, __unused1, __unused2, __unused3) in rows:
-                out["errors"].append({"row": row_num, "message": _("No se pudo crear el grupo de evaluación para {0}.").format(term_name)})
+                msg = _("No se pudo crear el grupo de evaluación para {0}.").format(term_name)
+                out["errors"].append({"row": row_num, "message": msg})
+                _add_result(
+                    row=row_num,
+                    student=__unused1,
+                    course=course_frappe,
+                    academic_term=term_name,
+                    status="ErrorProcesamiento",
+                    detail=msg,
+                )
             continue
         student_names = list({r[1] for r in rows})
         sg_name = get_or_create_student_group(course_frappe, year, term_name, student_names)
         if not sg_name:
             for (row_num, __unused1, __unused2, __unused3) in rows:
-                out["errors"].append({"row": row_num, "message": _("No se pudo crear el grupo de estudiantes.")})
+                msg = _("No se pudo crear el grupo de estudiantes.")
+                out["errors"].append({"row": row_num, "message": msg})
+                _add_result(
+                    row=row_num,
+                    student=__unused1,
+                    course=course_frappe,
+                    academic_term=term_name,
+                    status="ErrorProcesamiento",
+                    detail=msg,
+                )
             continue
         if sg_name not in created_sg:
             created_sg.add(sg_name)
@@ -1033,7 +1140,16 @@ def process_grades(
         ap_name = get_or_create_assessment_plan(sg_name, leaf, course_frappe, scale, academic_term_name=term_name)
         if not ap_name:
             for (row_num, __unused1, __unused2, __unused3) in rows:
-                out["errors"].append({"row": row_num, "message": _("No se pudo crear el plan de evaluación.")})
+                msg = _("No se pudo crear el plan de evaluación.")
+                out["errors"].append({"row": row_num, "message": msg})
+                _add_result(
+                    row=row_num,
+                    student=__unused1,
+                    course=course_frappe,
+                    academic_term=term_name,
+                    status="ErrorProcesamiento",
+                    detail=msg,
+                )
             continue
         if ap_name not in created_ap:
             created_ap.add(ap_name)
@@ -1048,14 +1164,47 @@ def process_grades(
             ar_name, err, created, updated_submitted = create_or_update_assessment_result(ap_name, student_name, score, scale)
             if err:
                 out["errors"].append({"row": row_num, "message": err})
+                _add_result(
+                    row=row_num,
+                    student=student_name,
+                    course=course_frappe,
+                    academic_term=term_name,
+                    status="ErrorProcesamiento",
+                    detail=err,
+                )
             else:
                 total_processed += 1
                 if created:
                     total_created += 1
+                    _add_result(
+                        row=row_num,
+                        student=student_name,
+                        course=course_frappe,
+                        academic_term=term_name,
+                        status="Creado",
+                        detail=ar_name or "",
+                    )
                 else:
                     total_updated += 1
                     if updated_submitted:
                         total_updated_submitted += 1
+                        _add_result(
+                            row=row_num,
+                            student=student_name,
+                            course=course_frappe,
+                            academic_term=term_name,
+                            status="ActualizadoSubmitted",
+                            detail=ar_name or "",
+                        )
+                    else:
+                        _add_result(
+                            row=row_num,
+                            student=student_name,
+                            course=course_frappe,
+                            academic_term=term_name,
+                            status="Actualizado",
+                            detail=ar_name or "",
+                        )
 
     out["summary"]["student_groups_created"] = len(created_sg)
     out["summary"]["assessment_plans_created"] = len(created_ap)
@@ -1064,5 +1213,6 @@ def process_grades(
     out["summary"]["assessment_results_updated_submitted"] = total_updated_submitted
     out["summary"]["rows_processed"] = total_processed
     out["summary"]["rows_with_errors"] = len(out["errors"])
+    out["results"] = results
     out["success"] = True
     return out
