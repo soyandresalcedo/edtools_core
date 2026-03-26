@@ -55,38 +55,83 @@ class CourseEnrollmentImport(Document):
 				title=_("Importación"),
 			)
 
-		summary_lines = []
-		error_lines = []
-		if result.get("validation_errors"):
-			summary_lines.append(_("Validación fallida (no se procesó el lote):"))
-			for e in result["validation_errors"]:
+		s = result.get("summary") or {}
+		validation_errors = result.get("validation_errors") or []
+		results = result.get("results") or []
+		errors = result.get("errors") or []
+
+		summary_html = f"""
+		<h4 style="margin-top: 10px; color: var(--text-color);">{_('Resultado del proceso')}</h4>
+		<div style="background-color: var(--fg-color); padding: 14px; border-radius: 6px; margin-bottom: 12px;
+		            border: 1px solid var(--border-color); color: var(--text-color);">
+			<p><strong>{_('Course Enrollment creados')}:</strong> {s.get('course_enrollments_created', 0)}</p>
+			<p><strong>{_('Duplicados (ya inscrito en el periodo)')}:</strong> {s.get('duplicates', 0)}</p>
+			<p><strong>{_('Grupos de estudiantes (creados/actualizados)')}:</strong> {s.get('student_groups_created_or_updated', 0)}</p>
+			<p><strong>{_('Filas con error en procesamiento')}:</strong> {s.get('rows_with_errors', 0)}</p>
+		</div>
+		"""
+
+		rows_html = ""
+		if validation_errors:
+			for e in validation_errors:
 				row = e.get("row") if e.get("row") is not None else "—"
-				msg = _("Fila {0}: {1}").format(row, e.get("message", ""))
-				summary_lines.append("  " + str(msg))
-				error_lines.append(str(msg))
+				rows_html += f"""
+				<tr style="border-bottom: 1px solid var(--border-color);">
+					<td style="border: 1px solid var(--border-color); padding: 10px;">{row}</td>
+					<td style="border: 1px solid var(--border-color); padding: 10px;">—</td>
+					<td style="border: 1px solid var(--border-color); padding: 10px;">—</td>
+					<td style="border: 1px solid var(--border-color); padding: 10px;">—</td>
+					<td style="border: 1px solid var(--border-color); padding: 10px;">ErrorValidacion</td>
+					<td style="border: 1px solid var(--border-color); padding: 10px;">{e.get('message', '')}</td>
+				</tr>
+				"""
 		else:
-			s = result.get("summary") or {}
-			summary_lines.append(
-				_("Course Enrollment creados: {0}").format(s.get("course_enrollments_created", 0))
-			)
-			summary_lines.append(
-				_("Duplicados (ya inscrito en el periodo): {0}").format(s.get("duplicates", 0))
-			)
-			summary_lines.append(
-				_("Grupos de estudiantes (creados/actualizados): {0}").format(
-					s.get("student_groups_created_or_updated", 0)
-				)
-			)
-			summary_lines.append(
-				_("Filas con error en procesamiento: {0}").format(s.get("rows_with_errors", 0))
-			)
+			for r in results:
+				rows_html += f"""
+				<tr style="border-bottom: 1px solid var(--border-color);">
+					<td style="border: 1px solid var(--border-color); padding: 10px;">{r.get('row') if r.get('row') is not None else '—'}</td>
+					<td style="border: 1px solid var(--border-color); padding: 10px;">{r.get('student_id') or r.get('student') or '—'}</td>
+					<td style="border: 1px solid var(--border-color); padding: 10px;">{r.get('course_input') or r.get('course') or '—'}</td>
+					<td style="border: 1px solid var(--border-color); padding: 10px;">{r.get('academic_term') or '—'}</td>
+					<td style="border: 1px solid var(--border-color); padding: 10px;">{r.get('status') or '—'}</td>
+					<td style="border: 1px solid var(--border-color); padding: 10px;">{r.get('detail') or '—'}</td>
+				</tr>
+				"""
 
-		for e in result.get("errors") or []:
-			row = e.get("row") if e.get("row") is not None else "—"
-			error_lines.append(str(_("Fila {0}: {1}").format(row, e.get("message", ""))))
+		table_html = f"""
+		<table style="width: 100%; border-collapse: collapse; margin-top: 10px;
+		              background-color: var(--bg-color); color: var(--text-color);">
+			<thead style="background-color: var(--border-color); border-bottom: 2px solid var(--border-color);">
+				<tr>
+					<th style="border: 1px solid var(--border-color); padding: 12px; text-align: left;">{_('Fila')}</th>
+					<th style="border: 1px solid var(--border-color); padding: 12px; text-align: left;">{_('Estudiante')}</th>
+					<th style="border: 1px solid var(--border-color); padding: 12px; text-align: left;">{_('Curso')}</th>
+					<th style="border: 1px solid var(--border-color); padding: 12px; text-align: left;">{_('Término')}</th>
+					<th style="border: 1px solid var(--border-color); padding: 12px; text-align: left;">{_('Estado')}</th>
+					<th style="border: 1px solid var(--border-color); padding: 12px; text-align: left;">{_('Detalle')}</th>
+				</tr>
+			</thead>
+			<tbody>
+				{rows_html or f"<tr><td colspan='6' style='padding: 12px;'>{_('Sin registros para mostrar.')}</td></tr>"}
+			</tbody>
+		</table>
+		"""
 
-		self.result_summary = "\n".join(summary_lines)
-		self.result_errors = "\n".join(error_lines) if error_lines else ""
+		errors_html = ""
+		if errors:
+			error_items = "".join(
+				f"<li>{_('Fila')} {e.get('row') if e.get('row') is not None else '—'}: {e.get('message', '')}</li>"
+				for e in errors
+			)
+			errors_html = f"""
+			<div style="margin-top: 12px; background-color: var(--fg-color); border: 1px solid var(--border-color); padding: 10px; border-radius: 6px;">
+				<strong>{_('Errores detectados')}</strong>
+				<ul style="margin-top: 8px;">{error_items}</ul>
+			</div>
+			"""
+
+		self.result_summary = summary_html + table_html
+		self.result_errors = errors_html
 		self.flags.ignore_permissions = True
 		self.save()
 
@@ -96,5 +141,5 @@ class CourseEnrollmentImport(Document):
 			"validation_errors": result.get("validation_errors"),
 			"summary": result.get("summary"),
 			"errors": result.get("errors"),
-			"message": self.result_summary,
+			"message": _("Importación finalizada. Revisa el bloque de resultados en el formulario."),
 		}

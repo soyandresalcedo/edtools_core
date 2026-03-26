@@ -37,13 +37,13 @@
   },
   {
    "fieldname": "result_summary",
-   "fieldtype": "Small Text",
+   "fieldtype": "HTML",
    "label": "Resumen",
    "read_only": 1
   },
   {
    "fieldname": "result_errors",
-   "fieldtype": "Small Text",
+   "fieldtype": "HTML",
    "label": "Errores por fila",
    "read_only": 1
   }

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import csv
+import html
 import re
 from collections import defaultdict
 from typing import Any, Callable
@@ -326,6 +327,32 @@ def process_enrollments(
 	default_enrollment_date: str | None = None,
 	progress_callback: Callable | None = None,
 ) -> dict[str, Any]:
+	results: list[dict[str, Any]] = []
+
+	def _add_result(
+		*,
+		row: int | None,
+		student_id: str = "",
+		student: str = "",
+		course_input: str = "",
+		course: str = "",
+		academic_term: str = "",
+		status: str = "",
+		detail: str = "",
+	):
+		results.append(
+			{
+				"row": row,
+				"student_id": student_id or "",
+				"student": student or "",
+				"course_input": course_input or "",
+				"course": course or "",
+				"academic_term": academic_term or "",
+				"status": status or "",
+				"detail": detail or "",
+			}
+		)
+
 	out: dict[str, Any] = {
 		"success": False,
 		"validation_errors": [],
@@ -337,11 +364,18 @@ def process_enrollments(
 			"student_groups_created_or_updated": 0,
 		},
 		"errors": [],
+		"results": results,
 	}
 
 	ok, validation_errors = validate_import_format(file_path)
 	if not ok:
 		out["validation_errors"] = validation_errors
+		for e in validation_errors:
+			_add_result(
+				row=e.get("row"),
+				status="ErrorValidacion",
+				detail=e.get("message", ""),
+			)
 		return out
 
 	resolved = _resolve_file_path(file_path)
@@ -359,22 +393,45 @@ def process_enrollments(
 		semester = (row.get("SEMESTER") or "").strip().replace(" ", "")
 		parsed = semester_to_academic_year_and_term(semester)
 		if not parsed:
-			out["errors"].append({"row": row_num, "message": _("SEMESTER inválido")})
+			msg = _("SEMESTER inválido")
+			out["errors"].append({"row": row_num, "message": msg})
+			_add_result(
+				row=row_num,
+				student_id=(row.get("ID") or "").strip(),
+				course_input=(row.get("COURSE") or "").strip(),
+				status="ErrorValidacion",
+				detail=msg,
+			)
 			continue
 		year, term_name = parsed
 		term_label = SEMESTER_SUFFIX_TO_TERM.get(semester[-2:], "")
 		course_code = (row.get("COURSE") or "").strip()
 		course_frappe = _resolve_course(course_code)
 		if not course_frappe:
-			out["errors"].append(
-				{"row": row_num, "message": _("Curso no existe: {0}").format(course_code)}
+			msg = _("Curso no existe: {0}").format(course_code)
+			out["errors"].append({"row": row_num, "message": msg})
+			_add_result(
+				row=row_num,
+				student_id=(row.get("ID") or "").strip(),
+				course_input=course_code,
+				academic_term=term_name,
+				status="ErrorValidacion",
+				detail=msg,
 			)
 			continue
 		student_raw = (row.get("ID") or "").strip()
 		student_name = get_student_name_by_id(student_raw)
 		if not student_name:
-			out["errors"].append(
-				{"row": row_num, "message": _("Estudiante no encontrado: {0}").format(student_raw)}
+			msg = _("Estudiante no encontrado: {0}").format(student_raw)
+			out["errors"].append({"row": row_num, "message": msg})
+			_add_result(
+				row=row_num,
+				student_id=student_raw,
+				course_input=course_code,
+				course=course_frappe,
+				academic_term=term_name,
+				status="ErrorValidacion",
+				detail=msg,
 			)
 			continue
 		enroll_date = coerce_enrollment_date_str(row.get("ENROLLMENT DATE")) or default_date
@@ -432,11 +489,22 @@ def process_enrollments(
 			)
 		except Exception as e:
 			for row_num, __s, __raw, __d in rows:
+				msg = _("Error Moodle/grupo: {0}").format(str(e)[:200])
 				out["errors"].append(
 					{
 						"row": row_num,
-						"message": _("Error Moodle/grupo: {0}").format(str(e)[:200]),
+						"message": msg,
 					}
+				)
+				_add_result(
+					row=row_num,
+					student_id=__raw,
+					student=__s,
+					course_input=course_frappe,
+					course=course_frappe,
+					academic_term=term_name,
+					status="ErrorMoodleGrupo",
+					detail=msg,
 				)
 			continue
 
@@ -450,7 +518,18 @@ def process_enrollments(
 
 			pe_name, pe_err = get_unique_program_enrollment(student_name, year)
 			if pe_err or not pe_name:
-				out["errors"].append({"row": row_num, "message": pe_err or _("Error PE")})
+				msg = pe_err or _("Error PE")
+				out["errors"].append({"row": row_num, "message": msg})
+				_add_result(
+					row=row_num,
+					student_id=student_name,
+					student=student_name,
+					course_input=course_frappe,
+					course=course_frappe,
+					academic_term=term_name,
+					status="ErrorPE",
+					detail=msg,
+				)
 				continue
 
 			filters: dict[str, Any] = {
@@ -465,6 +544,16 @@ def process_enrollments(
 
 			if frappe.db.exists("Course Enrollment", filters):
 				total_dup += 1
+				_add_result(
+					row=row_num,
+					student_id=student_name,
+					student=student_name,
+					course_input=course_frappe,
+					course=course_frappe,
+					academic_term=term_name,
+					status="Duplicado",
+					detail=_("Ya inscrito en este periodo."),
+				)
 				continue
 
 			try:
@@ -477,11 +566,22 @@ def process_enrollments(
 					course=course_frappe,
 				)
 			except Exception as moodle_err:
+				msg = _("Moodle: {0}").format(str(moodle_err)[:180])
 				out["errors"].append(
 					{
 						"row": row_num,
-						"message": _("Moodle: {0}").format(str(moodle_err)[:180]),
+						"message": msg,
 					}
+				)
+				_add_result(
+					row=row_num,
+					student_id=student_name,
+					student=student_name,
+					course_input=course_frappe,
+					course=course_frappe,
+					academic_term=term_name,
+					status="ErrorMoodle",
+					detail=msg,
 				)
 				frappe.log_error(
 					title="Course Enrollment Import — Moodle",
@@ -508,9 +608,30 @@ def process_enrollments(
 				enrollment.insert(ignore_permissions=True)
 				enrollment.submit()
 				total_ok += 1
+				_add_result(
+					row=row_num,
+					student_id=student_name,
+					student=student_name,
+					course_input=course_frappe,
+					course=course_frappe,
+					academic_term=term_name,
+					status="Creado",
+					detail=enrollment.name,
+				)
 			except Exception as e:
+				msg = _("Error CE: {0}").format(str(e)[:180])
 				out["errors"].append(
-					{"row": row_num, "message": _("Error CE: {0}").format(str(e)[:180])}
+					{"row": row_num, "message": msg}
+				)
+				_add_result(
+					row=row_num,
+					student_id=student_name,
+					student=student_name,
+					course_input=course_frappe,
+					course=course_frappe,
+					academic_term=term_name,
+					status="ErrorCE",
+					detail=msg,
 				)
 				frappe.log_error(
 					title="Course Enrollment Import — CE",
@@ -522,5 +643,18 @@ def process_enrollments(
 	out["summary"]["rows_with_errors"] = len(out["errors"])
 	out["summary"]["rows_processed_ok"] = total_ok
 	out["summary"]["student_groups_created_or_updated"] = len(created_or_updated_sg)
+	out["results"] = [
+		{
+			**r,
+			"student_id": html.escape(str(r.get("student_id", ""))),
+			"student": html.escape(str(r.get("student", ""))),
+			"course_input": html.escape(str(r.get("course_input", ""))),
+			"course": html.escape(str(r.get("course", ""))),
+			"academic_term": html.escape(str(r.get("academic_term", ""))),
+			"status": html.escape(str(r.get("status", ""))),
+			"detail": html.escape(str(r.get("detail", ""))),
+		}
+		for r in results
+	]
 	out["success"] = True
 	return out
