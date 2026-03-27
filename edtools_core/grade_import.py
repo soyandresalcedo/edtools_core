@@ -468,11 +468,48 @@ def get_or_create_student_group(
     Obtiene o crea un Student Group para (course, academic_year, academic_term)
     con los estudiantes indicados. group_based_on = Course.
     Devuelve el nombre del Student Group o None.
+
+    Si el grupo ya existe, añade al tabla students cualquier estudiante de
+    student_names que aún no esté (evita StudentNotInGroupError al validar
+    Assessment Result cuando se importan más alumnos al mismo curso/período).
     """
     if not course_name or not student_names:
         return None
     group_name = f"Grades - {course_name} - {academic_term_name}"
+    unique_students = list(dict.fromkeys([s for s in student_names if s]))
     if frappe.db.exists("Student Group", group_name):
+        try:
+            doc = frappe.get_doc("Student Group", group_name)
+            existing = {d.student for d in (doc.students or []) if d.student}
+            max_roll = 0
+            for d in doc.students or []:
+                try:
+                    max_roll = max(max_roll, int(d.group_roll_number or 0))
+                except (TypeError, ValueError):
+                    pass
+            added = False
+            for stu in unique_students:
+                if stu in existing:
+                    continue
+                max_roll += 1
+                student_name_title = frappe.db.get_value("Student", stu, "student_name") or stu
+                doc.append(
+                    "students",
+                    {
+                        "student": stu,
+                        "student_name": student_name_title,
+                        "group_roll_number": max_roll,
+                        "active": 1,
+                    },
+                )
+                existing.add(stu)
+                added = True
+            if added:
+                doc.save(ignore_permissions=True)
+                frappe.db.commit()
+        except Exception:
+            frappe.db.rollback()
+            return None
         return group_name
     try:
         doc = frappe.new_doc("Student Group")
@@ -483,7 +520,7 @@ def get_or_create_student_group(
         doc.course = course_name
         doc.program = None
         doc.max_strength = 0
-        for i, stu in enumerate(student_names, 1):
+        for i, stu in enumerate(unique_students, 1):
             student_name_title = frappe.db.get_value("Student", stu, "student_name") or stu
             doc.append("students", {
                 "student": stu,
