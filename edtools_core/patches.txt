@@ -15,3 +15,4 @@ edtools_core.patches.allow_assessment_result_detail_on_submit
 edtools_core.patches.allow_assessment_result_details_table_on_submit
 edtools_core.patches.allow_assessment_result_on_submit
 edtools_core.patches.customize_help_dropdown
+edtools_core.patches.add_course_short_name_field

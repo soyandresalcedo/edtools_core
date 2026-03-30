@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+import unicodedata
 from typing import Any
 
 import frappe
@@ -345,7 +346,106 @@ def _expand_course_code_without_spaces(code: str) -> str | None:
     return None
 
 
-def _resolve_course(course_code: str) -> str | None:
+def _normalize_course_key(value: str) -> str:
+    """
+    Normaliza código/título para comparaciones tolerantes:
+    - quita acentos
+    - elimina caracteres no alfanuméricos
+    - convierte a mayúsculas
+    Ej: "MIB-650", "mib 650", "MÍB 650" -> "MIB650"
+    """
+    if not value:
+        return ""
+    normalized = unicodedata.normalize("NFKD", str(value))
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^A-Za-z0-9]+", "", ascii_text).upper()
+
+
+def _get_all_courses_for_lookup(code_fields: list[str]) -> list[dict[str, Any]]:
+    """
+    Cachea cursos en el request para evitar consultar toda la tabla por fila.
+    """
+    cache_key = "_grade_import_course_lookup_rows"
+    cached = getattr(frappe.local, cache_key, None)
+    if cached is not None:
+        return cached
+
+    fields = ["name", "course_name"] + [f for f in code_fields if f]
+    # dict.fromkeys preserva orden y elimina duplicados
+    fields = list(dict.fromkeys(fields))
+    rows = frappe.get_all("Course", fields=fields, limit_page_length=0)
+    setattr(frappe.local, cache_key, rows)
+    return rows
+
+
+def _find_course_candidates(course_code: str, course_title: str | None = None, limit: int = 5) -> list[str]:
+    """
+    Busca posibles cursos candidatos para facilitar diagnóstico al usuario.
+    """
+    meta = frappe.get_meta("Course")
+    code_fields = []
+    if meta.has_field("short_name"):
+        code_fields.append("short_name")
+    if meta.has_field("course_code"):
+        code_fields.append("course_code")
+
+    rows = _get_all_courses_for_lookup(code_fields)
+    input_key = _normalize_course_key(course_code)
+    title_key = _normalize_course_key(course_title or "")
+
+    # Heurística: misma raíz alfa o mismos 3+ dígitos finales.
+    alpha = re.sub(r"[^A-Z]+", "", input_key)
+    digits = re.sub(r"[^0-9]+", "", input_key)
+    digit_tail = digits[-3:] if len(digits) >= 3 else digits
+
+    candidates = []
+    for row in rows:
+        tokens = [
+            row.get("name") or "",
+            row.get("course_name") or "",
+        ]
+        for f in code_fields:
+            tokens.append(row.get(f) or "")
+
+        token_keys = [_normalize_course_key(t) for t in tokens if t]
+        if not token_keys:
+            continue
+
+        # Coincidencia exacta por clave normalizada
+        if input_key and input_key in token_keys:
+            candidates.append(row.get("name"))
+            continue
+        if title_key and title_key in token_keys:
+            candidates.append(row.get("name"))
+            continue
+
+        # Coincidencias parciales útiles
+        token_joined = " ".join(token_keys)
+        alpha_match = bool(alpha) and alpha in token_joined
+        digits_match = bool(digit_tail) and digit_tail in token_joined
+        if alpha_match and digits_match:
+            candidates.append(row.get("name"))
+            continue
+        if title_key and title_key in token_joined:
+            candidates.append(row.get("name"))
+
+    # Limpieza final
+    out = [c for c in dict.fromkeys(candidates) if c]
+    return out[:max(1, int(limit or 5))]
+
+
+def _course_not_found_message(course_code: str, course_title: str | None = None) -> str:
+    candidates = _find_course_candidates(course_code, course_title=course_title, limit=5)
+    if candidates:
+        return _("Curso no existe: {0}. Posibles coincidencias: {1}").format(
+            course_code, ", ".join(candidates)
+        )
+    if course_title:
+        return _("Curso no existe: {0} (título: {1}).").format(course_code, course_title)
+    return _("Curso no existe: {0}").format(course_code)
+
+
+def _resolve_course(course_code: str, course_title: str | None = None) -> str | None:
     """
     Devuelve el name del Course en Frappe si existe (por short_name o por name).
     Acepta códigos con o sin espacios: "STA 530" y "STA530" funcionan igual.
@@ -364,6 +464,9 @@ def _resolve_course(course_code: str) -> str | None:
         code_fields.append("short_name")
     if meta.has_field("course_code"):
         code_fields.append("course_code")
+
+    input_key = _normalize_course_key(course_code)
+    title_key = _normalize_course_key(course_title or "")
 
     if code_fields:
         values_to_try = [stripped, normalized, compact]
@@ -388,17 +491,29 @@ def _resolve_course(course_code: str) -> str | None:
                 normalized_code = str(raw).strip().replace(" ", "").upper()
                 if normalized_code == compact_upper:
                     return c.get("name")
+                if input_key and _normalize_course_key(raw) == input_key:
+                    return c.get("name")
 
     # 3) Buscar por course_name exacto (título) si existe el campo
     if meta.has_field("course_name"):
-        for value in (stripped, normalized):
+        for value in (stripped, normalized, (course_title or "").strip()):
             if not value:
                 continue
             name = frappe.db.get_value("Course", {"course_name": value}, "name")
             if name:
                 return name
 
-    # 4) Buscar por name del registro
+    # 4) Búsqueda tolerante por claves normalizadas en toda la tabla
+    rows = _get_all_courses_for_lookup(code_fields)
+    for row in rows:
+        tokens = [row.get("name") or "", row.get("course_name") or ""]
+        for f in code_fields:
+            tokens.append(row.get(f) or "")
+        keys = {_normalize_course_key(t) for t in tokens if t}
+        if (input_key and input_key in keys) or (title_key and title_key in keys):
+            return row.get("name")
+
+    # 5) Buscar por name del registro
     for value in (normalized, stripped, compact, expanded):
         if value and frappe.db.exists("Course", value):
             return value
@@ -916,15 +1031,17 @@ def process_grade_single(data: dict) -> dict[str, Any]:
     year, term_name = parsed
     term_label = SEMESTER_SUFFIX_TO_TERM.get(semester[-2:], "")
 
-    course_frappe = _resolve_course(course_code)
+    course_title = str(data.get("course_title", "")).strip()
+    course_frappe = _resolve_course(course_code, course_title=course_title)
     if not course_frappe:
+        msg = _course_not_found_message(course_code, course_title=course_title)
         return {
             "success": False,
             "message": _("Curso no encontrado"),
-            "validation_errors": [{"field": "course", "message": _("Curso '{0}' no existe. Prueba con o sin espacios (STA 530 / STA530).").format(course_code)}],
+            "validation_errors": [{"field": "course", "message": msg}],
             "assessment_result": None,
             "created": False,
-            "error_detail": _("Curso no existe: {0}").format(course_code),
+            "error_detail": msg,
         }
 
     student_name = get_student_name_by_id(student_id)
@@ -1128,9 +1245,10 @@ def process_grades(
         year, term_name = parsed
         term_label = SEMESTER_SUFFIX_TO_TERM.get(semester[-2:], "")
         course_code = (row.get("COURSE") or "").strip()
-        course_frappe = _resolve_course(course_code)
+        course_title = (row.get("COURSE TITLE") or "").strip()
+        course_frappe = _resolve_course(course_code, course_title=course_title)
         if not course_frappe:
-            msg = _("Curso no existe: {0}").format(course_code)
+            msg = _course_not_found_message(course_code, course_title=course_title)
             out["errors"].append({"row": i + 2, "message": msg})
             _add_result(
                 row=i + 2,
