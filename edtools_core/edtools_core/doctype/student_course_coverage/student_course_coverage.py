@@ -73,6 +73,12 @@ def get_course_coverage(
 		import json
 		students = json.loads(students)
 
+	students = list(dict.fromkeys(students or []))
+	if not students:
+		frappe.throw(_("No students selected."))
+
+	program = (frappe.utils.cstr(program).strip() or None)
+
 	plan_courses = []
 	if program:
 		plan_courses = frappe.get_all(
@@ -84,33 +90,42 @@ def get_course_coverage(
 		if not plan_courses:
 			frappe.throw(_("Program {0} has no courses defined.").format(program))
 
-	# Bulk-fetch all Course Enrollments for these students in this program,
-	# joined with their Program Enrollment to get AY + AT.
-	# Use frappe.qb for PostgreSQL-safe IN clause handling.
-	CE = frappe.qb.DocType("Course Enrollment")
-	PE = frappe.qb.DocType("Program Enrollment")
-
-	ce_data = (
-		frappe.qb.from_(CE)
-		.inner_join(PE).on(CE.program_enrollment == PE.name)
-		.select(
-			CE.student,
-			CE.course,
-			CE.name.as_("course_enrollment"),
-			CE.enrollment_date,
-			PE.name.as_("program_enrollment"),
-			PE.program,
-			PE.academic_year,
-			PE.academic_term,
-		)
-		.where(CE.student.isin(students))
-		.where(PE.docstatus == 1)
-		.orderby(CE.student)
-		.orderby(CE.course)
-		.run(as_dict=True)
+	# Course Enrollments: use get_all + PE lookup (reliable across DBs; avoids qb isin edge cases).
+	ce_rows = frappe.get_all(
+		"Course Enrollment",
+		filters={"student": ["in", students]},
+		fields=["name", "student", "course", "program_enrollment", "enrollment_date"],
+		order_by="student asc, course asc",
 	)
-	if program:
-		ce_data = [row for row in ce_data if row.get("program") == program]
+	pe_names = list({c["program_enrollment"] for c in ce_rows if c.get("program_enrollment")})
+	pe_by_name = {}
+	if pe_names:
+		for pe in frappe.get_all(
+			"Program Enrollment",
+			filters={"name": ["in", pe_names], "docstatus": 1},
+			fields=["name", "program", "academic_year", "academic_term"],
+		):
+			pe_by_name[pe["name"]] = pe
+
+	ce_data = []
+	for c in ce_rows:
+		pe = pe_by_name.get(c.get("program_enrollment"))
+		if not pe:
+			continue
+		if program and pe.get("program") != program:
+			continue
+		ce_data.append(
+			{
+				"student": c["student"],
+				"course": c["course"],
+				"course_enrollment": c["name"],
+				"enrollment_date": c.get("enrollment_date"),
+				"program_enrollment": pe["name"],
+				"program": pe.get("program"),
+				"academic_year": pe.get("academic_year"),
+				"academic_term": pe.get("academic_term"),
+			}
+		)
 
 	# Index: student -> course -> list of enrollments
 	from collections import defaultdict
@@ -197,6 +212,16 @@ def get_course_coverage(
 		else:
 			# Flexible mode (no program selected): show all enrolled courses across programs.
 			all_courses = sorted(enrollments.keys())
+			course_titles = {}
+			if all_courses:
+				course_titles = {
+					row["name"]: (row.get("course_name") or row["name"])
+					for row in frappe.get_all(
+						"Course",
+						filters={"name": ["in", all_courses]},
+						fields=["name", "course_name"],
+					)
+				}
 			kpis["total"] = len(all_courses)
 			for course_code in all_courses:
 				ce_list = enrollments.get(course_code, [])
@@ -207,15 +232,26 @@ def get_course_coverage(
 				if in_current:
 					status = "current_period"
 					kpis["current"] += 1
+					detail = in_current[0]["course_enrollment"]
 				else:
 					status = "history"
 					kpis["history"] += 1
+					parts = []
+					for e in ce_list:
+						prog = e.get("program") or ""
+						term = e.get("academic_term") or ""
+						if prog and term:
+							parts.append(f"{prog} ({term})")
+						elif term:
+							parts.append(term)
+						elif prog:
+							parts.append(prog)
+					parts = list(dict.fromkeys(parts))
+					detail = "; ".join(parts)
 
-				terms = list({e["academic_term"] or "" for e in ce_list})
-				detail = ", ".join(terms) if terms else ""
 				courses_out.append({
 					"course": course_code,
-					"course_name": course_code,
+					"course_name": course_titles.get(course_code, course_code),
 					"mandatory": False,
 					"status": status,
 					"detail": detail,
