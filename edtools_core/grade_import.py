@@ -357,32 +357,94 @@ def _resolve_course(course_code: str) -> str | None:
     compact = (course_code or "").replace(" ", "")
     expanded = _expand_course_code_without_spaces(course_code)
 
-    # 1) Buscar por short_name (si el DocType tiene el campo)
+    # 1) Buscar por short_name/course_code (si existen campos en el DocType)
     meta = frappe.get_meta("Course")
+    code_fields = []
     if meta.has_field("short_name"):
+        code_fields.append("short_name")
+    if meta.has_field("course_code"):
+        code_fields.append("course_code")
+
+    if code_fields:
         values_to_try = [stripped, normalized, compact]
         if expanded and expanded not in values_to_try:
             values_to_try.append(expanded)
-        for value in values_to_try:
+        for fieldname in code_fields:
+            for value in values_to_try:
+                if not value:
+                    continue
+                name = frappe.db.get_value("Course", {fieldname: value}, "name")
+                if name:
+                    return name
+
+    # 2) Búsqueda flexible: comparar short_name/course_code sin espacios y en mayúsculas
+    if code_fields and compact:
+        fields = ["name"] + code_fields
+        courses = frappe.get_all("Course", fields=fields)
+        for c in courses or []:
+            compact_upper = compact.upper()
+            for fieldname in code_fields:
+                raw = c.get(fieldname) or ""
+                normalized_code = str(raw).strip().replace(" ", "").upper()
+                if normalized_code == compact_upper:
+                    return c.get("name")
+
+    # 3) Buscar por course_name exacto (título) si existe el campo
+    if meta.has_field("course_name"):
+        for value in (stripped, normalized):
             if not value:
                 continue
-            name = frappe.db.get_value("Course", {"short_name": value}, "name")
+            name = frappe.db.get_value("Course", {"course_name": value}, "name")
             if name:
                 return name
 
-    # 2) Búsqueda flexible: comparar short_name sin espacios (para DB con "STA 530", input "STA530")
-    if meta.has_field("short_name") and compact:
-        courses = frappe.get_all("Course", fields=["name", "short_name"])
-        for c in courses or []:
-            sn = (c.get("short_name") or "").strip().replace(" ", "")
-            if sn == compact:
-                return c.get("name")
-
-    # 3) Buscar por name del registro
+    # 4) Buscar por name del registro
     for value in (normalized, stripped, compact, expanded):
         if value and frappe.db.exists("Course", value):
             return value
     return None
+
+
+def _ensure_student_in_group(student_group_name: str, student_name: str) -> bool:
+    """
+    Garantiza que student_name exista en la tabla students del Student Group.
+    Se usa justo antes de crear/guardar Assessment Result para evitar
+    StudentNotInGroupError cuando el grupo existe pero no contiene al alumno.
+    """
+    if not student_group_name or not student_name:
+        return False
+    if not frappe.db.exists("Student Group", student_group_name):
+        return False
+    try:
+        sg = frappe.get_doc("Student Group", student_group_name)
+        existing = {d.student for d in (sg.students or []) if d.student}
+        if student_name in existing:
+            return True
+
+        max_roll = 0
+        for d in sg.students or []:
+            try:
+                max_roll = max(max_roll, int(d.group_roll_number or 0))
+            except (TypeError, ValueError):
+                pass
+
+        max_roll += 1
+        student_title = frappe.db.get_value("Student", student_name, "student_name") or student_name
+        sg.append(
+            "students",
+            {
+                "student": student_name,
+                "student_name": student_title,
+                "group_roll_number": max_roll,
+                "active": 1,
+            },
+        )
+        sg.save(ignore_permissions=True)
+        frappe.db.commit()
+        return True
+    except Exception:
+        frappe.db.rollback()
+        return False
 
 
 # Nombre del nodo raíz del árbol Assessment Group (puede existir en el sitio)
@@ -654,6 +716,10 @@ def create_or_update_assessment_result(
     if not doc:
         return None, _("No se pudo obtener o crear el documento de resultado."), False, False
     is_new = doc.get("__islocal", False)
+
+    # Asegurar pertenencia al grupo antes de guardar para evitar validación de Education.
+    if not _ensure_student_in_group(plan.student_group, student_name):
+        return None, _("No se pudo asociar el estudiante al grupo {0}.").format(plan.student_group), False, False
 
     # Borrador: rellenar campos y guardar/presentar
     doc.assessment_plan = assessment_plan_name
