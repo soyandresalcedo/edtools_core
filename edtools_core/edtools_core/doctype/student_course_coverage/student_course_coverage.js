@@ -43,10 +43,6 @@ frappe.ui.form.on('Student Course Coverage', {
 	},
 
 	generate_coverage(frm) {
-		if (!frm.doc.program) {
-			frappe.msgprint(__('Please select a Program.'));
-			return;
-		}
 		if (!frm.doc.academic_year || !frm.doc.academic_term) {
 			frappe.msgprint(__('Please select Academic Year and Academic Term.'));
 			return;
@@ -179,8 +175,19 @@ function render_student_block(sid, s, collapsible, idx) {
 			if (c.status === 'current_period') { badge_cls = 'cov-current'; label = __('Current Period'); }
 			else if (c.status === 'history') { badge_cls = 'cov-history'; label = __('History'); }
 
+			const code = (c.course || '').trim();
+			const name = (c.course_name || '').trim();
+			let displayCourse = code;
+			if (name) {
+				// Avoid duplicated rendering like "MAR 520 - X — MAR 520 - X"
+				const codeLower = code.toLowerCase();
+				const nameLower = name.toLowerCase();
+				const isDuplicate = nameLower === codeLower || nameLower.startsWith(codeLower + ' - ');
+				displayCourse = isDuplicate ? name : `${code} — ${name}`;
+			}
+
 			html += `<tr class="cov-row-${c.status}">
-				<td>${frappe.utils.escape_html(c.course)} — ${frappe.utils.escape_html(c.course_name || '')}</td>
+				<td>${frappe.utils.escape_html(displayCourse)}</td>
 				<td style="text-align:center">${c.mandatory ? '&#10003;' : ''}</td>
 				<td><span class="cov-badge ${badge_cls}">${label}</span></td>
 				<td class="text-muted">${frappe.utils.escape_html(c.detail || '')}</td>

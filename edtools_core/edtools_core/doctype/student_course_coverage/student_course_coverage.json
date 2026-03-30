@@ -24,8 +24,7 @@
    "fieldname": "program",
    "fieldtype": "Link",
    "label": "Program",
-   "options": "Program",
-   "reqd": 1
+   "options": "Program"
   },
   {
    "fieldname": "column_break_period",

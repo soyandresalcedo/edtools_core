@@ -55,7 +55,7 @@ class StudentCourseCoverage(Document):
 
 @frappe.whitelist()
 def get_course_coverage(
-	program: str,
+	program: str | None,
 	academic_year: str,
 	academic_term: str,
 	students: list[str],
@@ -73,14 +73,16 @@ def get_course_coverage(
 		import json
 		students = json.loads(students)
 
-	plan_courses = frappe.get_all(
-		"Program Course",
-		filters={"parent": program},
-		fields=["course", "course_name", "required"],
-		order_by="idx asc",
-	)
-	if not plan_courses:
-		frappe.throw(_("Program {0} has no courses defined.").format(program))
+	plan_courses = []
+	if program:
+		plan_courses = frappe.get_all(
+			"Program Course",
+			filters={"parent": program},
+			fields=["course", "course_name", "required"],
+			order_by="idx asc",
+		)
+		if not plan_courses:
+			frappe.throw(_("Program {0} has no courses defined.").format(program))
 
 	# Bulk-fetch all Course Enrollments for these students in this program,
 	# joined with their Program Enrollment to get AY + AT.
@@ -97,16 +99,18 @@ def get_course_coverage(
 			CE.name.as_("course_enrollment"),
 			CE.enrollment_date,
 			PE.name.as_("program_enrollment"),
+			PE.program,
 			PE.academic_year,
 			PE.academic_term,
 		)
 		.where(CE.student.isin(students))
-		.where(PE.program == program)
 		.where(PE.docstatus == 1)
 		.orderby(CE.student)
 		.orderby(CE.course)
 		.run(as_dict=True)
 	)
+	if program:
+		ce_data = [row for row in ce_data if row.get("program") == program]
 
 	# Index: student -> course -> list of enrollments
 	from collections import defaultdict
@@ -124,64 +128,98 @@ def get_course_coverage(
 		)
 	}
 
-	# Verify each student has a submitted PE for this program
-	pe_exists = set(
-		frappe.get_all(
-			"Program Enrollment",
-			filters={"student": ["in", students], "program": program, "docstatus": 1},
-			pluck="student",
-		)
-	)
+	# Verify each student has at least one submitted PE for this scope
+	pe_filters = {"student": ["in", students], "docstatus": 1}
+	if program:
+		pe_filters["program"] = program
+	pe_exists = set(frappe.get_all("Program Enrollment", filters=pe_filters, pluck="student"))
 
 	results = {}
 	for student_id in students:
 		student_name = student_names.get(student_id, student_id)
 		if student_id not in pe_exists:
+			warn_msg = _("No active Program Enrollment found.")
+			if program:
+				warn_msg = _("No active Program Enrollment for {0}").format(program)
 			results[student_id] = {
 				"student_name": student_name,
-				"warning": _("No active Program Enrollment for {0}").format(program),
+				"warning": warn_msg,
 				"courses": [],
-				"kpis": {"total": len(plan_courses), "current": 0, "history": 0, "missing": len(plan_courses), "missing_mandatory": sum(1 for pc in plan_courses if pc["required"])},
+				"kpis": {
+					"total": len(plan_courses) if program else 0,
+					"current": 0,
+					"history": 0,
+					"missing": len(plan_courses) if program else 0,
+					"missing_mandatory": sum(1 for pc in plan_courses if pc["required"]) if program else 0,
+				},
 			}
 			continue
 
 		enrollments = student_ce.get(student_id, {})
 		courses_out = []
-		kpis = {"total": len(plan_courses), "current": 0, "history": 0, "missing": 0, "missing_mandatory": 0}
+		kpis = {"total": 0, "current": 0, "history": 0, "missing": 0, "missing_mandatory": 0}
 
-		for pc in plan_courses:
-			course_code = pc["course"]
-			ce_list = enrollments.get(course_code, [])
-			is_mandatory = bool(pc["required"])
+		if program:
+			kpis["total"] = len(plan_courses)
+			for pc in plan_courses:
+				course_code = pc["course"]
+				ce_list = enrollments.get(course_code, [])
+				is_mandatory = bool(pc["required"])
 
-			if not ce_list:
-				status = "missing"
-				detail = ""
-				kpis["missing"] += 1
-				if is_mandatory:
-					kpis["missing_mandatory"] += 1
-			else:
+				if not ce_list:
+					status = "missing"
+					detail = ""
+					kpis["missing"] += 1
+					if is_mandatory:
+						kpis["missing_mandatory"] += 1
+				else:
+					in_current = [
+						e for e in ce_list
+						if e["academic_year"] == academic_year and e["academic_term"] == academic_term
+					]
+					if in_current:
+						status = "current_period"
+						detail = in_current[0]["course_enrollment"]
+						kpis["current"] += 1
+					else:
+						status = "history"
+						terms = list({e["academic_term"] or "" for e in ce_list})
+						detail = ", ".join(terms) if terms else ""
+						kpis["history"] += 1
+
+				courses_out.append({
+					"course": course_code,
+					"course_name": pc["course_name"],
+					"mandatory": is_mandatory,
+					"status": status,
+					"detail": detail,
+				})
+		else:
+			# Flexible mode (no program selected): show all enrolled courses across programs.
+			all_courses = sorted(enrollments.keys())
+			kpis["total"] = len(all_courses)
+			for course_code in all_courses:
+				ce_list = enrollments.get(course_code, [])
 				in_current = [
 					e for e in ce_list
 					if e["academic_year"] == academic_year and e["academic_term"] == academic_term
 				]
 				if in_current:
 					status = "current_period"
-					detail = in_current[0]["course_enrollment"]
 					kpis["current"] += 1
 				else:
 					status = "history"
-					terms = list({e["academic_term"] or "" for e in ce_list})
-					detail = ", ".join(terms) if terms else ""
 					kpis["history"] += 1
 
-			courses_out.append({
-				"course": course_code,
-				"course_name": pc["course_name"],
-				"mandatory": is_mandatory,
-				"status": status,
-				"detail": detail,
-			})
+				terms = list({e["academic_term"] or "" for e in ce_list})
+				detail = ", ".join(terms) if terms else ""
+				courses_out.append({
+					"course": course_code,
+					"course_name": course_code,
+					"mandatory": False,
+					"status": status,
+					"detail": detail,
+				})
 
 		results[student_id] = {
 			"student_name": student_name,
@@ -190,9 +228,9 @@ def get_course_coverage(
 		}
 
 	return {
-		"program": program,
+		"program": program or "",
 		"academic_year": academic_year,
 		"academic_term": academic_term,
-		"plan_total": len(plan_courses),
+		"plan_total": len(plan_courses) if program else 0,
 		"students": results,
 	}
