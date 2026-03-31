@@ -29,7 +29,7 @@ def _patch_education_api():
 
 
 def _patch_login_context():
-	"""Login siempre con logo CUC University y nombre 'CUC University'."""
+	"""Login siempre con logo y nombre institucional."""
 	try:
 		from edtools_core.login_context import patch_login_context
 		patch_login_context()
