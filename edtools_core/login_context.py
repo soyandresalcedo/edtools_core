@@ -11,7 +11,7 @@ def patch_login_context():
 	def get_context(context):
 		original_get_context(context)
 		# Forzar logo y nombre en la página de login
-		context["logo"] = "/assets/edtools_core/images/cuc-university-logo.png"
+		context["logo"] = "/assets/edtools_core/images/iditek-logo.png?v=20260331"
 		context["app_name"] = "IDITEK"
 
 	login_module.get_context = get_context
