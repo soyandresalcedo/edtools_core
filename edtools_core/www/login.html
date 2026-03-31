@@ -69,7 +69,8 @@
 
 {% macro logo_section(title=null) %}
 <div class="page-card-head">
-	<img class="app-logo" src="{{ logo }}">
+	{# Logo fijo: Navbar Settings suele traer app_logo de BD (CUC) y pisa hooks; forzar asset IDITEK negro #}
+	<img class="app-logo" src="/assets/edtools_core/images/iditek-logo-black.png?v={{ build_version }}">
 	{% if title %}
 	<h4>{{ _(title)}}</h4>
 	{% else %}
