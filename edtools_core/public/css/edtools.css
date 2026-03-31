@@ -98,10 +98,10 @@ body:has(.login-split-wrapper) .page-content-wrapper .container,
 .login-split-left {
 	flex: 3;
 	min-width: 75%;
-	background-size: cover;
+	background-size: contain;
 	background-position: center;
 	background-repeat: no-repeat;
-	background-color: #f0f4f8;
+	background-color: #0b1030;
 }
 
 .login-split-right {
