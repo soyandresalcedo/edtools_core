@@ -63,16 +63,14 @@
     min-width: 200px !important;
     width: auto !important;
     object-fit: contain;
-	/* Arte corporativo suele ser cian; forzar silueta negra respetando transparencia */
-	filter: brightness(0);
 }
 </style>
 {% endblock %}
 
 {% macro logo_section(title=null) %}
 <div class="page-card-head">
-	{# Logo fijo: Navbar Settings suele traer app_logo de BD (CUC) y pisa hooks; forzar asset IDITEK negro #}
-	<img class="app-logo" src="/assets/edtools_core/images/iditek-logo-black.png?v={{ build_version }}">
+	{# Logo fijo: PNG negro con transparencia (evita app_logo de BD) #}
+	<img class="app-logo" src="/assets/edtools_core/images/logo-iditek.png?v={{ build_version }}">
 	{% if title %}
 	<h4>{{ _(title)}}</h4>
 	{% else %}

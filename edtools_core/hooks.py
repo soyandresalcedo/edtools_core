@@ -269,6 +269,6 @@ app_name = "edtools_core"
 app_title = "IDITEK"
 
 # Logo de login y páginas web (transparente, se ve sobre fondo claro u oscuro)
-app_logo_url = ["/assets/edtools_core/images/iditek-logo-black.png"]
+app_logo_url = ["/assets/edtools_core/images/logo-iditek.png"]
 
 # Nota: El menú Ayuda se filtra en sessions.get() vía sessions_navbar_patch (sessions sobrescribe navbar después de boot)
