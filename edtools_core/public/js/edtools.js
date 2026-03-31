@@ -1,8 +1,10 @@
 // Edtools Text Replacement - Keep Frappe design, only change text
 
+var BRAND_NAME = "IDITEK";
+
 // Help dropdown: Documentation URL, hide 3 items, Soporte + CUC School non-clickable
 var DOCS_EDTOOLS_URL = "https://docs.edtools.co/api-reference/introduction";
-var HELP_LABELS_TO_HIDE = ["About", "Acerca de", "User Forum", "CUC University School", "Report an Issue", "Foro de usuarios", "Escuela CUC University", "Reportar un problema"];
+var HELP_LABELS_TO_HIDE = ["About", "Acerca de", "User Forum", "CUC University School", "IDITEK School", "Report an Issue", "Foro de usuarios", "Escuela CUC University", "Escuela IDITEK", "Reportar un problema"];
 
 function makeLinkNonClickable(el) {
     if (el.getAttribute("data-edtools-noclick") === "1") return;
@@ -34,21 +36,21 @@ function customizeHelpDropdown() {
             if (href.indexOf("docs.erpnext.com") !== -1 || (href.indexOf("erpnext") !== -1 && text.toLowerCase().indexOf("documentation") !== -1)) {
                 el.setAttribute("href", DOCS_EDTOOLS_URL);
             }
-            // 2) Soporte de CUC University: siempre no clickeable (sin importar href actual)
-            if (text.indexOf("Soporte") !== -1 && text.indexOf("CUC") !== -1) {
+            // 2) Soporte institucional: siempre no clickeable (sin importar href actual)
+            if (text.indexOf("Soporte") !== -1) {
                 makeLinkNonClickable(el);
             }
-            // 3) CUC University School: no clickeable por si no se ocultó
-            if (text.indexOf("CUC University School") !== -1) {
+            // 3) School institucional: no clickeable por si no se ocultó
+            if (text.indexOf("CUC University School") !== -1 || text.indexOf("IDITEK School") !== -1) {
                 makeLinkNonClickable(el);
                 el.style.display = "none";
             }
         }
 
-        // 4) Hide About, User Forum, CUC University School, Report an Issue (exact or partial)
+        // 4) Hide About, User Forum, School, Report an Issue (exact or partial)
         var t = text.trim();
         var hide = (t === "About" || t === "Acerca de") ||
-            text.indexOf("User Forum") !== -1 || text.indexOf("CUC University School") !== -1 || text.indexOf("Report an Issue") !== -1 ||
+            text.indexOf("User Forum") !== -1 || text.indexOf("CUC University School") !== -1 || text.indexOf("IDITEK School") !== -1 || text.indexOf("Report an Issue") !== -1 ||
             text.indexOf("Foro de usuarios") !== -1 || text.indexOf("Reportar un problema") !== -1;
         if (hide) {
             el.style.display = "none";
@@ -93,16 +95,17 @@ function bindHelpDropdownCustomize() {
 function replaceTextInPage() {
     // Text replacements - only changes wording, not design
     const replacements = {
-        'Frappe': 'CUC University',
-        'ERPNext': 'CUC University',
-        'Edtools': 'CUC University',
-        'with ERPNext': 'with CUC University',
-        'Powered by Frappe': 'Powered by CUC University',
-        'Powered by ERPNext': 'Powered by CUC University',
-        "Let's begin your journey with ERPNext": "Comencemos tu experiencia con CUC University",
-        "Let's begin your journey with Edtools": "Comencemos tu experiencia con CUC University",
-        'Configuración de ERPNext': 'Configuración de CUC University',
-        'ERPNext Settings': 'Configuración de CUC University'
+        'Frappe': BRAND_NAME,
+        'ERPNext': BRAND_NAME,
+        'Edtools': BRAND_NAME,
+        'CUC University': BRAND_NAME,
+        'with ERPNext': 'with ' + BRAND_NAME,
+        'Powered by Frappe': 'Powered by ' + BRAND_NAME,
+        'Powered by ERPNext': 'Powered by ' + BRAND_NAME,
+        "Let's begin your journey with ERPNext": "Comencemos tu experiencia con " + BRAND_NAME,
+        "Let's begin your journey with Edtools": "Comencemos tu experiencia con " + BRAND_NAME,
+        'Configuración de ERPNext': 'Configuración de ' + BRAND_NAME,
+        'ERPNext Settings': 'Configuración de ' + BRAND_NAME
     };
 
     // Function to replace text in a text node
@@ -146,20 +149,23 @@ function replaceTextInPage() {
 function updatePageTitles() {
     // Update browser tab title
     if (document.title.includes('Frappe')) {
-        document.title = document.title.replace('Frappe', 'CUC University');
+        document.title = document.title.replace('Frappe', BRAND_NAME);
     }
     if (document.title.includes('ERPNext')) {
-        document.title = document.title.replace('ERPNext', 'CUC University');
+        document.title = document.title.replace('ERPNext', BRAND_NAME);
     }
     if (document.title.includes('Edtools')) {
-        document.title = document.title.replace('Edtools', 'CUC University');
+        document.title = document.title.replace('Edtools', BRAND_NAME);
+    }
+    if (document.title.includes('CUC University')) {
+        document.title = document.title.replace('CUC University', BRAND_NAME);
     }
 
     // Update frappe.boot if available
     if (window.frappe && frappe.boot) {
-        frappe.boot.app_name = "CUC University";
+        frappe.boot.app_name = BRAND_NAME;
         if (frappe.boot.website_settings) {
-            frappe.boot.website_settings.app_name = "CUC University";
+            frappe.boot.website_settings.app_name = BRAND_NAME;
         }
     }
 }

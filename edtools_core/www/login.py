@@ -1,4 +1,4 @@
-# Contexto de la página de login: delegar a Frappe y forzar logo y nombre CUC University.
+# Contexto de la página de login: delegar a Frappe y forzar branding institucional.
 
 import frappe
 
@@ -10,4 +10,4 @@ def get_context(context):
 
 	frappe_login.get_context(context)
 	context["logo"] = "/assets/edtools_core/images/cuc-university-logo.png"
-	context["app_name"] = "CUC University"
+	context["app_name"] = "IDITEK"

@@ -53,8 +53,8 @@ def filter_navbar_settings_in_boot(bootinfo):
         # 2) Ocultar por etiqueta (por si la URL es distinta)
         if label in (
             "About", "Acerca de",
-            "User Forum", "CUC University School", "Report an Issue",
-            "Foro de usuarios", "Escuela CUC University", "Reportar un problema",
+            "User Forum", "CUC University School", "IDITEK School", "Report an Issue",
+            "Foro de usuarios", "Escuela CUC University", "Escuela IDITEK", "Reportar un problema",
             "Frappe School",
         ):
             _set(item, "hidden", 1)
@@ -66,5 +66,5 @@ def filter_navbar_settings_in_boot(bootinfo):
                 _set(item, "route", DOCUMENTATION_URL)
                 continue
             # 4) Soporte: no clickeable (por URL o por etiqueta)
-            if any(u in route_lower for u in URLS_TO_DISABLE) or ("Soporte" in label and "CUC" in label):
+            if any(u in route_lower for u in URLS_TO_DISABLE) or ("Soporte" in label):
                 _set(item, "route", "#")

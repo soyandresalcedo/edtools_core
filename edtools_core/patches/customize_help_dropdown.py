@@ -13,9 +13,11 @@ LABELS_TO_HIDE = [
     "Acerca de",
     "User Forum",
     "CUC University School",
+    "IDITEK School",
     "Report an Issue",
     "Foro de usuarios",
     "Escuela CUC University",
+    "Escuela IDITEK",
     "Reportar un problema",
 ]
 
@@ -37,12 +39,12 @@ def execute():
                     item.route = DOCUMENTATION_URL
                     changed = True
 
-            # 2) Hide User Forum, CUC University School, Report an Issue
+            # 2) Hide User Forum, School, Report an Issue
             if (item.item_label or "").strip() in LABELS_TO_HIDE:
                 item.hidden = 1
                 changed = True
 
-            # 3) Soporte de CUC University: keep visible but use "#" so JS can make it non-clickable
+            # 3) Soporte institucional: keep visible but use "#" so JS can make it non-clickable
             if item.item_label and SOPORTE_LABEL_SUBSTRING in item.item_label and item.route:
                 item.route = "#"
                 changed = True

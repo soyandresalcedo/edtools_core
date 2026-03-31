@@ -258,15 +258,15 @@ override_whitelisted_methods = {
 # Website Settings
 # Override the default website title
 website_context = {
-	"brand_html": "CUC University",
+	"brand_html": "IDITEK",
 	"top_bar_items": [],
 	"footer_items": []
 }
 
-# Brand overrides - CUC University
-brand_html = "CUC University"
+# Brand overrides - IDITEK
+brand_html = "IDITEK"
 app_name = "edtools_core"
-app_title = "CUC University"
+app_title = "IDITEK"
 
 # Logo de login y páginas web (transparente, se ve sobre fondo claro u oscuro)
 app_logo_url = ["/assets/edtools_core/images/cuc-university-logo.png"]
