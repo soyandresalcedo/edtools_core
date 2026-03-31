@@ -69,6 +69,8 @@ footer a[href*="erpnext"] {
     min-width: 200px !important;
     width: auto !important;
     object-fit: contain;
+	/* PNG corporativo cian → negro en pantalla; alpha intacto */
+	filter: brightness(0);
 }
 
 /* ============================= */
