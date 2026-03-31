@@ -9,5 +9,5 @@ def get_context(context):
 	from frappe.www import login as frappe_login
 
 	frappe_login.get_context(context)
-	context["logo"] = "/assets/edtools_core/images/cuc-university-logo.png?v=20260331c"
+	context["logo"] = "/assets/edtools_core/images/iditek-logo-black.png?v=20260331d"
 	context["app_name"] = "IDITEK"
