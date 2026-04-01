@@ -4,6 +4,20 @@
 import frappe
 
 
+def _is_website_guest() -> bool:
+	try:
+		u = frappe.session.user
+	except Exception:
+		return True
+	return not u or u == "Guest"
+
+
+def _redirect_guest_root_to_login():
+	"""302 a /login#login (fragment elige panel en la plantilla de login)."""
+	frappe.flags.redirect_location = "/login#login"
+	raise frappe.Redirect(302)
+
+
 @frappe.whitelist(allow_guest=True)
 def clear_student_portal_404_cache():
 	"""
@@ -20,15 +34,11 @@ def clear_student_portal_404_cache():
 
 def resolve(path):
 	"""Para student-portal y subrutas (schedule, grades, fees, etc.) devolver endpoint 'student-portal'."""
-	if not path:
-		# Raíz "/": Guest → login sin pasar por get_home_page() (evita caché Redis / Web Page rota).
-		if frappe.session.user == "Guest":
-			return "login"
-		from frappe.website.path_resolver import resolve_path
-		return resolve_path(path)
-	# Normalizar: quitar barras al inicio/final por si el path viene con formato distinto
-	path_normalized = (path or "").strip("/ ")
-	if path_normalized == "student-portal" or path_normalized.startswith("student-portal/"):
+	path_norm = (path or "").strip("/ ")
+	# Raíz "/" o "/index": Guest → redirección HTTP (evita DocumentPage/Web Page "None", CDN y caché home_page).
+	if _is_website_guest() and (not path_norm or path_norm == "index"):
+		_redirect_guest_root_to_login()
+	if path_norm == "student-portal" or path_norm.startswith("student-portal/"):
 		return "student-portal"
 	from frappe.website.path_resolver import resolve_path
 	return resolve_path(path)
