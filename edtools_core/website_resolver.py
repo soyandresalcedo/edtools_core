@@ -21,6 +21,9 @@ def clear_student_portal_404_cache():
 def resolve(path):
 	"""Para student-portal y subrutas (schedule, grades, fees, etc.) devolver endpoint 'student-portal'."""
 	if not path:
+		# Raíz "/": Guest → login sin pasar por get_home_page() (evita caché Redis / Web Page rota).
+		if frappe.session.user == "Guest":
+			return "login"
 		from frappe.website.path_resolver import resolve_path
 		return resolve_path(path)
 	# Normalizar: quitar barras al inicio/final por si el path viene con formato distinto
