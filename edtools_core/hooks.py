@@ -49,8 +49,10 @@ doctype_js = {
 # Home Pages
 # ----------
 
-# application home page (will override Website Settings)
-# home_page = "login"
+# Solo Guest: raíz "/" abre login. Usuarios logueados siguen con Role / Portal / Website Settings.
+get_website_user_home_page = "edtools_core.guest_home_page.get_website_user_home_page"
+
+# No usar home_page = "login" aquí: forzaría login también para usuarios sin home por rol.
 
 # website user home page (by Role). Valor debe ser lista para get_home_page_via_hooks (usa [-1]).
 # Estudiantes van a /student-portal (Education Vue app: horario, notas, cuotas, asistencia)
