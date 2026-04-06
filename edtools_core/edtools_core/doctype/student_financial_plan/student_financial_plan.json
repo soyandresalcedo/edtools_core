@@ -4,10 +4,6 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "program",
-  "column_break_period",
-  "academic_year",
-  "academic_term",
   "section_break_selection",
   "selection_mode",
   "student",
@@ -19,31 +15,6 @@
   "results_html"
  ],
  "fields": [
-  {
-   "fieldname": "program",
-   "fieldtype": "Link",
-   "label": "Program",
-   "options": "Program"
-  },
-  {
-   "fieldname": "column_break_period",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "academic_year",
-   "fieldtype": "Link",
-   "label": "Academic Year",
-   "options": "Academic Year",
-   "reqd": 1
-  },
-  {
-   "depends_on": "academic_year",
-   "fieldname": "academic_term",
-   "fieldtype": "Link",
-   "label": "Academic Term",
-   "options": "Academic Term",
-   "reqd": 1
-  },
   {
    "fieldname": "section_break_selection",
    "fieldtype": "Section Break",

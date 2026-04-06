@@ -3,14 +3,28 @@
 
 from __future__ import annotations
 
+import json
+
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt
+from frappe.utils import flt, getdate, today
 
 
 def _docstatus_label(docstatus: int) -> str:
 	return {0: _("Draft"), 1: _("Submitted"), 2: _("Cancelled")}.get(docstatus, str(docstatus))
+
+
+def _empty_kpis():
+	return {"count": 0, "total_billed": 0.0, "total_outstanding": 0.0, "paid_count": 0}
+
+
+def _is_fee_paid_row(f: dict) -> bool:
+	if f.get("edtools_manual_paid"):
+		return True
+	if int(f.get("docstatus") or 0) == 1 and flt(f.get("outstanding_amount")) <= 0:
+		return True
+	return False
 
 
 class StudentFinancialPlan(Document):
@@ -19,12 +33,7 @@ class StudentFinancialPlan(Document):
 		students = self._resolve_students()
 		if not students:
 			frappe.throw(_("No students selected."))
-		return get_financial_plan_data(
-			program=self.program,
-			academic_year=self.academic_year,
-			academic_term=self.academic_term,
-			students=students,
-		)
+		return get_financial_plan_data(students=students)
 
 	def _resolve_students(self) -> list[str]:
 		mode = self.selection_mode
@@ -56,30 +65,15 @@ class StudentFinancialPlan(Document):
 
 
 @frappe.whitelist()
-def get_financial_plan_data(
-	program: str | None,
-	academic_year: str,
-	academic_term: str,
-	students: list,
-) -> dict:
+def get_financial_plan_data(students: list | str | None = None) -> dict:
 	if isinstance(students, str):
-		import json
-
 		students = json.loads(students)
 
 	students = list(dict.fromkeys(students or []))
 	if not students:
 		frappe.throw(_("No students selected."))
 
-	program = frappe.utils.cstr(program).strip() or None
-
 	pe_filters: dict = {"student": ["in", students], "docstatus": 1}
-	if program:
-		pe_filters["program"] = program
-	if academic_year:
-		pe_filters["academic_year"] = academic_year
-	if academic_term:
-		pe_filters["academic_term"] = academic_term
 
 	pe_rows = frappe.get_all(
 		"Program Enrollment",
@@ -108,6 +102,8 @@ def get_financial_plan_data(
 	]
 	if frappe.db.has_column("Fees", "components_description"):
 		fee_fields.append("components_description")
+	if frappe.db.has_column("Fees", "edtools_manual_paid"):
+		fee_fields.append("edtools_manual_paid")
 
 	fees_by_pe: dict[str, list] = {}
 	if pe_names:
@@ -136,7 +132,7 @@ def get_financial_plan_data(
 		if not pe_list:
 			results[sid] = {
 				"student_name": name,
-				"warning": _("No Program Enrollment for the selected program/period."),
+				"warning": _("No submitted Program Enrollment for this student."),
 				"fees": [],
 				"kpis": _empty_kpis(),
 			}
@@ -149,11 +145,7 @@ def get_financial_plan_data(
 
 		total_billed = sum(flt(f.get("grand_total")) for f in fees_rows)
 		total_out = sum(flt(f.get("outstanding_amount")) for f in fees_rows)
-		paid_count = sum(
-			1
-			for f in fees_rows
-			if f.get("docstatus") == 1 and flt(f.get("outstanding_amount")) <= 0
-		)
+		paid_count = sum(1 for f in fees_rows if _is_fee_paid_row(f))
 
 		for f in fees_rows:
 			f["docstatus_label"] = _docstatus_label(int(f.get("docstatus") or 0))
@@ -171,12 +163,182 @@ def get_financial_plan_data(
 		}
 
 	return {
-		"program": program or "",
-		"academic_year": academic_year,
-		"academic_term": academic_term,
 		"students": results,
+		"has_manual_paid_field": bool(frappe.db.has_column("Fees", "edtools_manual_paid")),
 	}
 
 
-def _empty_kpis():
-	return {"count": 0, "total_billed": 0.0, "total_outstanding": 0.0, "paid_count": 0}
+@frappe.whitelist()
+def sfp_get_program_enrollments(student: str):
+	student = frappe.utils.cstr(student).strip()
+	if not student:
+		frappe.throw(_("Student is required."))
+	frappe.has_permission("Program Enrollment", "read", throw=True)
+	return frappe.get_all(
+		"Program Enrollment",
+		filters={"student": student, "docstatus": 1},
+		fields=["name", "program", "academic_year", "academic_term"],
+		order_by="modified desc",
+	)
+
+
+@frappe.whitelist()
+def sfp_get_fee_structures(program_enrollment: str):
+	pe = frappe.get_doc("Program Enrollment", program_enrollment)
+	if pe.docstatus != 1:
+		frappe.throw(_("Program Enrollment must be submitted."))
+	frappe.has_permission("Fee Structure", "read", throw=True)
+	return frappe.get_all(
+		"Fee Structure",
+		filters={
+			"program": pe.program,
+			"academic_year": pe.academic_year,
+			"academic_term": pe.academic_term,
+			"docstatus": 1,
+		},
+		fields=["name", "total_amount"],
+		order_by="name asc",
+	)
+
+
+@frappe.whitelist()
+def sfp_get_fee_categories(fee_structure: str):
+	if not frappe.db.exists("Fee Structure", fee_structure):
+		frappe.throw(_("Invalid Fee Structure."))
+	frappe.has_permission("Fee Structure", "read", throw=True)
+	return frappe.get_all(
+		"Fee Component",
+		filters={"parent": fee_structure, "parenttype": "Fee Structure"},
+		fields=["fees_category", "description"],
+		order_by="idx asc",
+	)
+
+
+@frappe.whitelist()
+def sfp_create_fee(
+	program_enrollment: str,
+	fee_structure: str,
+	fees_category: str,
+	due_date: str,
+	amount: float,
+	description: str | None = None,
+):
+	frappe.has_permission("Fees", "create", throw=True)
+
+	pe = frappe.get_doc("Program Enrollment", program_enrollment)
+	if pe.docstatus != 1:
+		frappe.throw(_("Program Enrollment must be submitted."))
+
+	if not frappe.db.exists(
+		"Fee Component",
+		{
+			"parent": fee_structure,
+			"parenttype": "Fee Structure",
+			"fees_category": fees_category,
+		},
+	):
+		frappe.throw(_("Fee Category does not belong to the selected Fee Structure."))
+
+	fs_match = frappe.get_all(
+		"Fee Structure",
+		filters={
+			"name": fee_structure,
+			"program": pe.program,
+			"academic_year": pe.academic_year,
+			"academic_term": pe.academic_term,
+			"docstatus": 1,
+		},
+		limit=1,
+	)
+	if not fs_match:
+		frappe.throw(_("Fee Structure does not match this Program Enrollment."))
+
+	from education.education.api import get_fee_components
+
+	rows = get_fee_components(fee_structure)
+	if not rows:
+		frappe.throw(_("Fee Structure has no components."))
+
+	amt = flt(amount)
+	if amt <= 0:
+		frappe.throw(_("Amount must be greater than zero."))
+
+	due = getdate(due_date)
+
+	doc = frappe.new_doc("Fees")
+	doc.student = pe.student
+	doc.program_enrollment = pe.name
+	doc.posting_date = today()
+	doc.due_date = due
+	doc.fee_structure = fee_structure
+	doc.academic_year = pe.academic_year
+	doc.academic_term = pe.academic_term
+
+	doc.append(
+		"components",
+		{
+			"fees_category": fees_category,
+			"description": (description or "").strip() or None,
+			"amount": amt,
+		},
+	)
+
+	doc.insert()
+	return {"name": doc.name}
+
+
+@frappe.whitelist()
+def sfp_update_fee(
+	fee_name: str,
+	due_date: str | None = None,
+	amount: float | None = None,
+	description: str | None = None,
+):
+	doc = frappe.get_doc("Fees", fee_name)
+	frappe.has_permission("Fees", "write", doc=doc, throw=True)
+
+	if doc.docstatus != 0:
+		frappe.throw(_("Only draft fees can be edited from this tool."))
+
+	if due_date is not None:
+		doc.due_date = getdate(due_date)
+
+	if not doc.components:
+		frappe.throw(_("Fee has no components."))
+
+	if amount is not None:
+		doc.components[0].amount = flt(amount)
+	if description is not None:
+		doc.components[0].description = description
+	doc.save()
+	return {"name": doc.name}
+
+
+@frappe.whitelist()
+def sfp_delete_fee(fee_name: str):
+	doc = frappe.get_doc("Fees", fee_name)
+	frappe.has_permission("Fees", "delete", doc=doc, throw=True)
+
+	if doc.docstatus == 0:
+		frappe.delete_doc("Fees", fee_name)
+		return {"deleted": True}
+
+	if doc.docstatus == 1:
+		frappe.throw(_("Submitted fees cannot be deleted. Cancel the Fee from the form first."))
+
+	frappe.throw(_("Cannot delete this fee."))
+
+
+@frappe.whitelist()
+def sfp_set_manual_paid(fee_name: str, value: int | bool):
+	if not frappe.db.has_column("Fees", "edtools_manual_paid"):
+		frappe.throw(_("Manual paid field is not installed. Run migrate."))
+
+	doc = frappe.get_doc("Fees", fee_name)
+	frappe.has_permission("Fees", "write", doc=doc, throw=True)
+
+	val = 1 if value in (1, True, "1", "true") else 0
+	frappe.db.set_value("Fees", fee_name, "edtools_manual_paid", val)
+	frappe.db.commit()
+	return {"name": fee_name, "edtools_manual_paid": val}
+

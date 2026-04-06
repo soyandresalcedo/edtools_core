@@ -16,3 +16,4 @@ edtools_core.patches.allow_assessment_result_details_table_on_submit
 edtools_core.patches.allow_assessment_result_on_submit
 edtools_core.patches.customize_help_dropdown
 edtools_core.patches.add_course_short_name_field
+edtools_core.patches.add_fees_edtools_manual_paid
