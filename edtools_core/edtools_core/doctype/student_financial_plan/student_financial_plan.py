@@ -215,40 +215,38 @@ def sfp_get_fee_categories(fee_structure: str):
 
 
 @frappe.whitelist()
-def sfp_get_fee_components_for_enrollment(program_enrollment: str):
-	"""Lista cada fila de componente de todos los Fee Structure del periodo de la matrícula (elige uno, no toda la estructura)."""
-	pe = frappe.get_doc("Program Enrollment", program_enrollment)
-	if pe.docstatus != 1:
-		frappe.throw(_("Program Enrollment must be submitted."))
+def sfp_get_fee_components_for_fee_structure(fee_structure: str):
+	"""Componentes de un solo Fee Structure (para el diálogo: primero eliges estructura, luego una línea)."""
+	if not frappe.db.exists("Fee Structure", fee_structure):
+		frappe.throw(_("Invalid Fee Structure."))
+	doc = frappe.get_doc("Fee Structure", fee_structure)
+	if doc.docstatus != 1:
+		frappe.throw(_("Fee Structure must be submitted."))
 	frappe.has_permission("Fee Structure", "read", throw=True)
 
 	from education.education.api import get_fee_components
 
-	fs_names = frappe.get_all(
-		"Fee Structure",
-		filters={
-			"program": pe.program,
-			"academic_year": pe.academic_year,
-			"academic_term": pe.academic_term,
-			"docstatus": 1,
-		},
-		pluck="name",
-		order_by="name asc",
-	)
-
 	out = []
-	for fs in fs_names:
-		rows = get_fee_components(fs) or []
-		for row in rows:
-			out.append(
-				{
-					"fee_structure": fs,
-					"fees_category": row.get("fees_category"),
-					"amount": flt(row.get("amount")),
-					"description": (row.get("description") or "").strip(),
-				}
-			)
+	for row in get_fee_components(fee_structure) or []:
+		out.append(
+			{
+				"fees_category": row.get("fees_category"),
+				"amount": flt(row.get("amount")),
+				"description": (row.get("description") or "").strip(),
+			}
+		)
 	return out
+
+
+@frappe.whitelist()
+def sfp_pe_period_label(program_enrollment: str):
+	"""Etiqueta legible del periodo de la matrícula (para mensajes si no hay Fee Structure)."""
+	pe = frappe.get_doc("Program Enrollment", program_enrollment)
+	return {
+		"program": pe.program,
+		"academic_year": pe.academic_year or "",
+		"academic_term": pe.academic_term or "",
+	}
 
 
 @frappe.whitelist()
