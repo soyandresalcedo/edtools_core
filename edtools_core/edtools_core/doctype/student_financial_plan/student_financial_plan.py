@@ -215,6 +215,43 @@ def sfp_get_fee_categories(fee_structure: str):
 
 
 @frappe.whitelist()
+def sfp_get_fee_components_for_enrollment(program_enrollment: str):
+	"""Lista cada fila de componente de todos los Fee Structure del periodo de la matrícula (elige uno, no toda la estructura)."""
+	pe = frappe.get_doc("Program Enrollment", program_enrollment)
+	if pe.docstatus != 1:
+		frappe.throw(_("Program Enrollment must be submitted."))
+	frappe.has_permission("Fee Structure", "read", throw=True)
+
+	from education.education.api import get_fee_components
+
+	fs_names = frappe.get_all(
+		"Fee Structure",
+		filters={
+			"program": pe.program,
+			"academic_year": pe.academic_year,
+			"academic_term": pe.academic_term,
+			"docstatus": 1,
+		},
+		pluck="name",
+		order_by="name asc",
+	)
+
+	out = []
+	for fs in fs_names:
+		rows = get_fee_components(fs) or []
+		for row in rows:
+			out.append(
+				{
+					"fee_structure": fs,
+					"fees_category": row.get("fees_category"),
+					"amount": flt(row.get("amount")),
+					"description": (row.get("description") or "").strip(),
+				}
+			)
+	return out
+
+
+@frappe.whitelist()
 def sfp_create_fee(
 	program_enrollment: str,
 	fee_structure: str,
@@ -260,8 +297,8 @@ def sfp_create_fee(
 		frappe.throw(_("Fee Structure has no components."))
 
 	amt = flt(amount)
-	if amt <= 0:
-		frappe.throw(_("Amount must be greater than zero."))
+	if amt == 0:
+		frappe.throw(_("Amount cannot be zero (use negative amounts for credits, e.g. scholarships)."))
 
 	due = getdate(due_date)
 

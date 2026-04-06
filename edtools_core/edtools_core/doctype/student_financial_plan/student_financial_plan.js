@@ -188,7 +188,7 @@ function bind_sfp_actions(frm, $wrapper, hasManualPaid) {
 }
 
 function open_add_fee_dialog(frm, student, $wrapper) {
-	let pe_fs_filters = { name: '' };
+	let componentRows = [];
 
 	frappe.call({
 		method: SFP_API + '.sfp_get_program_enrollments',
@@ -216,21 +216,14 @@ function open_add_fee_dialog(frm, student, $wrapper) {
 						},
 					},
 					{
-						fieldname: 'fee_structure',
-						fieldtype: 'Link',
-						label: __('Fee Structure'),
-						options: 'Fee Structure',
-						reqd: 1,
-						get_query: function () {
-							return { filters: pe_fs_filters };
-						},
-					},
-					{
-						fieldname: 'fees_category',
+						fieldname: 'fee_component',
 						fieldtype: 'Select',
-						label: __('Fee Category'),
+						label: __('Component'),
 						options: '',
 						reqd: 1,
+						description: __(
+							'One line from a Fee Structure for this program/period (e.g. Registro, Inscripción). Not the whole structure.'
+						),
 					},
 					{ fieldname: 'sec', fieldtype: 'Section Break' },
 					{ fieldname: 'due_date', fieldtype: 'Date', label: __('Due Date'), reqd: 1 },
@@ -244,21 +237,30 @@ function open_add_fee_dialog(frm, student, $wrapper) {
 				primary_action_label: __('Create'),
 				primary_action(values) {
 					const pe = values.program_enrollment;
-					const fs = values.fee_structure;
-					const cat = values.fees_category;
-					if (!pe || !fs || !cat) {
-						frappe.msgprint(__('Fill all required fields.'));
+					const sel = values.fee_component;
+					const m = sel && sel.match(/^\[(\d+)\]/);
+					if (!pe || !m) {
+						frappe.msgprint(__('Select Program Enrollment and a component.'));
+						return;
+					}
+					const idx = parseInt(m[1], 10);
+					const row = componentRows[idx];
+					if (!row) {
+						frappe.msgprint(__('Invalid component selection.'));
 						return;
 					}
 					frappe.call({
 						method: SFP_API + '.sfp_create_fee',
 						args: {
 							program_enrollment: pe,
-							fee_structure: fs,
-							fees_category: cat,
+							fee_structure: row.fee_structure,
+							fees_category: row.fees_category,
 							due_date: values.due_date,
 							amount: values.amount,
-							description: values.description || '',
+							description:
+								(values.description && values.description.trim()) ||
+								row.description ||
+								'',
 						},
 						freeze: true,
 						callback(r) {
@@ -272,67 +274,74 @@ function open_add_fee_dialog(frm, student, $wrapper) {
 				},
 			});
 
-			function load_categories(fs_name) {
-				d.set_value('fees_category', '');
-				if (!fs_name) {
-					d.set_df_property('fees_category', 'options', '');
+			function load_components_for_pe(pe) {
+				d.set_value('fee_component', '');
+				d.set_df_property('fee_component', 'options', '');
+				componentRows = [];
+				if (!pe) {
 					return;
 				}
 				frappe.call({
-					method: SFP_API + '.sfp_get_fee_categories',
-					args: { fee_structure: fs_name },
+					method: SFP_API + '.sfp_get_fee_components_for_enrollment',
+					args: { program_enrollment: pe },
 					callback(r) {
-						const rows = r.message || [];
-						const opts = rows.map(function (x) {
-							return x.fees_category;
+						componentRows = r.message || [];
+						if (!componentRows.length) {
+							frappe.msgprint(
+								__(
+									'No Fee Structure components for this enrollment period. Create or submit a Fee Structure first.'
+								)
+							);
+							return;
+						}
+						const labels = componentRows.map(function (c, i) {
+							return (
+								'[' +
+								i +
+								'] ' +
+								c.fees_category +
+								' — ' +
+								c.fee_structure +
+								' (' +
+								fmt_money_plain(c.amount) +
+								')'
+							);
 						});
-						d.set_df_property('fees_category', 'options', [''].concat(opts).join('\n'));
-						if (rows.length === 1) {
-							d.set_value('fees_category', rows[0].fees_category);
+						d.set_df_property('fee_component', 'options', labels.join('\n'));
+						if (componentRows.length === 1) {
+							d.set_value('fee_component', labels[0]);
+							d.set_value('amount', componentRows[0].amount);
+							if (componentRows[0].description) {
+								d.set_value('description', componentRows[0].description);
+							}
 						}
 					},
 				});
 			}
 
 			d.fields_dict.program_enrollment.df.onchange = function () {
-				const pe = d.get_value('program_enrollment');
-				d.set_value('fee_structure', '');
-				d.set_value('fees_category', '');
-				if (!pe) {
-					pe_fs_filters = { name: '' };
-					return;
-				}
-				frappe.db.get_value(
-					'Program Enrollment',
-					pe,
-					['program', 'academic_year', 'academic_term'],
-					function (r) {
-						if (r && r.message) {
-							pe_fs_filters = {
-								program: r.message.program,
-								academic_year: r.message.academic_year,
-								academic_term: r.message.academic_term,
-								docstatus: 1,
-							};
-						}
-					}
-				);
+				load_components_for_pe(d.get_value('program_enrollment'));
 			};
 
-			d.fields_dict.fee_structure.df.onchange = function () {
-				load_categories(d.get_value('fee_structure'));
+			d.fields_dict.fee_component.df.onchange = function () {
+				const sel = d.get_value('fee_component');
+				const m = sel && sel.match(/^\[(\d+)\]/);
+				if (!m) return;
+				const idx = parseInt(m[1], 10);
+				const row = componentRows[idx];
+				if (row) {
+					d.set_value('amount', row.amount);
+					if (row.description) {
+						d.set_value('description', row.description);
+					}
+				}
 			};
 
 			d.show();
 
 			if (pe_list.length === 1) {
 				d.set_value('program_enrollment', pe_list[0].name);
-				pe_fs_filters = {
-					program: pe_list[0].program,
-					academic_year: pe_list[0].academic_year,
-					academic_term: pe_list[0].academic_term,
-					docstatus: 1,
-				};
+				load_components_for_pe(pe_list[0].name);
 			}
 		},
 	});
