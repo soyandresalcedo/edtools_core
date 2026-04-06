@@ -118,6 +118,17 @@ function render_financial_plan(frm, data) {
 		$body.slideToggle(200);
 		$(this).find('.sfp-chevron').toggleClass('rotated');
 	});
+
+	$wrapper.find('.sfp-fee-cell a').on('click', function (e) {
+		e.preventDefault();
+		const name = $(this).text().trim();
+		if (name) frappe.set_route('Form', 'Fees', name);
+	});
+	$wrapper.find('.sfp-fs-cell a').on('click', function (e) {
+		e.preventDefault();
+		const name = $(this).text().trim();
+		if (name) frappe.set_route('Form', 'Fee Schedule', name);
+	});
 }
 
 function render_financial_legend() {
@@ -224,16 +235,3 @@ function render_financial_styles() {
 .sfp-badge { font-size: 12px; }
 </style>`;
 }
-
-frappe.ready(function () {
-	$(document).on('click', '.sfp-fee-cell a', function (e) {
-		e.preventDefault();
-		const name = $(this).text().trim();
-		if (name) frappe.set_route('Form', 'Fees', name);
-	});
-	$(document).on('click', '.sfp-fs-cell a', function (e) {
-		e.preventDefault();
-		const name = $(this).text().trim();
-		if (name) frappe.set_route('Form', 'Fee Schedule', name);
-	});
-});
