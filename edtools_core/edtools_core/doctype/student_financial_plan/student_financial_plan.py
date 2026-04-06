@@ -182,6 +182,15 @@ def sfp_get_program_enrollments(student: str):
 	)
 
 
+def _fee_structure_filters_for_program_year(pe) -> dict:
+	"""Fee Structures suelen definirse por programa + año; el término académico suele ir vacío o no usarse."""
+	return {
+		"program": pe.program,
+		"academic_year": pe.academic_year,
+		"docstatus": 1,
+	}
+
+
 @frappe.whitelist()
 def sfp_get_fee_structures(program_enrollment: str):
 	pe = frappe.get_doc("Program Enrollment", program_enrollment)
@@ -190,15 +199,53 @@ def sfp_get_fee_structures(program_enrollment: str):
 	frappe.has_permission("Fee Structure", "read", throw=True)
 	return frappe.get_all(
 		"Fee Structure",
-		filters={
-			"program": pe.program,
-			"academic_year": pe.academic_year,
-			"academic_term": pe.academic_term,
-			"docstatus": 1,
-		},
+		filters=_fee_structure_filters_for_program_year(pe),
 		fields=["name", "total_amount"],
 		order_by="name asc",
 	)
+
+
+@frappe.whitelist()
+def sfp_get_fee_defaults_from_sibling_fees(program_enrollment: str):
+	"""Fee Structure (y si existe, Fee Schedule) más frecuente en otros Fees de la misma matrícula."""
+	from collections import Counter
+
+	pe = frappe.get_doc("Program Enrollment", program_enrollment)
+	if pe.docstatus != 1:
+		frappe.throw(_("Program Enrollment must be submitted."))
+	frappe.has_permission("Fees", "read", throw=True)
+
+	rows = frappe.get_all(
+		"Fees",
+		filters={"program_enrollment": program_enrollment, "docstatus": ["!=", 2]},
+		fields=["fee_structure", "fee_schedule"],
+	)
+	with_fs = [r for r in rows if r.get("fee_structure")]
+	if not with_fs:
+		return {"fee_structure": None, "fee_schedule": None}
+
+	fs_counts = Counter(r["fee_structure"] for r in with_fs)
+	chosen_fs = fs_counts.most_common(1)[0][0]
+
+	fs_meta = frappe.db.get_value(
+		"Fee Structure",
+		chosen_fs,
+		["program", "academic_year", "docstatus"],
+		as_dict=True,
+	)
+	if (
+		not fs_meta
+		or fs_meta.docstatus != 1
+		or fs_meta.program != pe.program
+		or fs_meta.academic_year != pe.academic_year
+	):
+		return {"fee_structure": None, "fee_schedule": None}
+
+	same_fs = [r for r in with_fs if r.get("fee_structure") == chosen_fs]
+	schedules = [r.get("fee_schedule") for r in same_fs if r.get("fee_schedule")]
+	chosen_sched = Counter(schedules).most_common(1)[0][0] if schedules else None
+
+	return {"fee_structure": chosen_fs, "fee_schedule": chosen_sched}
 
 
 @frappe.whitelist()
@@ -257,6 +304,7 @@ def sfp_create_fee(
 	due_date: str,
 	amount: float,
 	description: str | None = None,
+	fee_schedule: str | None = None,
 ):
 	frappe.has_permission("Fees", "create", throw=True)
 
@@ -274,19 +322,13 @@ def sfp_create_fee(
 	):
 		frappe.throw(_("Fee Category does not belong to the selected Fee Structure."))
 
-	fs_match = frappe.get_all(
-		"Fee Structure",
-		filters={
-			"name": fee_structure,
-			"program": pe.program,
-			"academic_year": pe.academic_year,
-			"academic_term": pe.academic_term,
-			"docstatus": 1,
-		},
-		limit=1,
-	)
-	if not fs_match:
-		frappe.throw(_("Fee Structure does not match this Program Enrollment."))
+	fs_doc = frappe.get_doc("Fee Structure", fee_structure)
+	if fs_doc.docstatus != 1:
+		frappe.throw(_("Fee Structure must be submitted."))
+	if fs_doc.program != pe.program or fs_doc.academic_year != pe.academic_year:
+		frappe.throw(
+			_("Fee Structure does not match this Program Enrollment (program and academic year).")
+		)
 
 	from education.education.api import get_fee_components
 
@@ -308,6 +350,8 @@ def sfp_create_fee(
 	doc.fee_structure = fee_structure
 	doc.academic_year = pe.academic_year
 	doc.academic_term = pe.academic_term
+	if fee_schedule and frappe.db.exists("Fee Schedule", fee_schedule):
+		doc.fee_schedule = fee_schedule
 
 	doc.append(
 		"components",

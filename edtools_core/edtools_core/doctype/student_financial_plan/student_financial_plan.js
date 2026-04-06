@@ -187,10 +187,16 @@ function bind_sfp_actions(frm, $wrapper, hasManualPaid) {
 	}
 }
 
+/** Nombre imposible en BD: evita filtro name="" que muestra "Filters applied for Name = empty". */
+const SFP_FS_IMPOSSIBLE_NAME = '__sfp_select_program_enrollment_first__';
+
 function open_add_fee_dialog(frm, student, $wrapper) {
 	let componentRows = [];
-	let pe_fs_filters = { name: '' };
+	/** null = aún no hay matrícula; objeto = filtro program + año (sin término académico). */
+	let pe_fs_filters = null;
 	let last_no_fs_warned_for = null;
+	/** Desde otros Fees de la misma matrícula (para pre-rellenar y enviar fee_schedule si aplica). */
+	let siblingDefaults = { fee_structure: null, fee_schedule: null };
 
 	frappe.call({
 		method: SFP_API + '.sfp_get_program_enrollments',
@@ -224,9 +230,12 @@ function open_add_fee_dialog(frm, student, $wrapper) {
 						options: 'Fee Structure',
 						reqd: 1,
 						description: __(
-							'Only Fee Structures that match this enrollment (program, year, term). Pick one, then choose a single component below.'
+							'Same program and year as this enrollment. If this student already has fees on this enrollment, the Fee Structure (and schedule) suggested below matches the most common among those documents.'
 						),
 						get_query: function () {
+							if (pe_fs_filters === null) {
+								return { filters: { name: SFP_FS_IMPOSSIBLE_NAME } };
+							}
 							return { filters: pe_fs_filters };
 						},
 					},
@@ -262,19 +271,27 @@ function open_add_fee_dialog(frm, student, $wrapper) {
 						frappe.msgprint(__('Invalid component selection.'));
 						return;
 					}
+					const args = {
+						program_enrollment: pe,
+						fee_structure: fs,
+						fees_category: row.fees_category,
+						due_date: values.due_date,
+						amount: values.amount,
+						description:
+							(values.description && values.description.trim()) ||
+							row.description ||
+							'',
+					};
+					if (
+						siblingDefaults.fee_structure &&
+						fs === siblingDefaults.fee_structure &&
+						siblingDefaults.fee_schedule
+					) {
+						args.fee_schedule = siblingDefaults.fee_schedule;
+					}
 					frappe.call({
 						method: SFP_API + '.sfp_create_fee',
-						args: {
-							program_enrollment: pe,
-							fee_structure: fs,
-							fees_category: row.fees_category,
-							due_date: values.due_date,
-							amount: values.amount,
-							description:
-								(values.description && values.description.trim()) ||
-								row.description ||
-								'',
-						},
+						args: args,
 						freeze: true,
 						callback(r) {
 							if (!r.exc) {
@@ -298,11 +315,11 @@ function open_add_fee_dialog(frm, student, $wrapper) {
 					callback(r3) {
 						const p = r3.message || {};
 						frappe.msgprint({
-							title: __('No Fee Structure for this period'),
+							title: __('No Fee Structure for this program and year'),
 							message: __(
-								'There is no <b>submitted</b> Fee Structure for the same program and academic period as this enrollment:<br><br>' +
-									'<b>Program:</b> {0}<br><b>Academic Year:</b> {1}<br><b>Academic Term:</b> {2}<br><br>' +
-									'Create or submit a Fee Structure with exactly these values, or correct the Program Enrollment (year/term) if they are wrong.',
+								'There is no <b>submitted</b> Fee Structure for the same <b>program</b> and <b>academic year</b> as this enrollment (we do not require academic term on the Fee Structure).<br><br>' +
+									'<b>Program:</b> {0}<br><b>Academic Year:</b> {1}<br><b>Academic Term (enrollment):</b> {2}<br><br>' +
+									'Create or submit a Fee Structure with the same program and year, or fix the Program Enrollment if needed.',
 								[p.program || '—', p.academic_year || '—', p.academic_term || '—']
 							),
 						});
@@ -315,8 +332,9 @@ function open_add_fee_dialog(frm, student, $wrapper) {
 				d.set_value('fee_component', '');
 				d.set_df_property('fee_component', 'options', '');
 				componentRows = [];
+				siblingDefaults = { fee_structure: null, fee_schedule: null };
 				if (!pe) {
-					pe_fs_filters = { name: '' };
+					pe_fs_filters = null;
 					if (then) then();
 					return;
 				}
@@ -329,7 +347,6 @@ function open_add_fee_dialog(frm, student, $wrapper) {
 							pe_fs_filters = {
 								program: r.message.program,
 								academic_year: r.message.academic_year,
-								academic_term: r.message.academic_term,
 								docstatus: 1,
 							};
 						}
@@ -340,8 +357,30 @@ function open_add_fee_dialog(frm, student, $wrapper) {
 								const fss = rfs.message || [];
 								if (!fss.length) {
 									warn_no_fee_structure(pe);
+									if (then) then();
+									return;
 								}
-								if (then) then();
+								frappe.call({
+									method: SFP_API + '.sfp_get_fee_defaults_from_sibling_fees',
+									args: { program_enrollment: pe },
+									callback(rdef) {
+										const defMsg = rdef.message || {};
+										const defFs = defMsg.fee_structure;
+										const defSched = defMsg.fee_schedule;
+										const names = fss.map(function (x) {
+											return x.name;
+										});
+										if (defFs && names.indexOf(defFs) !== -1) {
+											siblingDefaults = {
+												fee_structure: defFs,
+												fee_schedule: defSched || null,
+											};
+											d.set_value('fee_structure', defFs);
+											load_components_for_structure(defFs);
+										}
+										if (then) then();
+									},
+								});
 							},
 						});
 					}
