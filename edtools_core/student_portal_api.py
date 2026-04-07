@@ -231,23 +231,39 @@ def _get_current_enrollment_edtools(student_name):
 		return None
 
 
-def _get_student_groups_edtools(student_name, program_name):
-	"""Lista de grupos del estudiante en el programa. Formato [{ label: "Nombre Grupo" }, ...]."""
-	if not program_name:
+def _get_student_groups_edtools(student_name, program_name=None, academic_year=None):
+	"""Lista de grupos del estudiante. Formato [{ label: "Nombre Grupo" }, ...].
+
+	1) Mismo program que el Program Enrollment actual.
+	2) Si no hay filas: mismo academic_year que el enrollment (desajuste PE vs SG.program).
+	3) Si sigue vacío: todos los grupos habilitados donde el estudiante es miembro (último recurso).
+	"""
+	if not student_name:
 		return []
 	try:
-		# Student Group Student tiene parent = Student Group name; Student Group tiene program
 		sgs = frappe.qb.DocType("Student Group Student")
 		sg = frappe.qb.DocType("Student Group")
-		rows = (
-			frappe.qb.from_(sg)
-			.inner_join(sgs)
-			.on(sg.name == sgs.parent)
-			.select(sg.name.as_("label"))
-			.where(sgs.student == student_name)
-			.where(sg.program == program_name)
-			.run(as_dict=True)
-		)
+
+		def _groups(extra_where):
+			q = (
+				frappe.qb.from_(sg)
+				.inner_join(sgs)
+				.on(sg.name == sgs.parent)
+				.select(sg.name.as_("label"))
+				.where(sgs.student == student_name)
+				.where(sg.disabled == 0)
+			)
+			for w in extra_where:
+				q = q.where(w)
+			return q.run(as_dict=True) or []
+
+		rows = []
+		if program_name:
+			rows = _groups([sg.program == program_name])
+		if not rows and academic_year:
+			rows = _groups([sg.academic_year == academic_year])
+		if not rows:
+			rows = _groups([])
 		return list(rows) if rows else []
 	except Exception:
 		return []
@@ -275,7 +291,9 @@ def get_student_info():
 	if current_program:
 		student_info["current_program"] = current_program
 		student_info["student_groups"] = _get_student_groups_edtools(
-			student_info["name"], current_program.get("program")
+			student_info["name"],
+			current_program.get("program"),
+			current_program.get("academic_year"),
 		) or []
 	# Enriquecer con datos del User: Edit Profile guarda en User (mobile_no, etc.), el modal lee Student
 	user_id = student_info.get("user")
@@ -625,7 +643,11 @@ def _get_fee_description(fee_name):
 
 @frappe.whitelist()
 def get_course_schedule_for_student(program_name=None, student_groups=None):
-	"""Compat con Student Portal Vue (education develop). Education v15 puede no tenerlo."""
+	"""Compat con Student Portal Vue (education develop). Education v15 puede no tenerlo.
+
+	Las clases se definen por Student Group; no exigir coincidencia con program del PE para evitar
+	cronogramas vacíos cuando Course Schedule.program difiere del Program Enrollment.program.
+	"""
 	try:
 		# Parámetros pueden venir como string (JSON) desde el request
 		if isinstance(student_groups, str):
@@ -633,8 +655,6 @@ def get_course_schedule_for_student(program_name=None, student_groups=None):
 				student_groups = json.loads(student_groups) if student_groups else []
 			except Exception:
 				student_groups = []
-		if not program_name or not student_groups:
-			return []
 
 		def _label(sg):
 			if sg is None:
@@ -654,23 +674,42 @@ def get_course_schedule_for_student(program_name=None, student_groups=None):
 			"color",  # v15; si existe class_schedule_color lo usamos después
 		]
 
+		# Preferir coincidencia por programa cuando los datos son coherentes; si no hay filas, todo el grupo.
 		schedule = []
-		for group_name in group_names:
-			try:
-				rows = frappe.get_all(
+		try:
+			if program_name:
+				schedule = frappe.get_all(
 					"Course Schedule",
-					filters={"program": program_name, "student_group": group_name},
+					filters={"student_group": ["in", group_names], "program": program_name},
 					fields=fields,
 					ignore_permissions=True,
-				)
-				schedule.extend(rows or [])
-			except Exception as group_err:
-				frappe.log_error(
-					title="get_course_schedule_for_student (per group)",
-					message=frappe.get_traceback() + "\n\nGroup: " + str(group_name),
-				)
-		# Ordenar por fecha
-		schedule.sort(key=lambda r: (r.get("schedule_date") or "", r.get("from_time") or ""))
+					order_by="schedule_date asc, from_time asc",
+				) or []
+			if not schedule:
+				schedule = frappe.get_all(
+					"Course Schedule",
+					filters={"student_group": ["in", group_names]},
+					fields=fields,
+					ignore_permissions=True,
+					order_by="schedule_date asc, from_time asc",
+				) or []
+		except Exception:
+			frappe.log_error(
+				title="get_course_schedule_for_student (query)",
+				message=frappe.get_traceback(),
+			)
+			schedule = []
+
+		seen = set()
+		deduped = []
+		for row in schedule:
+			n = row.get("name")
+			if n and n in seen:
+				continue
+			if n:
+				seen.add(n)
+			deduped.append(row)
+		schedule = deduped
 
 		# Enriquecer con datos de Room: room_name, room_number, meeting_url (si existe)
 		room_names = list({r.get("room") for r in schedule if r.get("room")})

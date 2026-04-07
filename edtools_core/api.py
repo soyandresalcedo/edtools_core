@@ -241,28 +241,44 @@ def get_course_list_based_on_program(program_name):
 @frappe.whitelist()
 def get_course_schedule_for_student(program_name, student_groups):
     # student_groups viene como lista de dicts [{'label': 'GRUPO-A'}, ...]
-    # Convertimos a lista simple si es necesario
+    # Alineado con student_portal_api: priorizar student_group; program opcional.
     if isinstance(student_groups, str):
-        student_groups = json.loads(student_groups)
+        student_groups = json.loads(student_groups) if student_groups else []
 
-    group_names = [sg.get("label") for sg in student_groups]
+    group_names = [sg.get("label") for sg in (student_groups or []) if sg and sg.get("label")]
+    if not group_names:
+        return []
 
-    schedule = frappe.db.get_list(
-        "Course Schedule",
-        fields=[
-            "schedule_date",
-            "room",
-            "class_schedule_color",
-            "course",
-            "from_time",
-            "to_time",
-            "instructor",
-            "title",
-            "name",
-        ],
-        filters={"program": program_name, "student_group": ["in", group_names]},
-        order_by="schedule_date asc",
-    )
+    fields = [
+        "schedule_date",
+        "room",
+        "course",
+        "from_time",
+        "to_time",
+        "instructor",
+        "title",
+        "name",
+        "color",
+    ]
+    schedule = []
+    if program_name:
+        schedule = frappe.get_all(
+            "Course Schedule",
+            fields=fields,
+            filters={"program": program_name, "student_group": ["in", group_names]},
+            order_by="schedule_date asc",
+            ignore_permissions=True,
+        )
+    if not schedule:
+        schedule = frappe.get_all(
+            "Course Schedule",
+            fields=fields,
+            filters={"student_group": ["in", group_names]},
+            order_by="schedule_date asc",
+            ignore_permissions=True,
+        )
+    for row in schedule:
+        row["class_schedule_color"] = row.get("class_schedule_color") or row.get("color")
     return schedule
 
 @frappe.whitelist()
