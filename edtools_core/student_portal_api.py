@@ -234,9 +234,12 @@ def _get_current_enrollment_edtools(student_name):
 def _get_student_groups_edtools(student_name, program_name=None, academic_year=None):
 	"""Lista de grupos del estudiante. Formato [{ label: "Nombre Grupo" }, ...].
 
-	1) Mismo program que el Program Enrollment actual.
-	2) Si no hay filas: mismo academic_year que el enrollment (desajuste PE vs SG.program).
-	3) Si sigue vacío: todos los grupos habilitados donde el estudiante es miembro (último recurso).
+	UNIÓN (deduplicada), no "primera estrategia con filas": el PE suele tener un solo Program
+	(p. ej. AS), pero el alumno puede estar en Student Groups cuyo campo Program es otro (p. ej. BS)
+	o en grupos por curso donde antes solo devolvíamos grupos AS y el cronograma quedaba vacío.
+
+	Se combinan, en orden: grupos con mismo program que el PE, mismo academic_year, y todos los
+	grupos habilitados donde es miembro (para incluir horarios ligados a cualquier sección).
 	"""
 	if not student_name:
 		return []
@@ -257,14 +260,22 @@ def _get_student_groups_edtools(student_name, program_name=None, academic_year=N
 				q = q.where(w)
 			return q.run(as_dict=True) or []
 
-		rows = []
+		merged = []
+		seen = set()
+
+		def _add(rlist):
+			for r in rlist or []:
+				lab = r.get("label")
+				if lab and lab not in seen:
+					seen.add(lab)
+					merged.append({"label": lab})
+
 		if program_name:
-			rows = _groups([sg.program == program_name])
-		if not rows and academic_year:
-			rows = _groups([sg.academic_year == academic_year])
-		if not rows:
-			rows = _groups([])
-		return list(rows) if rows else []
+			_add(_groups([sg.program == program_name]))
+		if academic_year:
+			_add(_groups([sg.academic_year == academic_year]))
+		_add(_groups([]))
+		return merged
 	except Exception:
 		return []
 
