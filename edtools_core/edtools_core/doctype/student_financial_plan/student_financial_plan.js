@@ -88,10 +88,9 @@ function fmt_date(d) {
 	return frappe.datetime.str_to_user(d);
 }
 
-function fee_is_paid_row(f) {
-	if (f.edtools_manual_paid) return true;
-	if (_cint(f.docstatus) === 1 && _flt(f.outstanding_amount) <= 0) return true;
-	return false;
+/** Submitted Fees with zero outstanding (fully paid); drafts or partial pay = unchecked */
+function fee_is_fully_paid(f) {
+	return _cint(f.docstatus) === 1 && _flt(f.outstanding_amount) <= 0;
 }
 
 function render_financial_plan(frm, data) {
@@ -99,19 +98,18 @@ function render_financial_plan(frm, data) {
 	$wrapper.empty();
 
 	const students = data.students || {};
-	const hasManualPaid = !!data.has_manual_paid_field;
 	const student_ids = Object.keys(students);
 	if (!student_ids.length) {
 		$wrapper.html('<p class="text-muted">' + __('No results.') + '</p>');
 		return;
 	}
 
-	let html = `<div class="sfp-container" data-has-manual-paid="${hasManualPaid ? 1 : 0}">`;
+	let html = `<div class="sfp-container">`;
 	html += render_financial_legend();
 
 	student_ids.forEach(function (sid, idx) {
 		const s = students[sid];
-		html += render_financial_student_block(sid, s, student_ids.length > 1, idx, hasManualPaid);
+		html += render_financial_student_block(sid, s, student_ids.length > 1, idx);
 	});
 
 	html += `</div>`;
@@ -125,7 +123,7 @@ function render_financial_plan(frm, data) {
 	});
 
 	bind_sfp_fee_links($wrapper);
-	bind_sfp_actions(frm, $wrapper, hasManualPaid);
+	bind_sfp_actions(frm, $wrapper);
 }
 
 function bind_sfp_fee_links($wrapper) {
@@ -141,7 +139,7 @@ function bind_sfp_fee_links($wrapper) {
 	});
 }
 
-function bind_sfp_actions(frm, $wrapper, hasManualPaid) {
+function bind_sfp_actions(frm, $wrapper) {
 	$wrapper.find('.sfp-btn-add-fee').on('click', function () {
 		const student = $(this).data('student');
 		open_add_fee_dialog(frm, student, $wrapper);
@@ -169,22 +167,6 @@ function bind_sfp_actions(frm, $wrapper, hasManualPaid) {
 		});
 	});
 
-	if (hasManualPaid) {
-		$wrapper.find('.sfp-paid-check').on('change', function () {
-			const name = $(this).data('fee');
-			const val = $(this).is(':checked') ? 1 : 0;
-			frappe.call({
-				method: SFP_API + '.sfp_set_manual_paid',
-				args: { fee_name: name, value: val },
-				callback(r) {
-					if (!r.exc) {
-						frappe.show_alert({ message: __('Saved'), indicator: 'green' });
-						frm.trigger('generate_financial_plan');
-					}
-				},
-			});
-		});
-	}
 }
 
 /** Nombre imposible en BD: evita filtro name="" que muestra "Filters applied for Name = empty". */
@@ -521,7 +503,7 @@ function render_financial_legend() {
 	</div>`;
 }
 
-function render_financial_student_block(sid, s, collapsible, idx, hasManualPaid) {
+function render_financial_student_block(sid, s, collapsible, idx) {
 	const kpis = s.kpis || {};
 	const warning = s.warning || '';
 	const open = idx === 0 ? '' : 'style="display:none"';
@@ -578,16 +560,12 @@ function render_financial_student_block(sid, s, collapsible, idx, hasManualPaid)
 				? `<a href="#" class="sfp-link-fs">${frappe.utils.escape_html(f.fee_schedule)}</a>`
 				: '';
 			const desc = f.components_description || '';
-			const paid = fee_is_paid_row(f);
-			let paidCell = '';
-			if (hasManualPaid) {
-				const ch = f.edtools_manual_paid ? ' checked' : '';
-				paidCell = `<input type="checkbox" class="sfp-paid-check" data-fee="${frappe.utils.escape_html(
-					f.name
-				)}"${ch} />`;
-			} else {
-				paidCell = paid ? `<span class="indicator-pill green">${__('Yes')}</span>` : `<span class="indicator-pill orange">${__('No')}</span>`;
-			}
+			const paid = fee_is_fully_paid(f);
+			const paidCell = `<input type="checkbox" class="sfp-paid-check" disabled${
+				paid ? ' checked' : ''
+			} title="${frappe.utils.escape_html(
+				__('Checked when the fee is submitted and fully paid (no outstanding balance).')
+			)}" />`;
 			const canEdit = _cint(f.docstatus) === 0;
 			let actions = '';
 			if (canEdit) {
@@ -649,5 +627,6 @@ function render_financial_styles() {
 .sfp-table td.sfp-num { text-align: right; }
 .sfp-badge { font-size: 12px; }
 .sfp-paid-cell { text-align: center; vertical-align: middle; }
+.sfp-paid-check:disabled { cursor: default; opacity: 1; }
 </style>`;
 }

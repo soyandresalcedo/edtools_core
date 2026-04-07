@@ -20,11 +20,8 @@ def _empty_kpis():
 
 
 def _is_fee_paid_row(f: dict) -> bool:
-	if f.get("edtools_manual_paid"):
-		return True
-	if int(f.get("docstatus") or 0) == 1 and flt(f.get("outstanding_amount")) <= 0:
-		return True
-	return False
+	"""Fully paid in accounting terms: submitted and no outstanding balance."""
+	return int(f.get("docstatus") or 0) == 1 and flt(f.get("outstanding_amount")) <= 0
 
 
 class StudentFinancialPlan(Document):
@@ -162,10 +159,7 @@ def get_financial_plan_data(students: list | str | None = None) -> dict:
 			},
 		}
 
-	return {
-		"students": results,
-		"has_manual_paid_field": bool(frappe.db.has_column("Fees", "edtools_manual_paid")),
-	}
+	return {"students": results}
 
 
 @frappe.whitelist()
