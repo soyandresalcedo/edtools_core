@@ -35,6 +35,22 @@ def validate_student_status(doc, method=None):
 		# No student specified, skip validation (will fail on required field check)
 		return
 
+	if not frappe.db.has_column("tabStudent", "student_status"):
+		# Sin campos de edtools_core.install: solo validar enabled
+		student = frappe.db.get_value(
+			"Student", doc.student, ["enabled", "student_name"], as_dict=True
+		)
+		if not student:
+			frappe.throw(_("Student {0} not found").format(frappe.bold(doc.student)))
+		if not student.enabled:
+			frappe.throw(
+				_("Cannot enroll {0}. Student account is disabled.").format(
+					frappe.bold(student.student_name or doc.student)
+				),
+				title=_("Student Account Disabled"),
+			)
+		return
+
 	# Fetch student data in a single database call for efficiency
 	student = frappe.db.get_value(
 		"Student", doc.student, ["enabled", "student_status", "student_name"], as_dict=True

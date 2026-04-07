@@ -25,6 +25,10 @@ def track_status_change(doc, method=None):
 		This function is called automatically via doc_events hooks in hooks.py:
 		- Student: before_save event
 	"""
+	# Campos creados en install.create_student_status_fields; sitios sin migración no los tienen.
+	if not frappe.db.has_column("tabStudent", "student_status"):
+		return
+
 	if doc.is_new():
 		frappe.flags.student_old_status_before_save = None
 		# New student document
