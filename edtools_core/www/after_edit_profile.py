@@ -3,8 +3,8 @@
 # Frappe busca el .py con guiones reemplazados por _ (after_edit_profile.py).
 
 import frappe
-from frappe.website.utils import get_home_page
-from frappe.utils import get_url
+
+from edtools_core.redirect_utils import get_role_based_redirect_url
 
 no_cache = 1
 
@@ -12,7 +12,4 @@ no_cache = 1
 def get_context(context):
 	if frappe.session.user == "Guest":
 		frappe.redirect("/login")
-	# Estudiantes y otros con role_home_page van a su home; el resto a /me
-	home = get_home_page()
-	redirect_to = get_url("/" + home.strip("/")) if home else get_url("/me")
-	frappe.redirect(redirect_to)
+	frappe.redirect(get_role_based_redirect_url())
