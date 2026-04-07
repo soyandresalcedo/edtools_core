@@ -26,7 +26,7 @@ def resolve(path):
 	# Normalizar: quitar barras al inicio/final por si el path viene con formato distinto
 	path_normalized = (path or "").strip("/ ")
 	if path_normalized in {"me", "profile"}:
-		return "me-redirect"
+		return "me_redirect"
 	if path_normalized == "student-portal" or path_normalized.startswith("student-portal/"):
 		return "student-portal"
 	from frappe.website.path_resolver import resolve_path

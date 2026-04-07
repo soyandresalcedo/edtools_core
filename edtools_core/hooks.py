@@ -58,6 +58,12 @@ role_home_page = {
 	"Student": ["student-portal"],
 }
 
+# /me y /profile no deben renderizar página de cuenta; redirigen por rol.
+website_route_rules = [
+	{"from_route": "/me", "to_route": "me_redirect"},
+	{"from_route": "/profile", "to_route": "me_redirect"},
+]
+
 # Resolver: /student-portal y /student-portal/schedule (etc.) sirven el mismo HTML para que F5 no dé 404
 website_path_resolver = ["edtools_core.website_resolver.resolve"]
 
