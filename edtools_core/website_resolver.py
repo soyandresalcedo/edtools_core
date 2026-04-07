@@ -19,12 +19,14 @@ def clear_student_portal_404_cache():
 
 
 def resolve(path):
-	"""Para student-portal y subrutas (schedule, grades, fees, etc.) devolver endpoint 'student-portal'."""
+	"""Resuelve rutas custom del portal y reemplaza /me por redirección controlada."""
 	if not path:
 		from frappe.website.path_resolver import resolve_path
 		return resolve_path(path)
 	# Normalizar: quitar barras al inicio/final por si el path viene con formato distinto
 	path_normalized = (path or "").strip("/ ")
+	if path_normalized in {"me", "profile"}:
+		return "me-redirect"
 	if path_normalized == "student-portal" or path_normalized.startswith("student-portal/"):
 		return "student-portal"
 	from frappe.website.path_resolver import resolve_path
