@@ -45,15 +45,47 @@ def set_payment_date_for_print(doc, method=None, print_settings=None, **kwargs):
 		doc.payment_date = None
 
 
-def ensure_income_account_for_fee_schedule_sales_invoice(doc, method=None):
-	"""Completa income_account en Sales Invoice generada desde Fee Schedule.
+def _is_valid_sales_invoice_income_account(company: str, account: str | None) -> bool:
+	"""Cuenta de ingreso hoja (no grupo), misma compañía, tipo Income Account."""
+	if not account or not company:
+		return False
+	row = frappe.db.get_value(
+		"Account",
+		account,
+		["company", "is_group", "disabled", "account_type"],
+		as_dict=True,
+	)
+	if not row:
+		return False
+	if row.company != company or row.is_group or row.disabled:
+		return False
+	return row.account_type == "Income Account"
 
-	Evita error de validación en ERPNext cuando los ítems de Fee Component no
-	tienen Item Default configurado para la compañía.
+
+def _first_ledger_income_account(company: str) -> str | None:
+	return frappe.db.get_value(
+		"Account",
+		{
+			"company": company,
+			"account_type": "Income Account",
+			"is_group": 0,
+			"disabled": 0,
+		},
+		"name",
+	)
+
+
+def ensure_income_account_for_fee_schedule_sales_invoice(doc, method=None):
+	"""Completa o corrige income_account en Sales Invoice desde Fee Schedule.
+
+	- Si falta cuenta: rellena desde Item Default / Fee Structure / primera Income hoja.
+	- Si la cuenta es inválida (grupo, otra compañía, no Income): la sustituye.
+	  Ej.: Fee Category mal configurada con "1 - Activo - Iditek" (grupo Activo).
 	"""
 	if not doc or doc.doctype != "Sales Invoice" or not doc.get("fee_schedule"):
 		return
 
+	company = doc.company
 	fee_structure = frappe.db.get_value("Fee Schedule", doc.fee_schedule, "fee_structure")
 	fee_structure_income = (
 		frappe.db.get_value("Fee Structure", fee_structure, "income_account")
@@ -62,27 +94,25 @@ def ensure_income_account_for_fee_schedule_sales_invoice(doc, method=None):
 	)
 
 	for row in doc.get("items") or []:
-		if row.get("income_account"):
+		current = row.get("income_account")
+
+		if _is_valid_sales_invoice_income_account(company, current):
 			continue
 
 		item_default_income = frappe.db.get_value(
 			"Item Default",
-			{"parent": row.get("item_code"), "company": doc.company},
+			{"parent": row.get("item_code"), "company": company},
 			"income_account",
 		)
 
-		fallback_income = item_default_income or fee_structure_income
+		fallback_income = None
+		for candidate in (item_default_income, fee_structure_income):
+			if _is_valid_sales_invoice_income_account(company, candidate):
+				fallback_income = candidate
+				break
+
 		if not fallback_income:
-			fallback_income = frappe.db.get_value(
-				"Account",
-				{
-					"company": doc.company,
-					"account_type": "Income Account",
-					"is_group": 0,
-					"disabled": 0,
-				},
-				"name",
-			)
+			fallback_income = _first_ledger_income_account(company)
 
 		if fallback_income:
 			row.income_account = fallback_income

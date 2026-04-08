@@ -36,6 +36,7 @@ web_include_js = "/assets/edtools_core/js/edtools.js"
 doctype_js = {
 	"Student": "public/js/student.js",
 	"Student Applicant": "public/js/student_applicant.js",
+	"Fee Schedule": "public/js/fee_schedule_custom.js",
 	"Fee Structure": "public/js/fee_structure_custom.js",
 	"Student Group": "public/js/student_group_custom.js",
 	"Program Enrollment": "public/js/program_enrollment.js",
