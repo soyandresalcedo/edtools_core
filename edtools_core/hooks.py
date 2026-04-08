@@ -166,6 +166,9 @@ doc_events = {
 	"Fees": {
 		"before_save": "edtools_core.fees_events.update_components_description",
 		"before_print": "edtools_core.fees_events.set_payment_date_for_print"
+	},
+	"Sales Invoice": {
+		"before_validate": "edtools_core.fees_events.ensure_income_account_for_fee_schedule_sales_invoice"
 	}
 }
 

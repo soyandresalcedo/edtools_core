@@ -43,3 +43,46 @@ def set_payment_date_for_print(doc, method=None, print_settings=None, **kwargs):
 			doc.payment_date = None
 	except Exception:
 		doc.payment_date = None
+
+
+def ensure_income_account_for_fee_schedule_sales_invoice(doc, method=None):
+	"""Completa income_account en Sales Invoice generada desde Fee Schedule.
+
+	Evita error de validación en ERPNext cuando los ítems de Fee Component no
+	tienen Item Default configurado para la compañía.
+	"""
+	if not doc or doc.doctype != "Sales Invoice" or not doc.get("fee_schedule"):
+		return
+
+	fee_structure = frappe.db.get_value("Fee Schedule", doc.fee_schedule, "fee_structure")
+	fee_structure_income = (
+		frappe.db.get_value("Fee Structure", fee_structure, "income_account")
+		if fee_structure
+		else None
+	)
+
+	for row in doc.get("items") or []:
+		if row.get("income_account"):
+			continue
+
+		item_default_income = frappe.db.get_value(
+			"Item Default",
+			{"parent": row.get("item_code"), "company": doc.company},
+			"income_account",
+		)
+
+		fallback_income = item_default_income or fee_structure_income
+		if not fallback_income:
+			fallback_income = frappe.db.get_value(
+				"Account",
+				{
+					"company": doc.company,
+					"account_type": "Income Account",
+					"is_group": 0,
+					"disabled": 0,
+				},
+				"name",
+			)
+
+		if fallback_income:
+			row.income_account = fallback_income
