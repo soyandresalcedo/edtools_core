@@ -132,6 +132,7 @@ standard_portal_menu_items = [
 # Override standard doctype classes (permite mismo curso en distintos periodos)
 override_doctype_class = {
 	"Course Enrollment": "edtools_core.overrides.course_enrollment.CourseEnrollment",
+	"Fee Schedule": "edtools_core.overrides.fee_schedule.FeeSchedule",
 	"Program Enrollment": "edtools_core.overrides.program_enrollment.ProgramEnrollment",
 	"Program Enrollment Tool": "edtools_core.overrides.program_enrollment_tool.ProgramEnrollmentTool",
 	"Student": "edtools_core.overrides.student.Student",
