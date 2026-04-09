@@ -510,36 +510,91 @@ def _get_invoices_from_fees(student):
 	return out
 
 
+def _build_installment_labels(raw_list, from_sales_invoice):
+	"""Pre-compute installment labels (e.g. 'Cuota 3/14') for all fees sharing a fee_schedule.
+	Groups by fee_schedule in a single pass to avoid N+1 queries."""
+	if from_sales_invoice:
+		return {}
+	schedules = {}
+	for si in raw_list:
+		fs = si.get("fee_schedule")
+		if fs:
+			schedules.setdefault(fs, [])
+	if not schedules:
+		return {}
+	for fs_name in list(schedules.keys()):
+		try:
+			siblings = frappe.db.get_all(
+				"Fees",
+				filters={"fee_schedule": fs_name, "docstatus": 1},
+				fields=["name"],
+				order_by="due_date asc, name asc",
+			)
+			schedules[fs_name] = [s["name"] for s in siblings]
+		except Exception:
+			schedules[fs_name] = []
+	labels = {}
+	for si in raw_list:
+		fs = si.get("fee_schedule")
+		name = si.get("name")
+		if not fs or fs not in schedules:
+			continue
+		sibs = schedules[fs]
+		if len(sibs) <= 1:
+			continue
+		try:
+			pos = sibs.index(name) + 1
+		except ValueError:
+			continue
+		labels[name] = f"Cuota {pos}/{len(sibs)}"
+	return labels
+
+
 @frappe.whitelist()
 def get_student_invoices(student):
 	"""Compat con Student Portal Vue (Fees). Education v15 puede no tenerlo.
 	Devuelve facturas (Sales Invoice o Fees) del estudiante con programa, estado, fechas y monto."""
+	from frappe.utils import flt
+	empty = {"invoices": [], "print_format": "Standard", "print_format_fees": "Standard",
+			 "total_outstanding": 0, "total_paid": 0, "currency_symbol": "$"}
 	if not student:
-		return {"invoices": [], "print_format": "Standard", "print_format_fees": "Standard"}
+		return empty
 	my_student = _get_current_user_student_name()
 	if not my_student or my_student != student:
-		return {"invoices": [], "print_format": "Standard", "print_format_fees": "Standard"}
-	# Prefer Sales Invoice si tiene campo student; si falla o no existe, usar Fees
+		return empty
 	raw_list = _get_invoices_from_sales_invoice(student)
 	from_sales_invoice = raw_list is not None
 	if raw_list is None:
 		raw_list = _get_invoices_from_fees(student)
+
+	installment_labels = _build_installment_labels(raw_list, from_sales_invoice)
+
+	total_outstanding = 0
+	total_paid = 0
 	student_sales_invoices = []
 	for si in raw_list:
+		outstanding = flt(si.get("outstanding_amount") or 0)
+		grand_total = flt(si.get("grand_total") or 0)
+		symbol = _get_currency_symbol(si.get("currency") or "USD")
+
 		row = {
 			"status": si.get("status", ""),
 			"program": _get_program_from_fee_schedule(si.get("fee_schedule")),
 			"invoice": si.get("name"),
 			"doctype": "Sales Invoice" if from_sales_invoice else "Fees",
+			"outstanding_amount": outstanding,
+			"grand_total": grand_total,
+			"currency_symbol": symbol,
+			"fee_schedule": si.get("fee_schedule"),
+			"installment_label": installment_labels.get(si.get("name")),
 		}
 		if not from_sales_invoice:
 			row["description"] = _get_fee_description(si.get("name"))
 		else:
 			row["description"] = ""
-		symbol = _get_currency_symbol(si.get("currency") or "USD")
-		row["amount"] = symbol + " " + str(si.get("outstanding_amount") or 0)
+		row["amount"] = symbol + " " + str(outstanding)
 		if si.get("status") in ("Paid", "Submitted"):
-			row["amount"] = symbol + " " + str(si.get("grand_total") or 0)
+			row["amount"] = symbol + " " + str(grand_total)
 			row["payment_date"] = (
 				_get_posting_date_from_payment_entry(si.get("name"))
 				if from_sales_invoice
@@ -549,13 +604,20 @@ def get_student_invoices(student):
 		else:
 			row["due_date"] = si.get("due_date") or "-"
 			row["payment_date"] = "-"
+		total_outstanding += outstanding
+		total_paid += (grand_total - outstanding)
 		student_sales_invoices.append(row)
+
+	first_currency = (raw_list[0].get("currency") or "USD") if raw_list else "USD"
 	print_format_si = _get_fees_print_format() or "Standard"
 	print_format_fees = _get_print_format_for_fees() or "Standard"
 	return {
 		"invoices": student_sales_invoices,
 		"print_format": print_format_si,
 		"print_format_fees": print_format_fees,
+		"total_outstanding": round(total_outstanding, 2),
+		"total_paid": round(total_paid, 2),
+		"currency_symbol": _get_currency_symbol(first_currency),
 	}
 
 
