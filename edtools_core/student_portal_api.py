@@ -40,8 +40,7 @@ def patch_education_api():
 			edu_api.get_student_programs = get_student_programs
 		if not hasattr(edu_api, "get_student_grades"):
 			edu_api.get_student_grades = get_student_grades
-		if not hasattr(edu_api, "get_student_invoices"):
-			edu_api.get_student_invoices = get_student_invoices
+		edu_api.get_student_invoices = get_student_invoices
 		# get_student_attendance: siempre usar nuestra versión (validación + ignore_permissions)
 		edu_api.get_student_attendance = get_student_attendance
 		if not hasattr(edu_api, "get_student_curriculum"):
