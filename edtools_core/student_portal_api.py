@@ -553,7 +553,8 @@ def _build_installment_labels(raw_list, from_sales_invoice):
 @frappe.whitelist()
 def get_student_invoices(student):
 	"""Compat con Student Portal Vue (Fees). Education v15 puede no tenerlo.
-	Devuelve facturas (Sales Invoice o Fees) del estudiante con programa, estado, fechas y monto."""
+	Devuelve facturas (Sales Invoice y/o Fees) del estudiante con programa, estado, fechas y monto.
+	Combina ambas fuentes para evitar que una lista vacía de SI oculte Fees existentes."""
 	from frappe.utils import flt
 	empty = {"invoices": [], "print_format": "Standard", "print_format_fees": "Standard",
 			 "total_outstanding": 0, "total_paid": 0, "currency_symbol": "$"}
@@ -562,17 +563,25 @@ def get_student_invoices(student):
 	my_student = _get_current_user_student_name()
 	if not my_student or my_student != student:
 		return empty
-	raw_list = _get_invoices_from_sales_invoice(student)
-	from_sales_invoice = raw_list is not None
-	if raw_list is None:
-		raw_list = _get_invoices_from_fees(student)
 
-	installment_labels = _build_installment_labels(raw_list, from_sales_invoice)
+	si_list = _get_invoices_from_sales_invoice(student) or []
+	fees_list = _get_invoices_from_fees(student) or []
+
+	tagged = []
+	for si in si_list:
+		si["_source"] = "Sales Invoice"
+		tagged.append(si)
+	for fee in fees_list:
+		fee["_source"] = "Fees"
+		tagged.append(fee)
+
+	installment_labels = _build_installment_labels(fees_list, False) if fees_list else {}
 
 	total_outstanding = 0
 	total_paid = 0
 	student_sales_invoices = []
-	for si in raw_list:
+	for si in tagged:
+		is_si = si["_source"] == "Sales Invoice"
 		outstanding = flt(si.get("outstanding_amount") or 0)
 		grand_total = flt(si.get("grand_total") or 0)
 		symbol = _get_currency_symbol(si.get("currency") or "USD")
@@ -581,23 +590,23 @@ def get_student_invoices(student):
 			"status": si.get("status", ""),
 			"program": _get_program_from_fee_schedule(si.get("fee_schedule")),
 			"invoice": si.get("name"),
-			"doctype": "Sales Invoice" if from_sales_invoice else "Fees",
+			"doctype": "Sales Invoice" if is_si else "Fees",
 			"outstanding_amount": outstanding,
 			"grand_total": grand_total,
 			"currency_symbol": symbol,
 			"fee_schedule": si.get("fee_schedule"),
 			"installment_label": installment_labels.get(si.get("name")),
 		}
-		if not from_sales_invoice:
-			row["description"] = _get_fee_description(si.get("name"))
-		else:
+		if is_si:
 			row["description"] = ""
+		else:
+			row["description"] = _get_fee_description(si.get("name"))
 		row["amount"] = symbol + " " + str(outstanding)
 		if si.get("status") in ("Paid", "Submitted"):
 			row["amount"] = symbol + " " + str(grand_total)
 			row["payment_date"] = (
 				_get_posting_date_from_payment_entry(si.get("name"))
-				if from_sales_invoice
+				if is_si
 				else _get_posting_date_from_payment_entry_fees(si.get("name"))
 			)
 			row["due_date"] = "-"
@@ -608,7 +617,7 @@ def get_student_invoices(student):
 		total_paid += (grand_total - outstanding)
 		student_sales_invoices.append(row)
 
-	first_currency = (raw_list[0].get("currency") or "USD") if raw_list else "USD"
+	first_currency = (tagged[0].get("currency") or "USD") if tagged else "USD"
 	print_format_si = _get_fees_print_format() or "Standard"
 	print_format_fees = _get_print_format_for_fees() or "Standard"
 	return {
