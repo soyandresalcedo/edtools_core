@@ -279,6 +279,44 @@ def _get_student_groups_edtools(student_name, program_name=None, academic_year=N
 		return []
 
 
+def _get_student_groups_attendance_edtools(student_name, program_name=None, academic_year=None):
+	"""Grupos para el portal de Asistencia: solo Course, con al menos un Student Attendance enviado.
+	Orden alfabético. Lista vacía si no aplica (sin fallback a todos los grupos)."""
+	if not student_name:
+		return []
+	try:
+		candidates = _get_student_groups_edtools(student_name, program_name, academic_year) or []
+		candidate_names = [c.get("label") for c in candidates if c.get("label")]
+		if not candidate_names:
+			return []
+		course_groups = frappe.get_all(
+			"Student Group",
+			filters={
+				"name": ["in", candidate_names],
+				"group_based_on": "Course",
+				"disabled": 0,
+			},
+			pluck="name",
+		) or []
+		if not course_groups:
+			return []
+		rows = frappe.get_all(
+			"Student Attendance",
+			filters={
+				"student": student_name,
+				"docstatus": 1,
+				"student_group": ["in", course_groups],
+			},
+			fields=["student_group"],
+			ignore_permissions=True,
+		)
+		with_attendance = {r.get("student_group") for r in (rows or []) if r.get("student_group")}
+		sorted_names = sorted(with_attendance, key=lambda x: (x or "").lower())
+		return [{"label": n} for n in sorted_names]
+	except Exception:
+		return []
+
+
 @frappe.whitelist()
 def get_student_info():
 	"""Portal del estudiante: datos del estudiante + current_program + student_groups (siempre poblados)."""
@@ -305,6 +343,13 @@ def get_student_info():
 			current_program.get("program"),
 			current_program.get("academic_year"),
 		) or []
+		student_info["student_groups_attendance"] = _get_student_groups_attendance_edtools(
+			student_info["name"],
+			current_program.get("program"),
+			current_program.get("academic_year"),
+		) or []
+	else:
+		student_info["student_groups_attendance"] = []
 	# Enriquecer con datos del User: Edit Profile guarda en User (mobile_no, etc.), el modal lee Student
 	user_id = student_info.get("user")
 	if user_id and user_id == frappe.session.user:
