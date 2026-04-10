@@ -347,16 +347,27 @@ def stripe_webhook():
 	except Exception:
 		pass  # si falla el log, seguir para no ocultar el error real
 
+	import stripe
+
+	payload = b""
 	try:
-		payload = frappe.request.get_data(as_text=True)
+		# Cuerpo en bruto (bytes): Stripe firma el payload exacto; evitar as_text/decodificar distinto.
+		payload = frappe.request.get_data()
 		sig = frappe.get_request_header("Stripe-Signature")
 		secret = _get_stripe_webhook_secret()
 		if not secret:
 			frappe.log_error(title="Stripe webhook no secret", message="stripe_webhook_secret not configured")
 			frappe.local.response["http_status_code"] = 500
 			return "Webhook secret not configured"
+		if not sig:
+			frappe.log_error(
+				title="Stripe webhook missing Stripe-Signature",
+				message="Header Stripe-Signature ausente (proxy o cliente no es Stripe).",
+			)
+			frappe.db.commit()
+			frappe.local.response["http_status_code"] = 400
+			return "Missing Stripe-Signature"
 
-		import stripe
 		stripe.api_key = _get_stripe_secret_key()
 		event = stripe.Webhook.construct_event(payload, sig, secret)
 		# Ejecutar el resto como Administrator: el webhook llega como Guest y no tiene permiso para crear Payment Entry
@@ -366,8 +377,22 @@ def stripe_webhook():
 		frappe.db.commit()
 		frappe.local.response["http_status_code"] = 400
 		return "Invalid payload"
-	except Exception as e:
-		frappe.log_error(title="Stripe webhook signature error", message=frappe.get_traceback())
+	except stripe.error.SignatureVerificationError as e:
+		frappe.log_error(
+			title="Stripe webhook SignatureVerificationError",
+			message=(
+				f"{e!s}\n"
+				f"payload_bytes={len(payload)}\n"
+				"Cada URL de webhook en Stripe tiene su propio Signing secret (whsec_...). "
+				"En Railway/staging debe coincidir STRIPE_WEBHOOK_SECRET (o stripe_webhook_secret) "
+				"con el secret del endpoint que apunta a ESTE host (no uses el de producción u otro endpoint)."
+			),
+		)
+		frappe.db.commit()
+		frappe.local.response["http_status_code"] = 400
+		return "Invalid signature"
+	except Exception:
+		frappe.log_error(title="Stripe webhook unexpected before event", message=frappe.get_traceback())
 		frappe.db.commit()
 		frappe.local.response["http_status_code"] = 400
 		return "Invalid signature"
