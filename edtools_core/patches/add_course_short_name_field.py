@@ -34,11 +34,57 @@ def _derive_short_name(course_doc) -> str:
     return re.sub(r"\s+", " ", source).strip().upper()[:40]
 
 
+def _ensure_custom_field_properties(custom_field_name: str) -> None:
+    cf = frappe.get_doc("Custom Field", custom_field_name)
+    changed = False
+    if not cf.get("insert_after"):
+        cf.insert_after = "course_name"
+        changed = True
+    if not cf.get("in_standard_filter"):
+        cf.in_standard_filter = 1
+        changed = True
+    if not cf.get("in_list_view"):
+        cf.in_list_view = 1
+        changed = True
+    if changed:
+        cf.save(ignore_permissions=True)
+        frappe.db.commit()
+
+
+def _backfill_short_names() -> None:
+    if not frappe.get_meta("Course").has_field("short_name"):
+        return
+    courses = frappe.get_all("Course", fields=["name", "course_name", "short_name"], limit_page_length=0)
+    updates = 0
+    for row in courses:
+        if (row.get("short_name") or "").strip():
+            continue
+        doc = frappe.get_doc("Course", row.get("name"))
+        guessed = _derive_short_name(doc)
+        if guessed:
+            doc.short_name = guessed
+            doc.save(ignore_permissions=True)
+            updates += 1
+    if updates:
+        frappe.db.commit()
+
+
 def execute():
+    frappe.clear_cache(doctype="Course")
+    meta = frappe.get_meta("Course", cached=False)
+
     custom_field_name = frappe.db.exists(
         "Custom Field",
         {"dt": "Course", "fieldname": "short_name"},
     )
+
+    # Si el meta ya expone short_name (custom previo, otro patch, o versión de Education),
+    # no intentar insertar otro Custom Field: Frappe lanza "already exists in Course".
+    if meta.has_field("short_name"):
+        if custom_field_name:
+            _ensure_custom_field_properties(custom_field_name)
+        _backfill_short_names()
+        return
 
     if not custom_field_name:
         cf = frappe.get_doc(
@@ -60,34 +106,7 @@ def execute():
         cf.insert(ignore_permissions=True)
         frappe.db.commit()
     else:
-        cf = frappe.get_doc("Custom Field", custom_field_name)
-        changed = False
-        if not cf.get("insert_after"):
-            cf.insert_after = "course_name"
-            changed = True
-        if not cf.get("in_standard_filter"):
-            cf.in_standard_filter = 1
-            changed = True
-        if not cf.get("in_list_view"):
-            cf.in_list_view = 1
-            changed = True
-        if changed:
-            cf.save(ignore_permissions=True)
-            frappe.db.commit()
+        _ensure_custom_field_properties(custom_field_name)
 
-    # Backfill solo donde short_name esté vacío.
-    if frappe.get_meta("Course").has_field("short_name"):
-        courses = frappe.get_all("Course", fields=["name", "course_name", "short_name"], limit_page_length=0)
-        updates = 0
-        for row in courses:
-            if (row.get("short_name") or "").strip():
-                continue
-            doc = frappe.get_doc("Course", row.get("name"))
-            guessed = _derive_short_name(doc)
-            if guessed:
-                doc.short_name = guessed
-                doc.save(ignore_permissions=True)
-                updates += 1
-        if updates:
-            frappe.db.commit()
+    _backfill_short_names()
 
