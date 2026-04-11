@@ -1589,6 +1589,10 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
     """
     Calcula el plan financiero. Usa valores de la Fee Structure cuando existan;
     soporta componentes opcionales (ej. Certificado) como pagos adicionales.
+
+    Con y sin interés: inscripción (mes 0), traducción (mes 1 si hay monto), capital desde mes 2.
+    Sin interés: las N cuotas reparten solo ``val_capital``; TyE y graduación no se diluyen en las cuotas;
+    la graduación se suma a la última cuota (tipo Capital+Graduacion) como en el modo con interés.
     """
     from frappe.utils import getdate, add_months, flt, cint
     import json
@@ -1689,8 +1693,9 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
             current_date = add_months(current_date, 1)
 
     else:
-        # --- MODO SIN INTERÉS (estilo Excel): Traducción + Graduación + Capital en cuotas iguales ---
-        # Inscripción aparte; el resto dividido en N cuotas uniformes
+        # --- MODO SIN INTERÉS: misma forma de calendario que con interés ---
+        # Inscripción mes 0, TyE mes 1 (si aplica), capital desde mes 2 repartiendo SOLO val_capital
+        # en N cuotas; graduación NO se diluye: va en la última cuota (Capital+Graduacion).
         if val_inscripcion > 0:
             schedule.append({
                 "term": "Pago Inicial 1 (Inscripción)",
@@ -1699,39 +1704,51 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
                 "type": "Inscripcion",
             })
 
-        total_a_dividir = val_capital + val_traduccion + val_graduacion
-        first_cuota_month = 1  # Cuotas empiezan mes 1 (después de Inscripción en mes 0)
+        if val_traduccion > 0:
+            schedule.append({
+                "term": "Pago Inicial 2 (Traducción)",
+                "due_date": add_months(start_date, 1),
+                "amount": flt(val_traduccion, 2),
+                "type": "Traduccion",
+            })
 
-        # Opcionales: pago aparte en mes 1
+        first_capital_month = 2
         for cat, desc, amount in optional_items:
             if amount > 0:
                 schedule.append({
                     "term": desc or cat,
-                    "due_date": add_months(start_date, first_cuota_month),
+                    "due_date": add_months(start_date, first_capital_month),
                     "amount": flt(amount, 2),
                     "type": "Otros",
                     "fees_category": cat,
                     "description": desc or cat,
                 })
 
-        if total_a_dividir > 0 and capital_installments > 0:
-            cuota_uniforme = total_a_dividir / capital_installments
-            cuota_uniforme = flt(cuota_uniforme, 2)
-
-            # Ajuste por redondeo: última cuota absorbe diferencia
+        if val_capital > 0 and capital_installments > 0:
+            cuota_uniforme = flt(val_capital / capital_installments, 2)
             total_redondeado = cuota_uniforme * (capital_installments - 1)
-            ultima_cuota = flt(total_a_dividir - total_redondeado, 2)
+            ultima_cuota_base = flt(val_capital - total_redondeado, 2)
 
-            current_date = add_months(start_date, first_cuota_month)
+            current_date = add_months(start_date, first_capital_month)
             for i in range(1, capital_installments + 1):
                 is_last = (i == capital_installments)
-                amount = ultima_cuota if is_last else cuota_uniforme
+                amount = ultima_cuota_base if is_last else cuota_uniforme
+                term_name = f"Cuota {i}/{capital_installments}"
+                row_type = "Capital"
+                grad_amt = 0.0
+
+                if is_last and val_graduacion > 0:
+                    amount = flt(amount + val_graduacion, 2)
+                    row_type = "Capital+Graduacion"
+                    term_name += " + Graduación"
+                    grad_amt = flt(val_graduacion, 2)
+
                 schedule.append({
-                    "term": f"Cuota {i}/{capital_installments}",
+                    "term": term_name,
                     "due_date": current_date,
                     "amount": amount,
-                    "type": "Capital",
-                    "graduacion_amount": 0,
+                    "type": row_type,
+                    "graduacion_amount": grad_amt,
                 })
                 current_date = add_months(current_date, 1)
 
