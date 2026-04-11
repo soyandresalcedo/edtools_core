@@ -38,6 +38,61 @@ frappe.ui.form.on('Student Financial Plan', {
 		frm.get_field('results_html').$wrapper.html('');
 	},
 
+	student_group(frm) {
+		if (frm.doc.selection_mode !== 'Student Group') {
+			return;
+		}
+		if (!frm.doc.student_group) {
+			frm.clear_table('students');
+			frm.refresh_field('students');
+			return;
+		}
+		frappe.call({
+			method: 'edtools_core.api.get_students_for_group_with_enrollment',
+			args: { student_group: frm.doc.student_group },
+			freeze: true,
+			freeze_message: __('Loading students from group…'),
+			callback(r) {
+				const result = r.message || {};
+				frm.clear_table('students');
+				if (result.students && result.students.length) {
+					result.students.forEach(function (s) {
+						const row = frm.add_child('students');
+						row.student = s.student;
+						row.student_name = s.student_full_name || '';
+						row.program_enrollment = s.program_enrollment || '';
+						row.status = 'Included';
+					});
+					frappe.show_alert({
+						message: __('{0} student(s) loaded. Remove rows to exclude from the plan.', [
+							result.students.length,
+						]),
+						indicator: 'green',
+					});
+				} else {
+					frappe.msgprint({
+						title: __('No students'),
+						indicator: 'orange',
+						message: __(
+							'No students in this group with a Program Enrollment. Add enrollments or pick another group.'
+						),
+					});
+				}
+				frm.refresh_field('students');
+				if (result.missing && result.missing.length) {
+					frappe.msgprint({
+						title: __('Students without Program Enrollment'),
+						indicator: 'orange',
+						message: __(
+							'<b>{0}</b> student(s) in the group have no Program Enrollment and were not added:<br><br>{1}',
+							[result.missing.length, frappe.utils.escape_html(result.missing.join(', '))]
+						),
+					});
+				}
+			},
+		});
+	},
+
 	generate_financial_plan(frm) {
 		let mode = frm.doc.selection_mode;
 		if (mode === 'Single Student' && !frm.doc.student) {
@@ -46,6 +101,14 @@ frappe.ui.form.on('Student Financial Plan', {
 		}
 		if (mode === 'Student Group' && !frm.doc.student_group) {
 			frappe.msgprint(__('Please select a Student Group.'));
+			return;
+		}
+		if (mode === 'Student Group' && (!frm.doc.students || frm.doc.students.length === 0)) {
+			frappe.msgprint(
+				__(
+					'No students in the table. Select a Student Group to load the list, or add rows manually.'
+				)
+			);
 			return;
 		}
 		if (mode === 'Manual List' && (!frm.doc.students || frm.doc.students.length === 0)) {

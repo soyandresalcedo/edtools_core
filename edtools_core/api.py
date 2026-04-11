@@ -1847,9 +1847,9 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 row_amount = flt(row.get("amount"))
 
                 if row_type == "Inscripcion":
-                    fee.append("components", {"fees_category": CAT_INSCRIPCION, "description": "Registration Fee", "amount": row_amount})
+                    fee.append("components", {"fees_category": CAT_INSCRIPCION, "description": "application fee", "amount": row_amount})
                 elif row_type == "Traduccion":
-                    fee.append("components", {"fees_category": CAT_TRADUCCION, "description": "Translation Fee", "amount": row_amount})
+                    fee.append("components", {"fees_category": CAT_TRADUCCION, "description": "Translation and equivalence", "amount": row_amount})
                 elif row_type == "Otros":
                     cat = row.get("fees_category") or "Otros"
                     desc = row.get("description") or row.get("term") or cat
@@ -1894,12 +1894,13 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
 @frappe.whitelist()
 def get_program_duration_details(program, start_date):
     """
-    Calcula la fecha de finalización buscando keywords en la ABREVIACIÓN del programa.
-    
-    Reglas:
+    Calcula la fecha de finalización buscando keywords en el nombre/abreviatura del programa.
+
+    Reglas (ventana académica para validar planes de pago con inscripción + TyE + N cuotas capital,
+    graduación combinada en la última cuota):
     - Master (MS/MBA/Maestría) -> 15 meses
-    - Bachelor (BS/Licenciatura) -> 41 meses
-    - Associate (AS/Técnico) -> 21 meses
+    - Bachelor (BS/Licenciatura) -> 42 meses (40 cuotas típicas + márgenes iniciales/finales)
+    - Associate (AS/Técnico) -> 22 meses (20 cuotas típicas + márgenes)
     """
     from frappe.utils import add_months, getdate, cstr
     
@@ -1924,13 +1925,13 @@ def get_program_duration_details(program, start_date):
     if "master" in search_text or "ms " in search_text or "m.s." in search_text or "mba" in search_text or "maestría" in search_text:
         months = 15
         
-    # --- BACHELORS / PREGRADO (41 Meses) ---
+    # --- BACHELORS / PREGRADO (42 Meses: alinea 40 cuotas + pagos iniciales / última cuota+graduación) ---
     elif "bachelor" in search_text or "bs " in search_text or "b.s." in search_text or "licenciatura" in search_text:
-        months = 41
-        
-    # --- ASSOCIATES / TÉCNICOS (21 Meses) ---
+        months = 42
+
+    # --- ASSOCIATES / TÉCNICOS (22 Meses: 20 cuotas + inscripción + TyE) ---
     elif "associate" in search_text or "as " in search_text or "a.s." in search_text or "técnico" in search_text:
-        months = 21
+        months = 22
         
     else:
         # Default de seguridad si no encuentra nada (puedes cambiarlo a 0 si prefieres error)
@@ -1943,6 +1944,67 @@ def get_program_duration_details(program, start_date):
         "end_date": end_date,
         "months": months
     }
+
+
+@frappe.whitelist()
+def validate_special_plan_duration(
+    program,
+    start_date,
+    capital_installments,
+    apply_interest,
+    components=None,
+):
+    """
+    Valida que la última fecha de vencimiento del plan (calculate_special_plan)
+    no supere la fecha fin devuelta por get_program_duration_details.
+
+    Pensado para Client Scripts / diálogos personalizados que antes comparaban
+    mal el número de documentos de fee (p. ej. 42) frente a meses de programa.
+    """
+    if isinstance(components, str):
+        components = json.loads(components) if components else []
+    if not components:
+        components = []
+    if isinstance(apply_interest, str):
+        apply_interest = str(apply_interest).lower() in ("1", "true", "yes", "y")
+
+    start_date = getdate(start_date)
+    plan = calculate_special_plan(components, capital_installments, start_date, apply_interest)
+    schedule = plan.get("schedule") or []
+    if not schedule:
+        return {"valid": True, "reason": _("Empty schedule.")}
+
+    last_due = max(getdate(row["due_date"]) for row in schedule if row.get("due_date"))
+
+    if not program:
+        return {"valid": True, "last_due_date": last_due}
+
+    details = get_program_duration_details(program, start_date)
+    end_date = details.get("end_date")
+    if not end_date:
+        return {
+            "valid": True,
+            "last_due_date": last_due,
+            "reason": _("Could not determine program academic window."),
+        }
+
+    end_date = getdate(end_date)
+    if last_due > end_date:
+        return {
+            "valid": False,
+            "message": _("El plan excede la duración académica."),
+            "last_due_date": last_due,
+            "end_date": end_date,
+            "months": details.get("months"),
+        }
+
+    return {
+        "valid": True,
+        "last_due_date": last_due,
+        "end_date": end_date,
+        "months": details.get("months"),
+    }
+
 
 @frappe.whitelist()
 def get_students_for_group(student_group):
@@ -2128,8 +2190,10 @@ def get_students_for_group_with_enrollment(student_group):
     group_doc = frappe.get_doc("Student Group", student_group)
     students = []
     missing_enrollment = []
-    
+
     for idx, s in enumerate(group_doc.students):
+        if int(getattr(s, "active", 1) or 1) == 0:
+            continue
         # Buscar Program Enrollment del estudiante
         enrollments = frappe.get_all(
             "Program Enrollment",

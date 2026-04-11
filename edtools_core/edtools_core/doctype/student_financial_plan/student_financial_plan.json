@@ -9,7 +9,7 @@
   "student",
   "student_group",
   "column_break_selection2",
-  "section_break_manual",
+  "section_break_student_list",
   "students",
   "section_break_results",
   "results_html"
@@ -47,13 +47,13 @@
    "fieldtype": "Column Break"
   },
   {
-   "depends_on": "eval:doc.selection_mode=='Manual List'",
-   "fieldname": "section_break_manual",
+   "depends_on": "eval:doc.selection_mode=='Student Group' || doc.selection_mode=='Manual List'",
+   "fieldname": "section_break_student_list",
    "fieldtype": "Section Break",
-   "label": "Students"
+   "label": "Student list"
   },
   {
-   "depends_on": "eval:doc.selection_mode=='Manual List'",
+   "depends_on": "eval:doc.selection_mode=='Student Group' || doc.selection_mode=='Manual List'",
    "fieldname": "students",
    "fieldtype": "Table",
    "label": "Students",
@@ -74,7 +74,7 @@
  "issingle": 1,
  "links": [],
  "show_name_in_global_search": 1,
- "modified": "2026-04-06 12:00:00.000000",
+ "modified": "2026-04-11 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "EdTools Core",
  "name": "Student Financial Plan",

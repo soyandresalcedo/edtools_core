@@ -174,3 +174,8 @@ frappe.ui.form.on('Fee Structure', {
         };
     }
 });
+
+// Validación de planes especiales (cuotas capital + inscripción + TyE + graduación en última cuota):
+// usar `frappe.call({ method: 'edtools_core.api.validate_special_plan_duration', args: {
+//   program: frm.doc.program, start_date, capital_installments, apply_interest, components: frm.doc.components
+// }})` en lugar de comparar solo el número de filas/documentos con los meses del programa.
