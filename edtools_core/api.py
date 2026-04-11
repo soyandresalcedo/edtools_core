@@ -1738,11 +1738,12 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
     return {"schedule": schedule, "total_interest": total_interest_generated}
 
 @frappe.whitelist()
-def generate_batch_records(student_group, fee_structure, components, schedule_data):
+def generate_batch_records(student_group, fee_structure, components, schedule_data, students=None):
     """
-    Genera los registros para TODO el grupo.
-    CORREGIDO: Agrega la tabla obligatoria 'student_groups' al Fee Schedule.
-    Normaliza fechas, company y valida Program Enrollment para evitar fallos silenciosos.
+    Genera Fee Schedule + Fees para estudiantes del grupo.
+
+    Si se pasa ``students`` (lista JSON de IDs de Student), solo se procesan esos alumnos
+    (deben pertenecer al grupo activo). Útil con **Student Financial Tool** tras personalizar la tabla.
     """
     import json
     import traceback
@@ -1752,6 +1753,10 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
         components = json.loads(components)
     if isinstance(schedule_data, str):
         schedule_data = json.loads(schedule_data)
+    if isinstance(students, str) and students.strip():
+        students = json.loads(students)
+    elif isinstance(students, str):
+        students = None
 
     if not components:
         frappe.throw("❌ ERROR: Lista de componentes vacía.")
@@ -1780,13 +1785,36 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
     if not company:
         frappe.throw("❌ ERROR: No hay Company definida en la Fee Structure ni por defecto en el sitio. Configure una Company.")
 
-    # 4. OBTENER ESTUDIANTES
-    students = frappe.db.get_list(
-        "Student Group Student",
-        filters={"parent": student_group, "active": 1},
-        fields=["student"],
-        ignore_permissions=True,
+    # 4. OBTENER ESTUDIANTES (todo el grupo o subconjunto explícito)
+    allowed_in_group = set(
+        frappe.get_all(
+            "Student Group Student",
+            filters={"parent": student_group, "active": 1},
+            pluck="student",
+        )
     )
+
+    if students is not None and len(students) > 0:
+        if not isinstance(students, list):
+            frappe.throw("❌ ERROR: El parámetro students debe ser una lista de IDs de estudiante.")
+        picked = list(dict.fromkeys(str(s).strip() for s in students if str(s).strip()))
+        invalid = [s for s in picked if s not in allowed_in_group]
+        if invalid:
+            frappe.throw(
+                _("Los siguientes estudiantes no están en el grupo activo {0}: {1}").format(
+                    student_group, ", ".join(invalid[:10])
+                )
+            )
+        students = [{"student": s} for s in picked]
+        if not students:
+            frappe.throw(_("La lista de estudiantes quedó vacía tras validar contra el grupo."))
+    else:
+        students = frappe.db.get_list(
+            "Student Group Student",
+            filters={"parent": student_group, "active": 1},
+            fields=["student"],
+            ignore_permissions=True,
+        )
 
     if not students:
         frappe.throw(f"El grupo '{student_group}' no tiene estudiantes activos.")

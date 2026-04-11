@@ -179,3 +179,6 @@ frappe.ui.form.on('Fee Structure', {
 // usar `frappe.call({ method: 'edtools_core.api.validate_special_plan_duration', args: {
 //   program: frm.doc.program, start_date, capital_installments, apply_interest, components: frm.doc.components
 // }})` en lugar de comparar solo el número de filas/documentos con los meses del programa.
+//
+// Generación por subconjunto: en `generate_batch_records` pasar `students` (JSON array de IDs Student)
+// además de `student_group`; solo se procesan esos alumnos si pertenecen al grupo activo.

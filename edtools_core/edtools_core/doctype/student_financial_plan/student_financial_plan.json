@@ -9,7 +9,7 @@
   "student",
   "student_group",
   "column_break_selection2",
-  "section_break_student_list",
+  "section_break_manual",
   "students",
   "section_break_results",
   "results_html"
@@ -47,13 +47,13 @@
    "fieldtype": "Column Break"
   },
   {
-   "depends_on": "eval:doc.selection_mode=='Student Group' || doc.selection_mode=='Manual List'",
-   "fieldname": "section_break_student_list",
+   "depends_on": "eval:doc.selection_mode=='Manual List'",
+   "fieldname": "section_break_manual",
    "fieldtype": "Section Break",
-   "label": "Student list"
+   "label": "Students"
   },
   {
-   "depends_on": "eval:doc.selection_mode=='Student Group' || doc.selection_mode=='Manual List'",
+   "depends_on": "eval:doc.selection_mode=='Manual List'",
    "fieldname": "students",
    "fieldtype": "Table",
    "label": "Students",

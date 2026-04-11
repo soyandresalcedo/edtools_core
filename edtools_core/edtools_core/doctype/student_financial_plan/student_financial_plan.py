@@ -43,11 +43,6 @@ class StudentFinancialPlan(Document):
 		if mode == "Student Group":
 			if not self.student_group:
 				frappe.throw(_("Please select a Student Group."))
-			# Si la tabla tiene filas (p. ej. tras cargar desde el grupo), solo esos estudiantes.
-			table_students = [r.student for r in (self.students or []) if getattr(r, "student", None)]
-			table_students = list(dict.fromkeys(table_students))
-			if table_students:
-				return table_students
 			rows = frappe.get_all(
 				"Student Group Student",
 				filters={"parent": self.student_group, "active": 1},
