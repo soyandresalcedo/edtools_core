@@ -5,6 +5,20 @@
 import frappe
 
 
+def _description_cell_as_str(raw):
+	"""Evita dict (p. ej. Texto traducible en JSON) antes de .strip() / APIs que esperan str."""
+	if raw is None:
+		return ""
+	if isinstance(raw, str):
+		return raw.strip()
+	if isinstance(raw, dict):
+		for v in raw.values():
+			if isinstance(v, str) and v.strip():
+				return v.strip()
+		return ""
+	return str(raw).strip()
+
+
 def update_components_description(doc, method=None):
 	"""Set doc.components_description from Components table (Description column).
 	Frappe doc_events call handlers as (doc, method).
@@ -13,9 +27,10 @@ def update_components_description(doc, method=None):
 		return
 	parts = []
 	for d in (doc.components or []):
-		desc = (d.get("description") or "").strip()
+		raw = d.get("description") if hasattr(d, "get") else getattr(d, "description", None)
+		desc = _description_cell_as_str(raw)
 		if desc:
-			parts.append(str(desc))
+			parts.append(desc)
 	doc.components_description = ", ".join(parts) if parts else ""
 
 

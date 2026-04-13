@@ -1754,6 +1754,21 @@ def calculate_special_plan(components, capital_installments, start_date, apply_i
 
     return {"schedule": schedule, "total_interest": total_interest_generated}
 
+
+def _coerce_financial_tool_text(val, default=""):
+    """Convierte valores del formulario (str o JSON traducible tipo dict) a str para campos Data/Link/Small Text."""
+    if val is None:
+        return default
+    if isinstance(val, str):
+        return val.strip()
+    if isinstance(val, dict):
+        for v in val.values():
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        return default
+    return cstr(val).strip() or default
+
+
 @frappe.whitelist()
 def generate_batch_records(student_group, fee_structure, components, schedule_data, students=None):
     """
@@ -1814,7 +1829,15 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
     if students is not None and len(students) > 0:
         if not isinstance(students, list):
             frappe.throw("❌ ERROR: El parámetro students debe ser una lista de IDs de estudiante.")
-        picked = list(dict.fromkeys(str(s).strip() for s in students if str(s).strip()))
+        normalized_ids = []
+        for s in students:
+            if isinstance(s, dict):
+                sid = s.get("student") or s.get("name")
+                if sid:
+                    normalized_ids.append(_coerce_financial_tool_text(sid))
+            elif s is not None and str(s).strip():
+                normalized_ids.append(str(s).strip())
+        picked = list(dict.fromkeys(x for x in normalized_ids if x))
         invalid = [s for s in picked if s not in allowed_in_group]
         if invalid:
             frappe.throw(
@@ -1840,7 +1863,8 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
     errors_detail = []
 
     for stu in students:
-        student_id = stu.get("student") if isinstance(stu, dict) else getattr(stu, "student", None)
+        raw_sid = stu.get("student") if isinstance(stu, dict) else getattr(stu, "student", None)
+        student_id = _coerce_financial_tool_text(raw_sid) if raw_sid is not None else ""
         if not student_id:
             errors_detail.append(_("Fila de estudiante sin ID válido: {0}").format(cstr(stu)))
             continue
@@ -1872,8 +1896,8 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 # Fee Schedule.validate suma child.total (no amount). Sin total, queda None y falla: int += NoneType
                 line_amt = flt(c.get("amount"))
                 fs.append("components", {
-                    "fees_category": c.get("fees_category"),
-                    "description": c.get("description"),
+                    "fees_category": _coerce_financial_tool_text(c.get("fees_category")),
+                    "description": _coerce_financial_tool_text(c.get("description")),
                     "amount": line_amt,
                     "total": line_amt,
                 })
@@ -1895,24 +1919,25 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 fee.currency = "USD"
                 fee.company = company
 
-                row_type = row.get("type")
+                row_type = _coerce_financial_tool_text(row.get("type"))
                 row_amount = flt(row.get("amount"))
+                term_txt = _coerce_financial_tool_text(row.get("term"))
 
                 if row_type == "Inscripcion":
                     fee.append("components", {"fees_category": CAT_INSCRIPCION, "description": "application fee", "amount": row_amount})
                 elif row_type == "Traduccion":
                     fee.append("components", {"fees_category": CAT_TRADUCCION, "description": "Translation and equivalence", "amount": row_amount})
                 elif row_type == "Otros":
-                    cat = row.get("fees_category") or "Otros"
-                    desc = row.get("description") or row.get("term") or cat
+                    cat = _coerce_financial_tool_text(row.get("fees_category")) or "Otros"
+                    desc = _coerce_financial_tool_text(row.get("description")) or term_txt or cat
                     fee.append("components", {"fees_category": cat, "description": desc, "amount": row_amount})
                 elif row_type == "Capital+Graduacion":
                     val_grad = flt(row.get("graduacion_amount"), 2) or DEFAULT_GRADUACION
                     val_cap = row_amount - val_grad
-                    fee.append("components", {"fees_category": CAT_COSTO_PROGRAMA, "description": f"{row.get('term', '')} (Capital)", "amount": flt(val_cap, 2)})
+                    fee.append("components", {"fees_category": CAT_COSTO_PROGRAMA, "description": f"{term_txt} (Capital)", "amount": flt(val_cap, 2)})
                     fee.append("components", {"fees_category": CAT_GRADUACION, "description": "Graduation Fee", "amount": val_grad})
                 else:
-                    fee.append("components", {"fees_category": CAT_COSTO_PROGRAMA, "description": row.get("term"), "amount": row_amount})
+                    fee.append("components", {"fees_category": CAT_COSTO_PROGRAMA, "description": term_txt or None, "amount": row_amount})
 
                 fee.grand_total = row_amount
                 fee.outstanding_amount = row_amount
