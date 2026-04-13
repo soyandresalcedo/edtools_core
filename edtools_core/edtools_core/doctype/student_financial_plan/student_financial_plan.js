@@ -2,6 +2,7 @@
 // For license information, please see license.txt
 
 const SFP_API = 'edtools_core.edtools_core.doctype.student_financial_plan.student_financial_plan';
+const SFP_SHIFT_ACK = 'EDTOOLS_CONFIRM_SHIFT_FEE_DUES';
 
 function _flt(v) {
 	return typeof flt === 'function' ? flt(v) : parseFloat(v) || 0;
@@ -124,6 +125,13 @@ function render_financial_plan(frm, data) {
 
 	bind_sfp_fee_links($wrapper);
 	bind_sfp_actions(frm, $wrapper);
+
+	frm._sfp_shift_context = frm._sfp_shift_context || {};
+	student_ids.forEach(function (sid) {
+		const feeRows = (students[sid].fees || []);
+		const schedules = [...new Set(feeRows.map((f) => f.fee_schedule).filter(Boolean))];
+		frm._sfp_shift_context[sid] = { schedules };
+	});
 }
 
 function bind_sfp_fee_links($wrapper) {
@@ -167,6 +175,94 @@ function bind_sfp_actions(frm, $wrapper) {
 		});
 	});
 
+	$wrapper.find('.sfp-btn-shift-dues').on('click', function () {
+		const student = $(this).data('student');
+		open_shift_due_dates_dialog(frm, student);
+	});
+}
+
+function open_shift_due_dates_dialog(frm, student) {
+	const ctx = (frm._sfp_shift_context && frm._sfp_shift_context[student]) || { schedules: [] };
+	const scheds = ctx.schedules || [];
+
+	const d = new frappe.ui.Dialog({
+		title: __('Shift fee due dates'),
+		fields: [
+			{
+				fieldname: 'fee_schedule',
+				fieldtype: 'Link',
+				label: __('Fee Schedule (optional)'),
+				options: 'Fee Schedule',
+				get_query() {
+					if (scheds.length) {
+						return { filters: { name: ['in', scheds] } };
+					}
+					return {};
+				},
+			},
+			{
+				fieldname: 'months',
+				fieldtype: 'Int',
+				label: __('Months (+ postpone, − advance)'),
+				reqd: 1,
+				description: __(
+					'Example: −1 moves due dates one month earlier; +2 moves two months later.'
+				),
+			},
+			{
+				fieldname: 'include_paid',
+				fieldtype: 'Check',
+				label: __('Include fully paid fees (outstanding = 0)'),
+				description: __(
+					'If unchecked, only drafts and fees with outstanding balance are moved.'
+				),
+			},
+			{
+				fieldname: 'confirm',
+				fieldtype: 'Check',
+				label: __(
+					'I confirm changing due dates on submitted fees (including paid if selected above).'
+				),
+				reqd: 1,
+			},
+		],
+		primary_action_label: __('Apply'),
+		primary_action(values) {
+			if (!values.confirm) {
+				frappe.msgprint(__('You must confirm to continue.'));
+				return;
+			}
+			const m = parseInt(values.months, 10);
+			if (!m || Number.isNaN(m)) {
+				frappe.msgprint(__('Enter a non-zero integer for months.'));
+				return;
+			}
+			frappe.call({
+				method: SFP_API + '.sfp_shift_fee_due_dates',
+				args: {
+					student,
+					months: m,
+					fee_schedule: values.fee_schedule || '',
+					include_paid: values.include_paid ? 1 : 0,
+					acknowledgement: SFP_SHIFT_ACK,
+				},
+				freeze: true,
+				callback(r) {
+					if (r.exc) return;
+					d.hide();
+					const msg = r.message || {};
+					const errN = (msg.errors || []).length;
+					const summary = __(
+						'Updated: {0} fee(s). Unchanged: {1}. Errors: {2}.',
+						[msg.updated || 0, msg.skipped || 0, errN]
+					);
+					frappe.show_alert({ message: summary, indicator: errN ? 'orange' : 'green' });
+					frm.trigger('generate_financial_plan');
+				},
+			});
+		},
+	});
+	d.show();
 }
 
 /** Nombre imposible en BD: evita filtro name="" que muestra "Filters applied for Name = empty". */
@@ -506,6 +602,7 @@ function render_financial_legend() {
 function render_financial_student_block(sid, s, collapsible, idx) {
 	const kpis = s.kpis || {};
 	const warning = s.warning || '';
+	const fees = s.fees || [];
 	const open = idx === 0 ? '' : 'style="display:none"';
 
 	let header_class = collapsible ? 'sfp-header sfp-clickable' : 'sfp-header';
@@ -518,10 +615,16 @@ function render_financial_student_block(sid, s, collapsible, idx) {
 	html += `<div class="${header_class}">`;
 	html += `${chevron}<strong>${frappe.utils.escape_html(s.student_name || sid)}</strong>`;
 	html += `<span class="text-muted" style="margin-left:8px;">${frappe.utils.escape_html(sid)}</span>`;
-	html += `<button type="button" class="btn btn-xs btn-default sfp-btn-add-fee" style="margin-left:auto" data-student="${frappe.utils.escape_html(
+	html += `<span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">`;
+	html += `<button type="button" class="btn btn-xs btn-default sfp-btn-add-fee" data-student="${frappe.utils.escape_html(
 		sid
 	)}">${__('Add fee')}</button>`;
-	html += `</div>`;
+	if (fees.length) {
+		html += `<button type="button" class="btn btn-xs btn-default sfp-btn-shift-dues" data-student="${frappe.utils.escape_html(
+			sid
+		)}">${__('Shift due dates')}</button>`;
+	}
+	html += `</span></div>`;
 
 	html += `<div class="sfp-body" ${open}>`;
 
@@ -537,8 +640,6 @@ function render_financial_student_block(sid, s, collapsible, idx) {
 	html += kpi_card(__('Outstanding'), fmt_money_plain(kpis.total_outstanding), 'var(--orange-600)', true);
 	html += kpi_card(__('Paid installments'), String(kpis.paid_count || 0), 'var(--green-600)', false);
 	html += `</div>`;
-
-	const fees = s.fees || [];
 	if (fees.length) {
 		html += `<table class="table table-bordered sfp-table">
 			<thead><tr>

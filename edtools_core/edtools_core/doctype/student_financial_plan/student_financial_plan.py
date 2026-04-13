@@ -8,7 +8,7 @@ import json
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, getdate, today
+from frappe.utils import add_months, flt, getdate, today
 
 
 def _docstatus_label(docstatus: int) -> str:
@@ -22,6 +22,12 @@ def _empty_kpis():
 def _is_fee_paid_row(f: dict) -> bool:
 	"""Fully paid in accounting terms: submitted and no outstanding balance."""
 	return int(f.get("docstatus") or 0) == 1 and flt(f.get("outstanding_amount")) <= 0
+
+
+# El cliente debe enviar esta cadena en `acknowledgement` (checkbox en UI).
+SFP_SHIFT_DUE_DATES_ACK = "EDTOOLS_CONFIRM_SHIFT_FEE_DUES"
+SFP_SHIFT_MONTHS_MIN = -36
+SFP_SHIFT_MONTHS_MAX = 36
 
 
 class StudentFinancialPlan(Document):
@@ -416,4 +422,127 @@ def sfp_set_manual_paid(fee_name: str, value: int | bool):
 	frappe.db.set_value("Fees", fee_name, "edtools_manual_paid", val)
 	frappe.db.commit()
 	return {"name": fee_name, "edtools_manual_paid": val}
+
+
+@frappe.whitelist()
+def sfp_shift_fee_due_dates(
+	student: str,
+	months: int,
+	fee_schedule: str | None = None,
+	include_paid: int | bool = 0,
+	acknowledgement: str | None = None,
+):
+	"""
+	Desplaza ``due_date`` en ±N meses para Fees del estudiante (no canceladas).
+	Usa ``frappe.db.set_value`` para poder actualizar fees ya enviadas.
+	"""
+	from frappe.utils import cint, cstr
+
+	if not acknowledgement or cstr(acknowledgement).strip() != SFP_SHIFT_DUE_DATES_ACK:
+		frappe.throw(_("Mark the confirmation checkbox to apply due date changes."))
+
+	student = cstr(student).strip()
+	if not student or not frappe.db.exists("Student", student):
+		frappe.throw(_("Invalid student."))
+
+	try:
+		months_i = int(months)
+	except (TypeError, ValueError):
+		frappe.throw(_("Months must be a whole number."))
+
+	if months_i == 0:
+		frappe.throw(_("Months cannot be zero (use positive to postpone, negative to advance)."))
+
+	if months_i < SFP_SHIFT_MONTHS_MIN or months_i > SFP_SHIFT_MONTHS_MAX:
+		frappe.throw(
+			_("Months must be between {0} and {1}.").format(SFP_SHIFT_MONTHS_MIN, SFP_SHIFT_MONTHS_MAX)
+		)
+
+	fs = cstr(fee_schedule).strip() or None
+	if fs and not frappe.db.exists("Fee Schedule", fs):
+		frappe.throw(_("Fee Schedule not found."))
+
+	include_paid = cint(include_paid) == 1
+
+	filters: dict = {"student": student, "docstatus": ["!=", 2]}
+	if fs:
+		filters["fee_schedule"] = fs
+
+	rows = frappe.get_all(
+		"Fees",
+		filters=filters,
+		fields=["name", "due_date", "outstanding_amount", "docstatus"],
+		order_by="due_date asc, name asc",
+	)
+
+	if not rows:
+		frappe.throw(_("No fees match the filters (non-cancelled only)."))
+
+	if not include_paid:
+		rows = [
+			r
+			for r in rows
+			if int(r.get("docstatus") or 0) == 0 or flt(r.get("outstanding_amount")) > 0
+		]
+		if not rows:
+			frappe.throw(
+				_(
+					"All matching fees are fully paid. Enable \"Include fully paid fees\" to move them."
+				)
+			)
+
+	results = []
+	errors = []
+	user = frappe.session.user
+
+	for r in rows:
+		name = r["name"]
+		old_due = r.get("due_date")
+		if not old_due:
+			errors.append({"fee": name, "reason": _("Missing due date.")})
+			continue
+
+		try:
+			doc = frappe.get_doc("Fees", name)
+		except frappe.DoesNotExistError:
+			errors.append({"fee": name, "reason": _("Document not found.")})
+			continue
+
+		if doc.student != student:
+			errors.append({"fee": name, "reason": _("Student mismatch.")})
+			continue
+
+		if not frappe.has_permission("Fees", "write", doc=doc):
+			errors.append({"fee": name, "reason": _("No write permission.")})
+			continue
+
+		new_due = add_months(getdate(old_due), months_i)
+		if getdate(new_due) == getdate(old_due):
+			results.append(
+				{"fee": name, "old_due": str(old_due), "new_due": str(new_due), "skipped": True}
+			)
+			continue
+
+		frappe.db.set_value("Fees", name, "due_date", new_due, update_modified=True)
+
+		comment = _("Due date shifted by {0} month(s): {1} → {2} ({3})").format(
+			months_i, old_due, new_due, user
+		)
+		try:
+			doc.reload()
+			doc.add_comment("Comment", comment)
+		except Exception:
+			frappe.log_error(title=f"Student Financial Plan shift comment {name}", message=comment)
+
+		results.append({"fee": name, "old_due": str(old_due), "new_due": str(new_due), "skipped": False})
+
+	return {
+		"months": months_i,
+		"student": student,
+		"fee_schedule": fs or "",
+		"updated": sum(1 for x in results if not x.get("skipped")),
+		"skipped": sum(1 for x in results if x.get("skipped")),
+		"rows": results,
+		"errors": errors,
+	}
 
