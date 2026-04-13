@@ -1954,12 +1954,6 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
             err = cstr(e)
             tb = traceback.format_exc()
             msg = f"{student_id}: {err}\n{tb}"
-            if "lower" in err and "dict" in err:
-                dbg = (
-                    f"[DEBUG dict/lower] frappe.local.lang={repr(getattr(frappe.local, 'lang', None))} "
-                    f"type={type(getattr(frappe.local, 'lang', None)).__name__}\n"
-                )
-                msg = dbg + msg
             frappe.log_error(title=f"Student Financial Tool - {student_id}", message=msg)
             errors_detail.append(f"{student_id}: {err}")
             continue
