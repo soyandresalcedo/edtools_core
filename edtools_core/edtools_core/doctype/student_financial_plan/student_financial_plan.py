@@ -104,9 +104,11 @@ def get_financial_plan_data(students: list | str | None = None) -> dict:
 
 	fees_by_pe: dict[str, list] = {}
 	if pe_names:
+		# Excluir canceladas (docstatus 2): no deben entrar en tabla ni KPIs (alineado con
+		# sfp_get_fee_defaults_from_sibling_fees y reportes que usan docstatus = 1 / != 2).
 		fee_rows = frappe.get_all(
 			"Fees",
-			filters={"program_enrollment": ["in", pe_names]},
+			filters={"program_enrollment": ["in", pe_names], "docstatus": ["!=", 2]},
 			fields=fee_fields,
 			order_by="program_enrollment asc, due_date asc, name asc",
 		)
