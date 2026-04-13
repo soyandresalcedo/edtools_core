@@ -3,6 +3,40 @@
 # Inyecta payment_date (fecha de pago) para Print Format Bolante de Pago.
 
 import frappe
+from frappe.utils import cstr
+
+
+def ensure_local_lang_for_num2words(doc, method=None):
+	"""Antes de validate: money_in_words → in_words → num2words(..., lang=frappe.local.lang).
+	Si `lang` es dict u otro no-str, num2words usa .lower() sobre lang y falla."""
+	lang = getattr(frappe.local, "lang", None)
+	if isinstance(lang, str) and lang.strip():
+		return
+	if isinstance(lang, dict):
+		for v in lang.values():
+			if isinstance(v, str) and v.strip():
+				frappe.local.lang = v.strip()
+				return
+		frappe.local.lang = _fallback_site_lang_string()
+		return
+	if lang is not None and not isinstance(lang, str):
+		s = cstr(lang).strip()
+		frappe.local.lang = s or _fallback_site_lang_string()
+		return
+	frappe.local.lang = _fallback_site_lang_string()
+
+
+def _fallback_site_lang_string():
+	try:
+		s = frappe.db.get_default("lang")
+		if isinstance(s, str) and s.strip():
+			return s.strip()
+	except Exception:
+		pass
+	conf = frappe.conf.get("lang")
+	if isinstance(conf, str) and conf.strip():
+		return conf.strip()
+	return "en"
 
 
 def _description_cell_as_str(raw):

@@ -161,10 +161,14 @@ doc_events = {
 			"edtools_core.azure_provisioning.sync_student_azure_license_by_status",
 		],
 	},
+	"Fee Schedule": {
+		"before_validate": "edtools_core.fees_events.ensure_local_lang_for_num2words",
+	},
 	"Fees": {
+		"before_validate": "edtools_core.fees_events.ensure_local_lang_for_num2words",
 		"before_save": "edtools_core.fees_events.update_components_description",
-		"before_print": "edtools_core.fees_events.set_payment_date_for_print"
-	}
+		"before_print": "edtools_core.fees_events.set_payment_date_for_print",
+	},
 }
 
 # Scheduled Tasks
