@@ -7,6 +7,9 @@ app_description = "Custom branding and features for Edtools Educational System"
 app_email = "soyandresalcedo@gmail.com"
 app_license = "MIT"
 
+# Normaliza frappe.local.lang al inicio de cada petición (num2words llama .lower() al idioma).
+before_request = ["edtools_core.fees_events.ensure_local_lang_before_request"]
+
 # Includes in <head>
 # ------------------
 
@@ -136,6 +139,8 @@ override_doctype_class = {
 	"Student": "edtools_core.overrides.student.Student",
 	"Student Group": "edtools_core.overrides.student_group.StudentGroup",
 	"User": "edtools_core.overrides.user.User",
+	"Fees": "edtools_core.overrides.fees.Fees",
+	"Fee Schedule": "edtools_core.overrides.fee_schedule.FeeSchedule",
 }
 
 # Document Events

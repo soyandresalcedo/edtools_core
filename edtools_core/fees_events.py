@@ -7,23 +7,30 @@ from frappe.utils import cstr
 
 
 def ensure_local_lang_for_num2words(doc, method=None):
-	"""Antes de validate: money_in_words → in_words → num2words(..., lang=frappe.local.lang).
-	Si `lang` es dict u otro no-str, num2words usa .lower() sobre lang y falla."""
-	lang = getattr(frappe.local, "lang", None)
-	if isinstance(lang, str) and lang.strip():
-		return
-	if isinstance(lang, dict):
-		for v in lang.values():
-			if isinstance(v, str) and v.strip():
-				frappe.local.lang = v.strip()
-				return
-		frappe.local.lang = _fallback_site_lang_string()
-		return
-	if lang is not None and not isinstance(lang, str):
-		s = cstr(lang).strip()
-		frappe.local.lang = s or _fallback_site_lang_string()
-		return
-	frappe.local.lang = _fallback_site_lang_string()
+    """Antes de validate: money_in_words → in_words → num2words(..., lang=frappe.local.lang).
+    num2words hace lang.lower(); si lang es dict/list u otro no-str, falla con AttributeError."""
+    lang = getattr(frappe.local, "lang", None)
+    if isinstance(lang, str) and lang.strip():
+        return
+    if isinstance(lang, dict):
+        for v in lang.values():
+            if isinstance(v, str) and v.strip():
+                frappe.local.lang = v.strip()
+                return
+        frappe.local.lang = _fallback_site_lang_string()
+        return
+    if isinstance(lang, (list, tuple)) and lang:
+        first = lang[0]
+        if isinstance(first, str) and first.strip():
+            frappe.local.lang = first.strip()
+            return
+        frappe.local.lang = _fallback_site_lang_string()
+        return
+    if lang is not None and not isinstance(lang, str):
+        s = cstr(lang).strip()
+        frappe.local.lang = s or _fallback_site_lang_string()
+        return
+    frappe.local.lang = _fallback_site_lang_string()
 
 
 def _fallback_site_lang_string():
@@ -31,12 +38,24 @@ def _fallback_site_lang_string():
 		s = frappe.db.get_default("lang")
 		if isinstance(s, str) and s.strip():
 			return s.strip()
+		if isinstance(s, dict):
+			for v in s.values():
+				if isinstance(v, str) and v.strip():
+					return v.strip()
 	except Exception:
 		pass
 	conf = frappe.conf.get("lang")
 	if isinstance(conf, str) and conf.strip():
 		return conf.strip()
 	return "en"
+
+
+def ensure_local_lang_before_request():
+	"""Hook before_request: normaliza lang en toda petición HTTP (num2words / gettext)."""
+	try:
+		ensure_local_lang_for_num2words(None, None)
+	except Exception:
+		pass
 
 
 def _description_cell_as_str(raw):

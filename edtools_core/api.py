@@ -4,6 +4,7 @@
 import json
 import frappe
 import requests
+from edtools_core.fees_events import ensure_local_lang_for_num2words
 from edtools_core.moodle_sync import sync_student_enrollment_to_moodle
 from frappe import _
 from frappe.utils import cint, cstr, flt, getdate, today, add_months, nowdate
@@ -1780,6 +1781,8 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
     import json
     import traceback
 
+    ensure_local_lang_for_num2words(None, None)
+
     # 1. DECODIFICAR Y VALIDAR
     if isinstance(components, str):
         components = json.loads(components)
@@ -1948,9 +1951,17 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
             generated_count += 1
 
         except Exception as e:
-            msg = f"{student_id}: {cstr(e)}\n{traceback.format_exc()}"
+            err = cstr(e)
+            tb = traceback.format_exc()
+            msg = f"{student_id}: {err}\n{tb}"
+            if "lower" in err and "dict" in err:
+                dbg = (
+                    f"[DEBUG dict/lower] frappe.local.lang={repr(getattr(frappe.local, 'lang', None))} "
+                    f"type={type(getattr(frappe.local, 'lang', None)).__name__}\n"
+                )
+                msg = dbg + msg
             frappe.log_error(title=f"Student Financial Tool - {student_id}", message=msg)
-            errors_detail.append(f"{student_id}: {cstr(e)}")
+            errors_detail.append(f"{student_id}: {err}")
             continue
 
     if errors_detail and generated_count == 0:
