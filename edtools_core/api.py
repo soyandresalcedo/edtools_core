@@ -8,6 +8,7 @@ from edtools_core.fees_events import ensure_local_lang_for_num2words
 from edtools_core.moodle_sync import sync_student_enrollment_to_moodle
 from frappe import _
 from frappe.utils import cint, cstr, flt, getdate, today, add_months, nowdate
+from frappe.utils.data import escape_html
 from frappe.utils.dateutils import get_dates_from_timegrain
 
 # ------------------------------------------------------------------
@@ -1770,6 +1771,43 @@ def _coerce_financial_tool_text(val, default=""):
     return cstr(val).strip() or default
 
 
+def _student_name_for_financial_tool(student_id):
+    if not student_id:
+        return "—"
+    return frappe.db.get_value("Student", student_id, "student_name") or cstr(student_id)
+
+
+def _financial_tool_batch_status_label(status_key):
+    return {
+        "ok": _("Éxito"),
+        "no_enrollment": _("Sin Program Enrollment"),
+        "sin_id": _("Sin ID de estudiante"),
+        "error": _("Error"),
+        "incomplete": _("Incompleto"),
+    }.get(status_key, cstr(status_key))
+
+
+def _build_financial_tool_batch_summary_html(results):
+    headers = [_("Estudiante"), _("Fees creados"), _("Estado"), _("Detalle")]
+    rows_html = []
+    for r in results:
+        rows_html.append(
+            "<tr><td>{name}</td><td class='text-right'>{count}</td><td>{status}</td><td>{detail}</td></tr>".format(
+                name=escape_html(cstr(r.get("student_name") or "")),
+                count=cint(r.get("fees_count") or 0),
+                status=escape_html(_financial_tool_batch_status_label(r.get("status_key"))),
+                detail=escape_html(cstr(r.get("detail") or "")[:500]),
+            )
+        )
+    thead = "<thead><tr>" + "".join("<th>{}</th>".format(escape_html(h)) for h in headers) + "</tr></thead>"
+    tbody = "<tbody>" + "".join(rows_html) + "</tbody>"
+    return (
+        "<div class='financial-tool-batch-summary'>"
+        "<table class='table table-bordered table-condensed' style='margin-bottom:0'>"
+        f"{thead}{tbody}</table></div>"
+    )
+
+
 @frappe.whitelist()
 def generate_batch_records(student_group, fee_structure, components, schedule_data, students=None):
     """
@@ -1863,25 +1901,42 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
         frappe.throw(f"El grupo '{student_group}' no tiene estudiantes activos.")
 
     generated_count = 0
-    errors_detail = []
+    results = []
+    expected_fees = len(schedule_data)
 
     for stu in students:
         raw_sid = stu.get("student") if isinstance(stu, dict) else getattr(stu, "student", None)
         student_id = _coerce_financial_tool_text(raw_sid) if raw_sid is not None else ""
         if not student_id:
-            errors_detail.append(_("Fila de estudiante sin ID válido: {0}").format(cstr(stu)))
+            results.append({
+                "student_id": "",
+                "student_name": "—",
+                "fees_count": 0,
+                "status_key": "sin_id",
+                "detail": _("Fila sin ID válido: {0}").format(cstr(stu)[:200]),
+            })
             continue
-        try:
-            # --- B. OBTENER ENROLLMENT (antes de crear Fee Schedule para fallar rápido) ---
-            enrollment = frappe.db.get_value(
-                "Program Enrollment",
-                {"student": student_id, "docstatus": 1},
-                "name",
-            )
-            if not enrollment:
-                errors_detail.append(f"{student_id}: sin Program Enrollment enviado (docstatus=1). Cree/envíe el Program Enrollment del estudiante.")
-                continue
 
+        student_name = _student_name_for_financial_tool(student_id)
+
+        enrollment = frappe.db.get_value(
+            "Program Enrollment",
+            {"student": student_id, "docstatus": 1},
+            "name",
+        )
+        if not enrollment:
+            results.append({
+                "student_id": student_id,
+                "student_name": student_name,
+                "fees_count": 0,
+                "status_key": "no_enrollment",
+                "detail": _("No hay Program Enrollment enviado (docstatus=1)."),
+            })
+            continue
+
+        fee_schedule_created = False
+        fees_created = 0
+        try:
             # --- A. CREAR FEE SCHEDULE ---
             fs = frappe.new_doc("Fee Schedule")
             fs.student = student_id
@@ -1907,6 +1962,7 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
 
             fs.save(ignore_permissions=True)
             fs.submit()
+            fee_schedule_created = True
 
             # --- C. CREAR FEES (FACTURAS) ---
             for row in schedule_data:
@@ -1947,31 +2003,54 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
 
                 fee.save(ignore_permissions=True)
                 fee.submit()
+                fees_created += 1
 
             generated_count += 1
+            results.append({
+                "student_id": student_id,
+                "student_name": student_name,
+                "fees_count": fees_created,
+                "status_key": "ok",
+                "detail": fs.name,
+            })
 
         except Exception as e:
             err = cstr(e)
             tb = traceback.format_exc()
             msg = f"{student_id}: {err}\n{tb}"
             frappe.log_error(title=f"Student Financial Tool - {student_id}", message=msg)
-            errors_detail.append(f"{student_id}: {err}")
+            if fee_schedule_created and fees_created < expected_fees:
+                status_key = "incomplete"
+                detail = _("Plan de fees incompleto ({0}/{1}): {2}").format(fees_created, expected_fees, err[:280])
+            else:
+                status_key = "error"
+                detail = err[:500]
+            results.append({
+                "student_id": student_id,
+                "student_name": student_name,
+                "fees_count": fees_created,
+                "status_key": status_key,
+                "detail": detail,
+            })
             continue
 
-    if errors_detail and generated_count == 0:
-        frappe.msgprint(
-            _("Ningún registro generado. Revisar Error Log y:\n{0}").format("\n".join(errors_detail)),
-            title=_("Generar para Grupo"),
-            indicator="red",
-        )
-    elif errors_detail and generated_count > 0:
-        frappe.msgprint(
-            _("Generados {0} registros. Algunos fallaron:\n{1}\nRevisar Error Log para detalles.").format(generated_count, "\n".join(errors_detail)),
-            title=_("Generar para Grupo"),
-            indicator="orange",
-        )
+    ok_n = sum(1 for r in results if r.get("status_key") == "ok")
+    if ok_n == len(results):
+        indicator = "green"
+    elif ok_n == 0:
+        indicator = "red"
+    else:
+        indicator = "orange"
 
-    return generated_count
+    html = _build_financial_tool_batch_summary_html(results)
+    title = _("Generar para Grupo")
+    return {
+        "html": html,
+        "title": title,
+        "indicator": indicator,
+        "generated_count": generated_count,
+        "results": results,
+    }
 
 @frappe.whitelist()
 def get_program_duration_details(program, start_date):
