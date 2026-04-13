@@ -1840,20 +1840,24 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
     errors_detail = []
 
     for stu in students:
+        student_id = stu.get("student") if isinstance(stu, dict) else getattr(stu, "student", None)
+        if not student_id:
+            errors_detail.append(_("Fila de estudiante sin ID válido: {0}").format(cstr(stu)))
+            continue
         try:
             # --- B. OBTENER ENROLLMENT (antes de crear Fee Schedule para fallar rápido) ---
             enrollment = frappe.db.get_value(
                 "Program Enrollment",
-                {"student": stu.student, "docstatus": 1},
+                {"student": student_id, "docstatus": 1},
                 "name",
             )
             if not enrollment:
-                errors_detail.append(f"{stu.student}: sin Program Enrollment enviado (docstatus=1). Cree/envíe el Program Enrollment del estudiante.")
+                errors_detail.append(f"{student_id}: sin Program Enrollment enviado (docstatus=1). Cree/envíe el Program Enrollment del estudiante.")
                 continue
 
             # --- A. CREAR FEE SCHEDULE ---
             fs = frappe.new_doc("Fee Schedule")
-            fs.student = stu.student
+            fs.student = student_id
             fs.program = struct_base.program
             fs.academic_year = struct_base.academic_year
             fs.fee_structure = fee_structure
@@ -1877,7 +1881,7 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
             # --- C. CREAR FEES (FACTURAS) ---
             for row in schedule_data:
                 fee = frappe.new_doc("Fees")
-                fee.student = stu.student
+                fee.student = student_id
                 fee.program_enrollment = enrollment
                 fee.program = fs.program
                 fee.academic_year = fs.academic_year
@@ -1916,9 +1920,9 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
             generated_count += 1
 
         except Exception as e:
-            msg = f"{stu.student}: {cstr(e)}\n{traceback.format_exc()}"
-            frappe.log_error(title=f"Student Financial Tool - {stu.student}", message=msg)
-            errors_detail.append(f"{stu.student}: {cstr(e)}")
+            msg = f"{student_id}: {cstr(e)}\n{traceback.format_exc()}"
+            frappe.log_error(title=f"Student Financial Tool - {student_id}", message=msg)
+            errors_detail.append(f"{student_id}: {cstr(e)}")
             continue
 
     if errors_detail and generated_count == 0:
