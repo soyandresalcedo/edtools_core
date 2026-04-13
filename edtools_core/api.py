@@ -1869,10 +1869,13 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
             fs.append("student_groups", {"student_group": student_group})
 
             for c in components:
+                # Fee Schedule.validate suma child.total (no amount). Sin total, queda None y falla: int += NoneType
+                line_amt = flt(c.get("amount"))
                 fs.append("components", {
                     "fees_category": c.get("fees_category"),
                     "description": c.get("description"),
-                    "amount": c.get("amount"),
+                    "amount": line_amt,
+                    "total": line_amt,
                 })
 
             fs.save(ignore_permissions=True)
