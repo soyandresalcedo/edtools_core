@@ -35,6 +35,10 @@ frappe.ui.form.on('Student Course Coverage', {
 		});
 	},
 
+	coverage_mode(frm) {
+		frm.get_field('results_html').$wrapper.html('');
+	},
+
 	academic_year(frm) {
 		frm.set_value('academic_term', '');
 	},
@@ -48,9 +52,14 @@ frappe.ui.form.on('Student Course Coverage', {
 	},
 
 	generate_coverage(frm) {
-		if (!frm.doc.academic_year || !frm.doc.academic_term) {
-			frappe.msgprint(__('Please select Academic Year and Academic Term.'));
-			return;
+		const cov = frm.doc.coverage_mode || 'by_period';
+		if (cov === 'by_period') {
+			if (!frm.doc.academic_year || !frm.doc.academic_term) {
+				frappe.msgprint(
+					__('Please select Academic Year and Academic Term (required in By period mode).')
+				);
+				return;
+			}
 		}
 
 		let mode = frm.doc.selection_mode;
@@ -96,9 +105,10 @@ function render_coverage(frm, data) {
 	}
 
 	let html = `<div class="coverage-container">`;
-	html += render_legend();
+	html += render_legend(data);
 
 	const coverageMeta = {
+		mode: data.coverage_mode || 'by_period',
 		program: (data.program || '').trim(),
 		plan_total: data.plan_total,
 	};
@@ -112,11 +122,19 @@ function render_coverage(frm, data) {
 	html += render_styles();
 	$wrapper.html(html);
 
-	$wrapper.on('click', '.cov-ce-link', function (e) {
+	$wrapper.off('click.covce').on('click.covce', '.cov-ce-link', function (e) {
 		e.preventDefault();
 		const name = $(this).text().trim();
 		if (name) {
 			frappe.set_route('Form', 'Course Enrollment', name);
+		}
+	});
+
+	$wrapper.off('click.covar').on('click.covar', '.cov-ar-link', function (e) {
+		e.preventDefault();
+		const name = $(this).text().trim();
+		if (name) {
+			frappe.set_route('Form', 'Assessment Result', name);
 		}
 	});
 
@@ -128,7 +146,18 @@ function render_coverage(frm, data) {
 	});
 }
 
-function render_legend() {
+function render_legend(data) {
+	const mode = (data && data.coverage_mode) || 'by_period';
+	if (mode === 'student_history') {
+		return `
+	<div class="cov-legend" style="margin-bottom:16px;display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
+		<span class="cov-badge cov-graded">${__('Graded')}</span>
+		<span class="cov-badge cov-inprogress">${__('In progress')}</span>
+		<span style="color:var(--text-muted);font-size:12px;margin-left:auto;">
+			${__('Rows from Course Enrollment; grade from Assessment Result when matched.')}
+		</span>
+	</div>`;
+	}
 	return `
 	<div class="cov-legend" style="margin-bottom:16px;display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
 		<span class="cov-badge cov-current">${__('Current Period')}</span>
@@ -141,6 +170,116 @@ function render_legend() {
 }
 
 function render_student_block(sid, s, collapsible, idx, coverageMeta) {
+	const mode = (coverageMeta && coverageMeta.mode) || 'by_period';
+	if (mode === 'student_history') {
+		return render_student_block_history(sid, s, collapsible, idx, coverageMeta);
+	}
+	return render_student_block_period(sid, s, collapsible, idx, coverageMeta);
+}
+
+function render_student_block_history(sid, s, collapsible, idx, coverageMeta) {
+	const kpis = s.kpis || {};
+	const warning = s.warning || '';
+	const open = idx === 0 ? '' : 'style="display:none"';
+	coverageMeta = coverageMeta || {};
+
+	let header_class = collapsible ? 'cov-header cov-clickable' : 'cov-header';
+	let chevron = collapsible
+		? `<span class="cov-chevron ${idx === 0 ? 'rotated' : ''}">&#9654;</span> `
+		: '';
+
+	let html = `<div class="cov-student" data-student="${frappe.utils.escape_html(sid)}">`;
+
+	html += `<div class="${header_class}">`;
+	html += `${chevron}<strong>${frappe.utils.escape_html(s.student_name || sid)}</strong>`;
+	html += `<span class="text-muted" style="margin-left:8px;">${frappe.utils.escape_html(sid)}</span>`;
+	html += `</div>`;
+
+	html += `<div class="cov-body" ${open}>`;
+
+	if (warning) {
+		html += `<div class="alert alert-warning" style="margin:8px 0;">${frappe.utils.escape_html(warning)}</div>`;
+		html += `</div></div>`;
+		return html;
+	}
+
+	html += `<div class="cov-kpis">`;
+	html += kpi_card(__('Enrollments / rows'), kpis.enrollments, 'var(--text-color)');
+	html += kpi_card(__('Graded'), kpis.graded, 'var(--green-600)');
+	html += kpi_card(__('In progress'), kpis.in_progress, 'var(--orange-600)');
+	html += `</div>`;
+
+	const courses = s.courses || [];
+	if (courses.length) {
+		html += `<table class="table table-bordered cov-table">
+			<thead><tr>
+				<th style="width:32%">${__('Course')}</th>
+				<th style="width:14%">${__('Program')}</th>
+				<th style="width:14%">${__('Period')}</th>
+				<th style="width:12%">${__('Status')}</th>
+				<th style="width:10%">${__('Grade')}</th>
+				<th style="width:18%">${__('Records')}</th>
+			</tr></thead><tbody>`;
+
+		courses.forEach(function (c) {
+			const code = (c.course || '').trim();
+			const name = (c.course_name || '').trim();
+			let displayCourse = code;
+			if (name) {
+				const codeLower = code.toLowerCase();
+				const nameLower = name.toLowerCase();
+				const isDuplicate = nameLower === codeLower || nameLower.startsWith(codeLower + ' - ');
+				displayCourse = isDuplicate ? name : `${code} — ${name}`;
+			}
+
+			let badge_cls = 'cov-inprogress';
+			let label = __('In progress');
+			if (c.status === 'graded') {
+				badge_cls = 'cov-graded';
+				label = __('Graded');
+			}
+
+			const prog = (c.program || '').trim();
+			const period = (c.period_label || '').trim();
+			const grade = (c.grade || '').trim();
+			const recordCell = format_history_record_cell(c);
+
+			html += `<tr class="cov-row-${c.status || 'in_progress'}">
+				<td>${frappe.utils.escape_html(displayCourse)}</td>
+				<td class="text-muted">${frappe.utils.escape_html(prog)}</td>
+				<td class="text-muted">${frappe.utils.escape_html(period)}</td>
+				<td><span class="cov-badge ${badge_cls}">${label}</span></td>
+				<td>${frappe.utils.escape_html(grade)}</td>
+				<td class="text-muted cov-detail-cell">${recordCell}</td>
+			</tr>`;
+		});
+
+		html += `</tbody></table>`;
+	}
+
+	html += `</div></div>`;
+	return html;
+}
+
+function format_history_record_cell(c) {
+	const esc = frappe.utils.escape_html;
+	if (c.detail_kind === 'assessment_result') {
+		const ar = (c.detail || c.assessment_result || '').trim();
+		if (!ar) return '';
+		return `<a href="#" class="cov-ar-link">${esc(ar)}</a>`;
+	}
+	const parts = [];
+	if (c.detail) {
+		parts.push(`<a href="#" class="cov-ce-link">${esc((c.detail || '').trim())}</a>`);
+	}
+	const ar = (c.assessment_result || '').trim();
+	if (ar && ar !== (c.detail || '').trim()) {
+		parts.push(`<a href="#" class="cov-ar-link">${esc(ar)}</a>`);
+	}
+	return parts.join(' <span class="text-muted">·</span> ') || '';
+}
+
+function render_student_block_period(sid, s, collapsible, idx, coverageMeta) {
 	const kpis = s.kpis || {};
 	const warning = s.warning || '';
 	const open = idx === 0 ? '' : 'style="display:none"';
@@ -277,6 +416,8 @@ function render_styles() {
 .cov-current { background: var(--green-100); color: var(--green-700); }
 .cov-history { background: var(--gray-200); color: var(--gray-700); }
 .cov-missing { background: var(--red-100); color: var(--red-700); }
+.cov-graded { background: var(--green-100); color: var(--green-700); }
+.cov-inprogress { background: var(--orange-100); color: var(--orange-800); }
 .cov-row-missing td:first-child { font-weight: 600; }
 </style>`;
 }
