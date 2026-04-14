@@ -43,6 +43,110 @@ def _format_ar_grade(ar: dict | None) -> str:
 	return ""
 
 
+def _active_programs_for_student(student_id: str) -> list[str]:
+	"""Programas distintos de matrículas a programa activas (PE enviado), más reciente primero."""
+	rows = frappe.get_all(
+		"Program Enrollment",
+		filters={"student": student_id, "docstatus": 1},
+		fields=["program", "modified"],
+		order_by="modified desc",
+	)
+	out: list[str] = []
+	seen: set[str] = set()
+	for r in rows:
+		p = cstr(r.get("program") or "").strip()
+		if p and p not in seen:
+			seen.add(p)
+			out.append(p)
+	return out
+
+
+def _program_plan_courses(program_name: str) -> list[dict]:
+	if not program_name or not frappe.db.exists("Program", program_name):
+		return []
+	return frappe.get_all(
+		"Program Course",
+		filters={"parent": program_name},
+		fields=["course", "course_name", "required"],
+		order_by="idx asc",
+	)
+
+
+def _merged_plan_courses(program_names: list[str]) -> list[dict]:
+	"""Une Program Course de varios programas; una fila por código de curso (primer nombre conservado)."""
+	merged: dict[str, dict] = {}
+	for prog in program_names:
+		for pc in _program_plan_courses(prog):
+			code = cstr(pc.get("course") or "").strip()
+			if not code or code in merged:
+				continue
+			merged[code] = {
+				"course": code,
+				"course_name": pc.get("course_name") or code,
+				"required": bool(pc.get("required")),
+			}
+	return list(merged.values())
+
+
+def _covered_course_codes_for_student(student_id: str, allowed_programs: list[str]) -> set[str]:
+	"""
+	Curso cuberto respecto al plan si:
+	- hay Course Enrollment enviado (docstatus 1) ligado a PE enviado cuyo program está en allowed, o
+	- hay Assessment Result enviado con nota significativa y program vacío o en allowed.
+	"""
+	if not allowed_programs:
+		return set()
+	allowed = set(allowed_programs)
+	covered: set[str] = set()
+
+	ce_rows = frappe.get_all(
+		"Course Enrollment",
+		filters={"student": student_id, "docstatus": 1},
+		fields=["course", "program_enrollment"],
+	)
+	pe_ids = list({c["program_enrollment"] for c in ce_rows if c.get("program_enrollment")})
+	pe_by_name: dict = {}
+	if pe_ids:
+		for pe in frappe.get_all(
+			"Program Enrollment",
+			filters={"name": ["in", pe_ids], "docstatus": 1},
+			fields=["name", "program"],
+		):
+			pe_by_name[pe["name"]] = pe
+	for c in ce_rows:
+		pe = pe_by_name.get(c.get("program_enrollment"))
+		if not pe:
+			continue
+		if (pe.get("program") or "") not in allowed:
+			continue
+		cc = cstr(c.get("course") or "").strip()
+		if cc:
+			covered.add(cc)
+
+	for ar in frappe.get_all(
+		"Assessment Result",
+		filters={"student": student_id, "docstatus": 1},
+		fields=["course", "program", "grade", "total_score"],
+	):
+		if not _ar_has_meaningful_grade(ar):
+			continue
+		cc = cstr(ar.get("course") or "").strip()
+		if not cc:
+			continue
+		ap = cstr(ar.get("program") or "").strip()
+		if not ap or ap in allowed:
+			covered.add(cc)
+
+	return covered
+
+
+def _filtered_ce_entries(ce_list: list, allowed_programs: list[str] | None) -> list:
+	if not allowed_programs:
+		return ce_list
+	ap = set(allowed_programs)
+	return [e for e in ce_list if (e.get("program") or "") in ap]
+
+
 def _history_rows_for_student(student_id: str, program_filter: str | None) -> tuple[list[dict], str]:
 	"""
 	Construye filas a partir de Course Enrollment (no cancelados) + Assessment Result (enviados).
@@ -196,6 +300,79 @@ def _history_rows_for_student(student_id: str, program_filter: str | None) -> tu
 	return rows, warning
 
 
+def _history_rows_by_course(history_rows: list[dict]) -> dict[str, list[dict]]:
+	out: dict[str, list[dict]] = defaultdict(list)
+	for r in history_rows:
+		cc = cstr(r.get("course") or "").strip()
+		if cc:
+			out[cc].append(r)
+	return out
+
+
+def _build_plan_focus_rows(
+	plan_courses: list[dict],
+	covered_codes: set[str],
+	history_rows: list[dict],
+) -> list[dict]:
+	"""
+	Orden: primero cursos del plan cubiertos pero aún en progreso (transcript in_progress),
+	después pendientes (no cubiertos por CE enviado ni AR con nota).
+	"""
+	by_course = _history_rows_by_course(history_rows)
+	in_progress_codes = {
+		cstr(r.get("course") or "").strip()
+		for r in history_rows
+		if r.get("status") == "in_progress" and cstr(r.get("course") or "").strip()
+	}
+
+	first_block: list[dict] = []
+	second_block: list[dict] = []
+
+	for pc in plan_courses:
+		code = cstr(pc.get("course") or "").strip()
+		if not code:
+			continue
+		name = pc.get("course_name") or code
+		req = bool(pc.get("required"))
+
+		if code not in covered_codes:
+			second_block.append(
+				{
+					"course": code,
+					"course_name": name,
+					"mandatory": req,
+					"focus_status": "pending",
+					"status": "plan_pending",
+					"period_label": "",
+					"grade": "",
+					"detail": "",
+					"detail_kind": "",
+					"assessment_result": "",
+					"program": "",
+				}
+			)
+		elif code in in_progress_codes:
+			hlist = by_course.get(code, [])
+			h0 = hlist[0] if hlist else {}
+			first_block.append(
+				{
+					"course": code,
+					"course_name": name,
+					"mandatory": req,
+					"focus_status": "enrolled_in_progress",
+					"status": "plan_in_progress",
+					"period_label": h0.get("period_label") or "",
+					"grade": h0.get("grade") or "",
+					"detail": h0.get("detail") or "",
+					"detail_kind": h0.get("detail_kind") or "",
+					"assessment_result": h0.get("assessment_result") or "",
+					"program": h0.get("program") or "",
+				}
+			)
+
+	return first_block + second_block
+
+
 def get_student_history_coverage(
 	students: list[str],
 	program_filter: str | None = None,
@@ -215,18 +392,44 @@ def get_student_history_coverage(
 	pf = (cstr(program_filter).strip() or None)
 
 	results = {}
+	root_plan_total = 0
+
 	for student_id in students:
 		rows, warning = _history_rows_for_student(student_id, pf)
 		graded = sum(1 for r in rows if r.get("status") == "graded")
 		inprog = len(rows) - graded
+
+		allowed = [pf] if pf else _active_programs_for_student(student_id)
+		plan_courses = _merged_plan_courses(allowed) if allowed else []
+		plan_total = len(plan_courses)
+		if plan_total > root_plan_total:
+			root_plan_total = plan_total
+
+		plan_focus: list[dict] = []
+		plan_pending = 0
+		plan_in_progress = 0
+		if allowed and plan_courses:
+			covered = _covered_course_codes_for_student(student_id, allowed)
+			plan_focus = _build_plan_focus_rows(plan_courses, covered, rows)
+			plan_pending = sum(1 for r in plan_focus if r.get("focus_status") == "pending")
+			plan_in_progress = sum(1 for r in plan_focus if r.get("focus_status") == "enrolled_in_progress")
+		elif not allowed:
+			msg = _("No active Program Enrollment found; program plan cannot be inferred.")
+			warning = f"{warning} {msg}".strip() if warning else msg
+
 		results[student_id] = {
 			"student_name": student_names.get(student_id, student_id),
 			"warning": warning,
 			"courses": rows,
+			"plan_focus_rows": plan_focus,
+			"inferred_programs": allowed,
 			"kpis": {
 				"enrollments": len(rows),
 				"graded": graded,
 				"in_progress": inprog,
+				"plan_total": plan_total,
+				"plan_pending": plan_pending,
+				"plan_in_progress": plan_in_progress,
 			},
 		}
 
@@ -235,7 +438,7 @@ def get_student_history_coverage(
 		"program": pf or "",
 		"academic_year": "",
 		"academic_term": "",
-		"plan_total": 0,
+		"plan_total": root_plan_total,
 		"students": results,
 	}
 
@@ -256,7 +459,6 @@ class StudentCourseCoverage(Document):
 			academic_year=self.academic_year,
 			academic_term=self.academic_term,
 			students=students,
-			only_mandatory=bool(self.only_mandatory),
 			coverage_mode=mode,
 		)
 
@@ -297,14 +499,15 @@ def get_course_coverage(
 	academic_year: str,
 	academic_term: str,
 	students: list[str],
-	only_mandatory: bool = False,
 	coverage_mode: str | None = None,
 ) -> dict:
 	"""
 	Modo ``by_period`` (legacy): plan vs año/término seleccionados.
 
-	Modo ``student_history``: expediente por estudiante (CE no cancelados + notas de
-	Assessment Result enviados). ``program`` opcional acota por programa del PE / AR.
+	Modo ``student_history``: expediente + plan inferido desde PE (o Program del formulario).
+
+	Si ``program`` está vacío en cualquier modo, los programas activos del estudiante (PE enviado)
+	definen el plan fusionado (Program Course).
 	"""
 	if isinstance(students, str):
 		import json
@@ -324,17 +527,6 @@ def get_course_coverage(
 		frappe.throw(_("Academic Year and Academic Term are required in By period mode."))
 
 	program = (frappe.utils.cstr(program).strip() or None)
-
-	plan_courses = []
-	if program:
-		plan_courses = frappe.get_all(
-			"Program Course",
-			filters={"parent": program},
-			fields=["course", "course_name", "required"],
-			order_by="idx asc",
-		)
-		if not plan_courses:
-			frappe.throw(_("Program {0} has no courses defined.").format(program))
 
 	# Course Enrollments: solo enviados (docstatus 1) en modo legacy.
 	ce_rows = frappe.get_all(
@@ -386,28 +578,56 @@ def get_course_coverage(
 		)
 	}
 
-	pe_filters = {"student": ["in", students], "docstatus": 1}
-	if program:
-		pe_filters["program"] = program
-	pe_exists = set(frappe.get_all("Program Enrollment", filters=pe_filters, pluck="student"))
-
 	results = {}
+	max_plan_len = 0
+
 	for student_id in students:
 		student_name = student_names.get(student_id, student_id)
-		if student_id not in pe_exists:
-			warn_msg = _("No active Program Enrollment found.")
-			if program:
-				warn_msg = _("No active Program Enrollment for {0}").format(program)
+		allowed = [program] if program else _active_programs_for_student(student_id)
+		plan_courses = _program_plan_courses(program) if program else _merged_plan_courses(allowed)
+
+		if program and not plan_courses:
+			frappe.throw(_("Program {0} has no courses defined.").format(program))
+
+		pe_any = frappe.db.exists(
+			"Program Enrollment", {"student": student_id, "docstatus": 1}
+		)
+		if program:
+			pe_ok = frappe.db.exists(
+				"Program Enrollment",
+				{"student": student_id, "docstatus": 1, "program": program},
+			)
+		else:
+			pe_ok = bool(allowed)
+
+		if not pe_any:
 			results[student_id] = {
 				"student_name": student_name,
-				"warning": warn_msg,
+				"warning": _("No active Program Enrollment found."),
 				"courses": [],
+				"inferred_programs": allowed,
 				"kpis": {
-					"total": len(plan_courses) if program else 0,
+					"total": 0,
 					"current": 0,
 					"history": 0,
-					"missing": len(plan_courses) if program else 0,
-					"missing_mandatory": sum(1 for pc in plan_courses if pc["required"]) if program else 0,
+					"missing": 0,
+					"missing_mandatory": 0,
+				},
+			}
+			continue
+
+		if program and not pe_ok:
+			results[student_id] = {
+				"student_name": student_name,
+				"warning": _("No active Program Enrollment for {0}").format(program),
+				"courses": [],
+				"inferred_programs": allowed,
+				"kpis": {
+					"total": len(plan_courses),
+					"current": 0,
+					"history": 0,
+					"missing": len(plan_courses),
+					"missing_mandatory": sum(1 for pc in plan_courses if pc["required"]),
 				},
 			}
 			continue
@@ -416,11 +636,13 @@ def get_course_coverage(
 		courses_out = []
 		kpis = {"total": 0, "current": 0, "history": 0, "missing": 0, "missing_mandatory": 0}
 
-		if program:
+		if plan_courses:
 			kpis["total"] = len(plan_courses)
+			if len(plan_courses) > max_plan_len:
+				max_plan_len = len(plan_courses)
 			for pc in plan_courses:
 				course_code = pc["course"]
-				ce_list = enrollments.get(course_code, [])
+				ce_list = _filtered_ce_entries(enrollments.get(course_code, []), allowed if not program else None)
 				is_mandatory = bool(pc["required"])
 
 				if not ce_list:
@@ -468,7 +690,7 @@ def get_course_coverage(
 				}
 			kpis["total"] = len(all_courses)
 			for course_code in all_courses:
-				ce_list = enrollments.get(course_code, [])
+				ce_list = _filtered_ce_entries(enrollments.get(course_code, []), allowed if not program else None)
 				in_current = [
 					e
 					for e in ce_list
@@ -507,6 +729,7 @@ def get_course_coverage(
 		results[student_id] = {
 			"student_name": student_name,
 			"courses": courses_out,
+			"inferred_programs": allowed,
 			"kpis": kpis,
 		}
 
@@ -515,6 +738,6 @@ def get_course_coverage(
 		"program": program or "",
 		"academic_year": academic_year,
 		"academic_term": academic_term,
-		"plan_total": len(plan_courses) if program else 0,
+		"plan_total": max_plan_len,
 		"students": results,
 	}

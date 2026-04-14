@@ -153,8 +153,10 @@ function render_legend(data) {
 	<div class="cov-legend" style="margin-bottom:16px;display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
 		<span class="cov-badge cov-graded">${__('Graded')}</span>
 		<span class="cov-badge cov-inprogress">${__('In progress')}</span>
+		<span class="cov-badge cov-plan-ip">${__('Enrolled (plan)')}</span>
+		<span class="cov-badge cov-plan-pending">${__('Pending (plan)')}</span>
 		<span style="color:var(--text-muted);font-size:12px;margin-left:auto;">
-			${__('Rows from Course Enrollment; grade from Assessment Result when matched.')}
+			${__('Table 1: transcript. Table 2: plan courses — in progress first, then pending.')}
 		</span>
 	</div>`;
 	}
@@ -163,9 +165,6 @@ function render_legend(data) {
 		<span class="cov-badge cov-current">${__('Current Period')}</span>
 		<span class="cov-badge cov-history">${__('History')}</span>
 		<span class="cov-badge cov-missing">${__('Not Enrolled')}</span>
-		<span style="color:var(--text-muted);font-size:12px;margin-left:auto;">
-			<strong>M</strong> = ${__('Mandatory')}
-		</span>
 	</div>`;
 }
 
@@ -207,10 +206,16 @@ function render_student_block_history(sid, s, collapsible, idx, coverageMeta) {
 	html += kpi_card(__('Enrollments / rows'), kpis.enrollments, 'var(--text-color)');
 	html += kpi_card(__('Graded'), kpis.graded, 'var(--green-600)');
 	html += kpi_card(__('In progress'), kpis.in_progress, 'var(--orange-600)');
+	if ((kpis.plan_total || 0) > 0) {
+		html += kpi_card(__('Plan courses'), kpis.plan_total, 'var(--text-color)');
+		html += kpi_card(__('Plan: in progress'), kpis.plan_in_progress || 0, 'var(--orange-600)');
+		html += kpi_card(__('Plan: pending'), kpis.plan_pending || 0, 'var(--red-600)');
+	}
 	html += `</div>`;
 
 	const courses = s.courses || [];
 	if (courses.length) {
+		html += `<h4 class="cov-subtable-title">${__('Academic history')}</h4>`;
 		html += `<table class="table table-bordered cov-table">
 			<thead><tr>
 				<th style="width:32%">${__('Course')}</th>
@@ -254,6 +259,50 @@ function render_student_block_history(sid, s, collapsible, idx, coverageMeta) {
 			</tr>`;
 		});
 
+		html += `</tbody></table>`;
+	}
+
+	const focus = s.plan_focus_rows || [];
+	if (focus.length) {
+		html += `<h4 class="cov-subtable-title" style="margin-top:20px;">${__('Plan: currently enrolled & pending')}</h4>`;
+		html += `<table class="table table-bordered cov-table">
+			<thead><tr>
+				<th style="width:32%">${__('Course')}</th>
+				<th style="width:14%">${__('Program')}</th>
+				<th style="width:14%">${__('Period')}</th>
+				<th style="width:12%">${__('Status')}</th>
+				<th style="width:10%">${__('Grade')}</th>
+				<th style="width:18%">${__('Records')}</th>
+			</tr></thead><tbody>`;
+		focus.forEach(function (c) {
+			const code = (c.course || '').trim();
+			const name = (c.course_name || '').trim();
+			let displayCourse = code;
+			if (name) {
+				const codeLower = code.toLowerCase();
+				const nameLower = name.toLowerCase();
+				const isDuplicate = nameLower === codeLower || nameLower.startsWith(codeLower + ' - ');
+				displayCourse = isDuplicate ? name : `${code} — ${name}`;
+			}
+			let badge_cls = 'cov-plan-pending';
+			let label = __('Pending (plan)');
+			if (c.focus_status === 'enrolled_in_progress') {
+				badge_cls = 'cov-plan-ip';
+				label = __('Enrolled (in progress)');
+			}
+			const prog = (c.program || '').trim();
+			const period = (c.period_label || '').trim();
+			const grade = (c.grade || '').trim();
+			const recordCell = format_history_record_cell(c);
+			html += `<tr class="cov-row-${c.status || 'plan_pending'}">
+				<td>${frappe.utils.escape_html(displayCourse)}</td>
+				<td class="text-muted">${frappe.utils.escape_html(prog)}</td>
+				<td class="text-muted">${frappe.utils.escape_html(period)}</td>
+				<td><span class="cov-badge ${badge_cls}">${label}</span></td>
+				<td>${frappe.utils.escape_html(grade)}</td>
+				<td class="text-muted cov-detail-cell">${recordCell}</td>
+			</tr>`;
+		});
 		html += `</tbody></table>`;
 	}
 
@@ -313,12 +362,12 @@ function render_student_block_period(sid, s, collapsible, idx, coverageMeta) {
 	html += kpi_card(__('Current Period'), kpis.current, 'var(--green-600)');
 	html += kpi_card(__('History'), kpis.history, 'var(--gray-600)');
 	html += kpi_card(__('Not Enrolled'), kpis.missing, 'var(--red-600)');
-	html += kpi_card(__('Not Enrolled (M)'), kpis.missing_mandatory, 'var(--orange-600)');
 	html += `</div>`;
 
 	const tot = Number(kpis.total) || 0;
 	const cur = Number(kpis.current) || 0;
-	if (coverageMeta.program && tot > 0) {
+	const hasPlan = tot > 0 && ((coverageMeta.program || '').trim() || (s.inferred_programs || []).length);
+	if (hasPlan) {
 		const pct = Math.min(100, Math.max(0, Math.round((100 * cur) / tot)));
 		html += `<div class="cov-plan-progress" style="margin:0 0 14px 0;">
 			<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text-muted);margin-bottom:6px;gap:8px;">
@@ -336,10 +385,9 @@ function render_student_block_period(sid, s, collapsible, idx, coverageMeta) {
 	if (courses.length) {
 		html += `<table class="table table-bordered cov-table">
 			<thead><tr>
-				<th style="width:40%">${__('Course')}</th>
-				<th style="width:10%;text-align:center">${__('M')}</th>
-				<th style="width:20%">${__('Status')}</th>
-				<th style="width:30%">${__('Detail')}</th>
+				<th style="width:44%">${__('Course')}</th>
+				<th style="width:22%">${__('Status')}</th>
+				<th style="width:34%">${__('Detail')}</th>
 			</tr></thead><tbody>`;
 
 		courses.forEach(function (c) {
@@ -363,7 +411,6 @@ function render_student_block_period(sid, s, collapsible, idx, coverageMeta) {
 
 			html += `<tr class="cov-row-${c.status}">
 				<td>${frappe.utils.escape_html(displayCourse)}</td>
-				<td style="text-align:center">${c.mandatory ? '&#10003;' : ''}</td>
 				<td><span class="cov-badge ${badge_cls}">${label}</span></td>
 				<td class="text-muted cov-detail-cell">${detailCell}</td>
 			</tr>`;
@@ -418,6 +465,9 @@ function render_styles() {
 .cov-missing { background: var(--red-100); color: var(--red-700); }
 .cov-graded { background: var(--green-100); color: var(--green-700); }
 .cov-inprogress { background: var(--orange-100); color: var(--orange-800); }
+.cov-plan-ip { background: var(--blue-100, #cfe2ff); color: var(--blue-800, #084298); }
+.cov-plan-pending { background: var(--red-100); color: var(--red-700); }
+.cov-subtable-title { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--text-muted); }
 .cov-row-missing td:first-child { font-weight: 600; }
 </style>`;
 }

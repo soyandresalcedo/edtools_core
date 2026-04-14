@@ -14,7 +14,6 @@
   "student",
   "student_group",
   "column_break_selection2",
-  "only_mandatory",
   "section_break_manual",
   "students",
   "section_break_results",
@@ -31,7 +30,7 @@
    "reqd": 1
   },
   {
-   "description": "Optional: limit to a program plan (by period) or filter history rows (student history).",
+   "description": "Optional filter. If empty, programs are taken from each student's submitted Program Enrollment(s) to build the merged course plan.",
    "fieldname": "program",
    "fieldtype": "Link",
    "label": "Program",
@@ -87,14 +86,6 @@
   {
    "fieldname": "column_break_selection2",
    "fieldtype": "Column Break"
-  },
-  {
-   "default": "0",
-   "depends_on": "eval:doc.coverage_mode=='by_period'",
-   "description": "Highlight mandatory courses in the summary KPIs",
-   "fieldname": "only_mandatory",
-   "fieldtype": "Check",
-   "label": "Highlight Mandatory Only"
   },
   {
    "depends_on": "eval:doc.selection_mode=='Manual List'",
