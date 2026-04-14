@@ -90,10 +90,11 @@ def get_course_coverage(
 		if not plan_courses:
 			frappe.throw(_("Program {0} has no courses defined.").format(program))
 
-	# Course Enrollments: use get_all + PE lookup (reliable across DBs; avoids qb isin edge cases).
+	# Course Enrollments: solo enviados (docstatus 1), alineado con Program Enrollment y con
+	# informes académicos; excluye borradores y cancelados.
 	ce_rows = frappe.get_all(
 		"Course Enrollment",
-		filters={"student": ["in", students]},
+		filters={"student": ["in", students], "docstatus": 1},
 		fields=["name", "student", "course", "program_enrollment", "enrollment_date"],
 		order_by="student asc, course asc",
 	)

@@ -26,7 +26,12 @@ frappe.ui.form.on('Student Course Coverage', {
 		}).addClass('btn-primary');
 
 		frm.add_custom_button(__('Clear'), function () {
-			frm.get_field('results_html').$wrapper.html('');
+			frappe.confirm(
+				__('Clear the coverage results from this page?'),
+				function () {
+					frm.get_field('results_html').$wrapper.html('');
+				}
+			);
 		});
 	},
 
@@ -93,14 +98,27 @@ function render_coverage(frm, data) {
 	let html = `<div class="coverage-container">`;
 	html += render_legend();
 
+	const coverageMeta = {
+		program: (data.program || '').trim(),
+		plan_total: data.plan_total,
+	};
+
 	student_ids.forEach(function (sid, idx) {
 		const s = students[sid];
-		html += render_student_block(sid, s, student_ids.length > 1, idx);
+		html += render_student_block(sid, s, student_ids.length > 1, idx, coverageMeta);
 	});
 
 	html += `</div>`;
 	html += render_styles();
 	$wrapper.html(html);
+
+	$wrapper.on('click', '.cov-ce-link', function (e) {
+		e.preventDefault();
+		const name = $(this).text().trim();
+		if (name) {
+			frappe.set_route('Form', 'Course Enrollment', name);
+		}
+	});
 
 	// Accordion toggle
 	$wrapper.find('.cov-header').on('click', function () {
@@ -122,10 +140,11 @@ function render_legend() {
 	</div>`;
 }
 
-function render_student_block(sid, s, collapsible, idx) {
+function render_student_block(sid, s, collapsible, idx, coverageMeta) {
 	const kpis = s.kpis || {};
 	const warning = s.warning || '';
 	const open = idx === 0 ? '' : 'style="display:none"';
+	coverageMeta = coverageMeta || {};
 
 	let header_class = collapsible ? 'cov-header cov-clickable' : 'cov-header';
 	let chevron = collapsible
@@ -158,6 +177,21 @@ function render_student_block(sid, s, collapsible, idx) {
 	html += kpi_card(__('Not Enrolled (M)'), kpis.missing_mandatory, 'var(--orange-600)');
 	html += `</div>`;
 
+	const tot = Number(kpis.total) || 0;
+	const cur = Number(kpis.current) || 0;
+	if (coverageMeta.program && tot > 0) {
+		const pct = Math.min(100, Math.max(0, Math.round((100 * cur) / tot)));
+		html += `<div class="cov-plan-progress" style="margin:0 0 14px 0;">
+			<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text-muted);margin-bottom:6px;gap:8px;">
+				<span>${__('Plan coverage (current period)')}</span>
+				<span><strong>${pct}%</strong> (${cur} / ${tot})</span>
+			</div>
+			<div class="progress" style="height:10px;margin:0;border-radius:4px;overflow:hidden;background:var(--control-bg);">
+				<div class="progress-bar" style="width:${pct}%;background:var(--green-500);height:100%;"></div>
+			</div>
+		</div>`;
+	}
+
 	// Table
 	const courses = s.courses || [];
 	if (courses.length) {
@@ -186,11 +220,13 @@ function render_student_block(sid, s, collapsible, idx) {
 				displayCourse = isDuplicate ? name : `${code} — ${name}`;
 			}
 
+			const detailCell = format_coverage_detail_cell(c);
+
 			html += `<tr class="cov-row-${c.status}">
 				<td>${frappe.utils.escape_html(displayCourse)}</td>
 				<td style="text-align:center">${c.mandatory ? '&#10003;' : ''}</td>
 				<td><span class="cov-badge ${badge_cls}">${label}</span></td>
-				<td class="text-muted">${frappe.utils.escape_html(c.detail || '')}</td>
+				<td class="text-muted cov-detail-cell">${detailCell}</td>
 			</tr>`;
 		});
 
@@ -206,6 +242,19 @@ function kpi_card(label, value, color) {
 		<div class="cov-kpi-value" style="color:${color}">${value ?? 0}</div>
 		<div class="cov-kpi-label">${label}</div>
 	</div>`;
+}
+
+/** Detail en periodo actual = name de Course Enrollment (contrato API). History = texto libre, sin enlace. */
+function format_coverage_detail_cell(c) {
+	const d = (c.detail || '').trim();
+	if (!d) {
+		return '';
+	}
+	if (c.status === 'current_period') {
+		const esc = frappe.utils.escape_html(d);
+		return `<a href="#" class="cov-ce-link">${esc}</a>`;
+	}
+	return frappe.utils.escape_html(d);
 }
 
 function render_styles() {
