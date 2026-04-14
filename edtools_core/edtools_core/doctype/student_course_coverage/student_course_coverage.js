@@ -156,7 +156,7 @@ function render_legend(data) {
 		<span class="cov-badge cov-plan-ip">${__('Enrolled (plan)')}</span>
 		<span class="cov-badge cov-plan-pending">${__('Pending (plan)')}</span>
 		<span style="color:var(--text-muted);font-size:12px;margin-left:auto;">
-			${__('Table 1: transcript. Table 2: plan courses — in progress first, then pending.')}
+			${__('Plan courses in progress below are omitted from the history table.')}
 		</span>
 	</div>`;
 	}

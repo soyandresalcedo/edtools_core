@@ -396,8 +396,6 @@ def get_student_history_coverage(
 
 	for student_id in students:
 		rows, warning = _history_rows_for_student(student_id, pf)
-		graded = sum(1 for r in rows if r.get("status") == "graded")
-		inprog = len(rows) - graded
 
 		allowed = [pf] if pf else _active_programs_for_student(student_id)
 		plan_courses = _merged_plan_courses(allowed) if allowed else []
@@ -413,9 +411,27 @@ def get_student_history_coverage(
 			plan_focus = _build_plan_focus_rows(plan_courses, covered, rows)
 			plan_pending = sum(1 for r in plan_focus if r.get("focus_status") == "pending")
 			plan_in_progress = sum(1 for r in plan_focus if r.get("focus_status") == "enrolled_in_progress")
+			# No duplicar en "Academic history" lo que ya va en plan (en curso del plan).
+			ip_plan_courses = {
+				cstr(r.get("course") or "").strip()
+				for r in plan_focus
+				if r.get("focus_status") == "enrolled_in_progress"
+			}
+			if ip_plan_courses:
+				rows = [
+					r
+					for r in rows
+					if not (
+						r.get("status") == "in_progress"
+						and cstr(r.get("course") or "").strip() in ip_plan_courses
+					)
+				]
 		elif not allowed:
 			msg = _("No active Program Enrollment found; program plan cannot be inferred.")
 			warning = f"{warning} {msg}".strip() if warning else msg
+
+		graded = sum(1 for r in rows if r.get("status") == "graded")
+		inprog = len(rows) - graded
 
 		results[student_id] = {
 			"student_name": student_names.get(student_id, student_id),
