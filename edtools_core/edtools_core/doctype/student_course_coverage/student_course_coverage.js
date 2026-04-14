@@ -152,7 +152,6 @@ function render_legend(data) {
 		return `
 	<div class="cov-legend" style="margin-bottom:16px;display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
 		<span class="cov-badge cov-graded">${__('Graded')}</span>
-		<span class="cov-badge cov-inprogress">${__('In progress')}</span>
 		<span class="cov-badge cov-plan-ip">${__('Enrolled (plan)')}</span>
 		<span class="cov-badge cov-plan-pending">${__('Pending (plan)')}</span>
 		<span style="color:var(--text-muted);font-size:12px;margin-left:auto;">
@@ -205,7 +204,6 @@ function render_student_block_history(sid, s, collapsible, idx, coverageMeta) {
 	html += `<div class="cov-kpis">`;
 	html += kpi_card(__('Enrollments / rows'), kpis.enrollments, 'var(--text-color)');
 	html += kpi_card(__('Graded'), kpis.graded, 'var(--green-600)');
-	html += kpi_card(__('In progress'), kpis.in_progress, 'var(--orange-600)');
 	if ((kpis.plan_total || 0) > 0) {
 		html += kpi_card(__('Plan courses'), kpis.plan_total, 'var(--text-color)');
 		html += kpi_card(__('Plan: in progress'), kpis.plan_in_progress || 0, 'var(--orange-600)');
