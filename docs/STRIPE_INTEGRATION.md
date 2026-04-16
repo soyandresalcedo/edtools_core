@@ -12,9 +12,9 @@
   3. El backend devuelve el **client_secret** del PaymentIntent al frontend.
   4. El frontend carga **Stripe.js** y muestra el formulario de tarjeta (Elements); el usuario completa y confirma.
   5. Stripe procesa el pago y confirma.
-  6. Opción A: el frontend llama a un endpoint “payment confirmed” y el backend crea el **Payment Entry** en Frappe.
-  7. Opción B (más robusta): Stripe envía un **webhook** `payment_intent.succeeded` a tu servidor; el backend crea el Payment Entry ahí (evita duplicados si el usuario cierra la pestaña antes de que el frontend llame).
-  8. Se actualiza el `outstanding_amount` del Fee (vía Payment Entry y el flujo normal de Frappe).
+  6. El frontend llama a **`finalize_payment_and_get_volante`**: el backend verifica el PaymentIntent en Stripe, crea (o reutiliza) una **Payment Entry en borrador** (`docstatus = 0`) y devuelve la URL del PDF **Volante / Bolante de Pago** (`Fees` + print format `Bolante de Pago`) para abrirlo al instante.
+  7. Stripe puede enviar además el **webhook** `payment_intent.succeeded`; el mismo código de creación de Payment Entry es **idempotente** por `reference_no = payment_intent_id` (no duplica si el paso 6 ya corrió).
+  8. El `outstanding_amount` del Fee se actualiza cuando **Tesorería somete** la Payment Entry (flujo normal de ERPNext).
 
 ## 2. Claves y configuración
 
@@ -34,14 +34,22 @@ Configuración en EdTools:
 | Parte | Ubicación |
 |-------|-----------|
 | Crear PaymentIntent (API) | `edtools_core.stripe_payment.create_payment_intent` |
+| Tras pago exitoso: PE borrador + URL volante PDF | `edtools_core.stripe_payment.finalize_payment_and_get_volante` |
 | Webhook Stripe | `edtools_core.stripe_payment.stripe_webhook` (URL pública) |
 | Configuración (claves) | Site Config o variables de entorno: `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, etc. |
 | Vista "Pay Now" | Override en `education-frontend-overrides`: `FeesPaymentDialog.vue` (Stripe Elements) |
 
 ## 4. Idempotencia y duplicados
 
-- Cada **PaymentIntent** tiene un `id` único. En el webhook, antes de crear el Payment Entry, se comprueba si ya existe un registro vinculado a ese `payment_intent_id` (tabla o campo custom). Si ya existe, no se crea otro Payment Entry.
-- Así se evitan duplicados aunque Stripe reenvíe el webhook o el usuario haga doble clic.
+- Cada **PaymentIntent** tiene un `id` único. En **`Payment Entry.reference_no`** se guarda ese id. Antes de insertar, se comprueba si ya existe una PE con ese `reference_no` en **borrador o enviada** (`docstatus` 0 o 1). Si existe, se devuelve la misma y no se crea otra.
+- Así se evitan duplicados si Stripe reenvía el webhook, el estudiante reintenta **Descargar volante**, o el frontend llama dos veces a `finalize_payment_and_get_volante`.
+
+### Checklist manual (sandbox)
+
+1. Pagar una cuota con tarjeta de prueba; comprobar que se abre el **PDF del volante** al terminar.
+2. En Desk: la **Payment Entry** nueva debe estar en **Borrador** hasta que alguien la someta.
+3. Llamar dos veces a finalize con el mismo `payment_intent_id` (o usar **Descargar volante** en estado “Validando pago…”): una sola PE.
+4. Tras llegar el **webhook**, sigue habiendo una sola PE con ese `reference_no`.
 
 ## 5. Configuración
 
@@ -73,7 +81,7 @@ Configuración en EdTools:
 2. Crea en ERPNext un **Mode of Payment** "Stripe" y asígnale una cuenta (ej. "Stripe - CUCUSA") en la Company que usen los Fees. Opcional: configura `stripe_paid_to_account` en site_config.
 3. En el portal del estudiante, ve a Fees y haz clic en **Pay Now** en una cuota con saldo.
 4. Al hacer clic en **Proceed to Payment** se crea el PaymentIntent y aparece el formulario de tarjeta. Usa tarjeta de prueba: **4242 4242 4242 4242**, fecha futura, CVC cualquiera (ej. 123).
-5. Tras **Pay Now**, Stripe confirma el pago. El **webhook** crea el Payment Entry y actualiza el Fee. Si el webhook no está configurado, el pago se habrá cobrado en Stripe pero el Fee en EdTools no se actualizará hasta que el webhook se ejecute.
+5. Tras **Pay Now**, Stripe confirma el pago. El portal llama a **finalize** (PE en borrador + PDF). El **webhook** es respaldo idempotente. Si finalize falla por red pero el webhook llega, igual quedará la PE en borrador. El Fee pasa a “pagado” en el portal cuando la PE se **someta** y el saldo del Fee se actualice.
 6. Para probar el webhook en local o en un entorno sin URL pública: instala **Stripe CLI** y ejecuta:
    ```bash
    stripe listen --forward-to https://cucuniversity.edtools.co/api/method/edtools_core.stripe_payment.stripe_webhook

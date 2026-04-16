@@ -4,6 +4,8 @@
 
 import json
 import os
+from urllib.parse import quote
+
 import frappe
 from frappe import _
 from frappe.utils import flt, getdate, today
@@ -229,9 +231,11 @@ def create_payment_intent(fee_name, student_name=None, amount=None):
 
 def _create_payment_entry_for_stripe(student_name, payment_intent_id, paid_amount, starting_fee_name=None):
 	"""
-	Create and submit a Payment Entry for the Stripe payment, with cascade allocation
+	Create a Payment Entry in Draft (docstatus=0) for the Stripe payment, with cascade allocation
 	across multiple Fees (one reference row per fee with allocated_amount).
-	Idempotent: if a PE already exists with reference_no = payment_intent_id, skip.
+	Accounting can submit later for reconciliation.
+
+	Idempotent: if a PE already exists with reference_no = payment_intent_id (draft or submitted), return it.
 	"""
 	# DEBUG: entrada
 	frappe.log_error(
@@ -242,7 +246,7 @@ def _create_payment_entry_for_stripe(student_name, payment_intent_id, paid_amoun
 
 	existing = frappe.db.get_all(
 		"Payment Entry",
-		filters={"reference_no": payment_intent_id, "docstatus": 1},
+		filters={"reference_no": payment_intent_id, "docstatus": ["in", [0, 1]]},
 		limit=1,
 	)
 	if existing:
@@ -303,7 +307,7 @@ def _create_payment_entry_for_stripe(student_name, payment_intent_id, paid_amoun
 	pe.source_exchange_rate = 1
 	pe.reference_no = payment_intent_id
 	pe.reference_date = nowdate()
-	pe.remarks = f"Stripe payment: {payment_intent_id}"
+	pe.remarks = f"Stripe payment (borrador / pendiente conciliación): {payment_intent_id}"
 
 	for row in breakdown:
 		pe.append("references", {
@@ -322,12 +326,87 @@ def _create_payment_entry_for_stripe(student_name, payment_intent_id, paid_amoun
 	)
 	frappe.db.commit()
 	pe.insert(ignore_permissions=True)
-	frappe.log_error(title="Stripe PE DEBUG after insert", message=f"PE name={pe.name}")
-	frappe.db.commit()
-	pe.submit(ignore_permissions=True)
-	frappe.log_error(title="Stripe PE DEBUG after submit", message=f"PE name={pe.name} docstatus={pe.docstatus}")
+	frappe.log_error(
+		title="Stripe PE DEBUG after insert (draft)",
+		message=f"PE name={pe.name} docstatus={pe.docstatus}",
+	)
 	frappe.db.commit()
 	return pe.name
+
+
+# Must match portal print format in student_portal_api._get_print_format_for_fees()
+_FEES_PORTAL_VOLANTE_PRINT_FORMAT = "Bolante de Pago"
+
+
+def _fees_volante_pdf_url(fee_name):
+	"""Relative URL for student portal volante (Fees + Bolante de Pago)."""
+	fmt = _FEES_PORTAL_VOLANTE_PRINT_FORMAT
+	return (
+		"/api/method/frappe.utils.print_format.download_pdf?"
+		f"doctype={quote('Fees')}&name={quote(fee_name)}&format={quote(fmt)}"
+	)
+
+
+@frappe.whitelist()
+def finalize_payment_and_get_volante(fee_name, payment_intent_id):
+	"""
+	After Stripe confirmCardPayment succeeds, call this to:
+	- Verify PaymentIntent with Stripe (server-side)
+	- Create or reuse draft Payment Entry (idempotent by reference_no)
+	- Return URL to download Fees volante (Bolante de Pago) immediately.
+	"""
+	student = _get_current_student_name()
+	if not student:
+		frappe.throw(_("Not authenticated as a student."), frappe.PermissionError)
+
+	secret = _get_stripe_secret_key()
+	if not secret:
+		frappe.throw(_("Stripe is not configured."), frappe.ValidationError)
+
+	fee = frappe.db.get_value(
+		"Fees",
+		fee_name,
+		["name", "student"],
+		as_dict=True,
+	)
+	if not fee:
+		frappe.throw(_("Fee not found: {0}").format(fee_name))
+	if fee.student != student:
+		frappe.throw(_("This fee does not belong to you."), frappe.PermissionError)
+
+	try:
+		import stripe
+		stripe.api_key = secret
+		pi = stripe.PaymentIntent.retrieve(payment_intent_id)
+	except Exception as e:
+		frappe.log_error(title="Stripe finalize retrieve PI failed", message=frappe.get_traceback())
+		frappe.throw(_("Could not verify payment: {0}").format(str(e)))
+
+	if pi.get("status") != "succeeded":
+		frappe.throw(_("Payment is not completed yet."), frappe.ValidationError)
+
+	metadata = pi.get("metadata") or {}
+	meta_student = metadata.get("student_name")
+	meta_fee = metadata.get("fee_name")
+	if not meta_student or meta_student != student:
+		frappe.throw(_("This payment does not belong to your account."), frappe.PermissionError)
+	if not meta_fee or meta_fee != fee_name:
+		frappe.throw(_("Payment does not match this fee."), frappe.ValidationError)
+
+	amount_received = (pi.get("amount_received") or pi.get("amount") or 0) / 100.0
+
+	pe_name = _create_payment_entry_for_stripe(
+		student,
+		payment_intent_id,
+		amount_received,
+		starting_fee_name=fee_name,
+	)
+	frappe.db.commit()
+
+	return {
+		"payment_entry_name": pe_name,
+		"pdf_url": _fees_volante_pdf_url(fee_name),
+	}
 
 
 @frappe.whitelist(allow_guest=True)
