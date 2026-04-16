@@ -7,15 +7,54 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cstr, flt
 
-# Modo "por periodo" (comportamiento original) vs expediente por estudiante.
-COV_MODE_BY_PERIOD = "by_period"
 COV_MODE_STUDENT_HISTORY = "student_history"
 
+# Campos opcionales en Course Enrollment (custom en sitios como CUC) para periodo académico real.
+_KNOWN_CE_PERIOD_FIELDS = (
+	"academic_year",
+	"academic_term",
+	"custom_academic_year",
+	"custom_academic_term",
+)
 
-def _normalize_coverage_mode(mode: str | None) -> str:
-	if (cstr(mode).strip() or COV_MODE_BY_PERIOD) == COV_MODE_STUDENT_HISTORY:
-		return COV_MODE_STUDENT_HISTORY
-	return COV_MODE_BY_PERIOD
+
+def _ce_period_fieldnames() -> list[str]:
+	meta = frappe.get_meta("Course Enrollment")
+	return [fn for fn in _KNOWN_CE_PERIOD_FIELDS if meta.get_field(fn)]
+
+
+def _period_from_ce_and_pe(ce: dict | None, pe: dict | None) -> tuple[str, str]:
+	"""Año/término para etiqueta y match con AR: preferir CE (incl. custom), si no PE."""
+	if ce:
+		ay = cstr(ce.get("academic_year") or ce.get("custom_academic_year") or "").strip()
+		term = cstr(ce.get("academic_term") or ce.get("custom_academic_term") or "").strip()
+		if ay or term:
+			return ay, term
+	if pe:
+		return (
+			cstr(pe.get("academic_year") or "").strip(),
+			cstr(pe.get("academic_term") or "").strip(),
+		)
+	return "", ""
+
+
+def _pick_focus_row_for_course(course_code: str, history_rows: list[dict]) -> dict:
+	"""Fila de historial que alimenta plan 'en progreso': CE más reciente, no hlist[0] arbitrario."""
+	cc = cstr(course_code or "").strip()
+	if not cc:
+		return {}
+	cands = [
+		r
+		for r in history_rows
+		if cstr(r.get("course") or "").strip() == cc and r.get("status") == "in_progress"
+	]
+	if not cands:
+		return {}
+	ce_rows = [r for r in cands if r.get("detail_kind") == "course_enrollment"]
+	if ce_rows:
+		ce_rows.sort(key=lambda r: (str(r.get("enrollment_date") or ""), r.get("detail") or ""), reverse=True)
+		return ce_rows[0]
+	return cands[0]
 
 
 def _ar_has_meaningful_grade(ar: dict | None) -> bool:
@@ -151,11 +190,15 @@ def _history_rows_for_student(student_id: str, program_filter: str | None) -> tu
 	"""
 	Construye filas a partir de Course Enrollment (no cancelados) + Assessment Result (enviados).
 	``detail`` + ``detail_kind`` alimentan enlaces en el cliente.
+
+	``period_label`` prioriza año/término del **Course Enrollment** (campos estándar o custom)
+	cuando existan; si no, del **Program Enrollment**. Así coincide con el periodo real del curso.
 	"""
+	ce_fields = ["name", "course", "program_enrollment", "enrollment_date", "modified"] + _ce_period_fieldnames()
 	ce_rows = frappe.get_all(
 		"Course Enrollment",
 		filters={"student": student_id, "docstatus": ["!=", 2]},
-		fields=["name", "course", "program_enrollment", "enrollment_date"],
+		fields=ce_fields,
 		order_by="enrollment_date desc",
 	)
 
@@ -224,10 +267,17 @@ def _history_rows_for_student(student_id: str, program_filter: str | None) -> tu
 		if program_filter and (pe.get("program") or "") != program_filter:
 			continue
 		course_code = ce.get("course") or ""
-		ay = cstr(pe.get("academic_year") or "").strip()
-		term = cstr(pe.get("academic_term") or "").strip()
+		ay, term = _period_from_ce_and_pe(ce, pe)
 		key = (course_code, ay, term)
 		ar_list = ar_by_key.get(key, [])
+		if not ar_list and pe:
+			k_pe = (
+				course_code,
+				cstr(pe.get("academic_year") or "").strip(),
+				cstr(pe.get("academic_term") or "").strip(),
+			)
+			if k_pe != key:
+				ar_list = ar_by_key.get(k_pe, [])
 		best_ar = ar_list[0] if ar_list else None
 
 		has_grade = _ar_has_meaningful_grade(best_ar)
@@ -246,8 +296,10 @@ def _history_rows_for_student(student_id: str, program_filter: str | None) -> tu
 				"grade": _format_ar_grade(best_ar),
 				"assessment_result": (best_ar or {}).get("name") or "",
 				"program": pe.get("program") or "",
+				"enrollment_date": ce.get("enrollment_date"),
 				"_sort_ay": ay,
 				"_sort_term": term,
+				"_sort_enrollment": str(ce.get("enrollment_date") or ""),
 			}
 		)
 		keys_from_ce.add(key)
@@ -282,31 +334,33 @@ def _history_rows_for_student(student_id: str, program_filter: str | None) -> tu
 				"grade": _format_ar_grade(ar),
 				"assessment_result": ar["name"],
 				"program": cstr(ar.get("program") or "").strip(),
+				"enrollment_date": None,
 				"_sort_ay": ay,
 				"_sort_term": term,
+				"_sort_enrollment": cstr(ar.get("modified") or "")[:10],
 			}
 		)
 		keys_from_ce.add(key)
 
-	rows.sort(key=lambda r: (r.get("_sort_ay") or "", r.get("_sort_term") or "", r.get("course") or ""))
+	rows.sort(
+		key=lambda r: (
+			r.get("_sort_enrollment") or "",
+			r.get("_sort_ay") or "",
+			r.get("_sort_term") or "",
+			r.get("course") or "",
+		),
+		reverse=True,
+	)
 	for r in rows:
 		r.pop("_sort_ay", None)
 		r.pop("_sort_term", None)
+		r.pop("_sort_enrollment", None)
 
 	warning = ""
 	if not rows:
 		warning = _("No course enrollments or submitted assessment results found for this student.")
 
 	return rows, warning
-
-
-def _history_rows_by_course(history_rows: list[dict]) -> dict[str, list[dict]]:
-	out: dict[str, list[dict]] = defaultdict(list)
-	for r in history_rows:
-		cc = cstr(r.get("course") or "").strip()
-		if cc:
-			out[cc].append(r)
-	return out
 
 
 def _build_plan_focus_rows(
@@ -318,7 +372,6 @@ def _build_plan_focus_rows(
 	Orden: primero cursos del plan cubiertos pero aún en progreso (transcript in_progress),
 	después pendientes (no cubiertos por CE enviado ni AR con nota).
 	"""
-	by_course = _history_rows_by_course(history_rows)
 	in_progress_codes = {
 		cstr(r.get("course") or "").strip()
 		for r in history_rows
@@ -352,8 +405,7 @@ def _build_plan_focus_rows(
 				}
 			)
 		elif code in in_progress_codes:
-			hlist = by_course.get(code, [])
-			h0 = hlist[0] if hlist else {}
+			h0 = _pick_focus_row_for_course(code, history_rows)
 			first_block.append(
 				{
 					"course": code,
@@ -463,20 +515,13 @@ class StudentCourseCoverage(Document):
 
 	@frappe.whitelist()
 	def get_coverage(self):
-		"""Resolve selected students and delegate to the coverage API."""
+		"""Resolve selected students and delegate to student history coverage (único modo soportado)."""
 		students = self._resolve_students()
 		if not students:
 			frappe.throw(_("No students selected. Please choose at least one student."))
 
-		mode = _normalize_coverage_mode(getattr(self, "coverage_mode", None))
-
-		return get_course_coverage(
-			program=self.program,
-			academic_year=self.academic_year,
-			academic_term=self.academic_term,
-			students=students,
-			coverage_mode=mode,
-		)
+		program_filter = (frappe.utils.cstr(self.program).strip() or None)
+		return get_student_history_coverage(students=students, program_filter=program_filter)
 
 	def _resolve_students(self) -> list[str]:
 		mode = self.selection_mode
@@ -511,19 +556,15 @@ class StudentCourseCoverage(Document):
 
 @frappe.whitelist()
 def get_course_coverage(
-	program: str | None,
-	academic_year: str,
-	academic_term: str,
-	students: list[str],
+	program: str | None = None,
+	academic_year: str | None = None,
+	academic_term: str | None = None,
+	students: list | None = None,
 	coverage_mode: str | None = None,
 ) -> dict:
 	"""
-	Modo ``by_period`` (legacy): plan vs año/término seleccionados.
-
-	Modo ``student_history``: expediente + plan inferido desde PE (o Program del formulario).
-
-	Si ``program`` está vacío en cualquier modo, los programas activos del estudiante (PE enviado)
-	definen el plan fusionado (Program Course).
+	API compatible con llamadas antiguas: siempre devuelve expediente + plan (student_history).
+	Los parámetros ``academic_year``, ``academic_term`` y ``coverage_mode`` se ignoran.
 	"""
 	if isinstance(students, str):
 		import json
@@ -534,226 +575,5 @@ def get_course_coverage(
 	if not students:
 		frappe.throw(_("No students selected."))
 
-	mode = _normalize_coverage_mode(coverage_mode)
-	if mode == COV_MODE_STUDENT_HISTORY:
-		program_filter = (frappe.utils.cstr(program).strip() or None)
-		return get_student_history_coverage(students=students, program_filter=program_filter)
-
-	if not (cstr(academic_year).strip() and cstr(academic_term).strip()):
-		frappe.throw(_("Academic Year and Academic Term are required in By period mode."))
-
-	program = (frappe.utils.cstr(program).strip() or None)
-
-	# Course Enrollments: solo enviados (docstatus 1) en modo legacy.
-	ce_rows = frappe.get_all(
-		"Course Enrollment",
-		filters={"student": ["in", students], "docstatus": 1},
-		fields=["name", "student", "course", "program_enrollment", "enrollment_date"],
-		order_by="student asc, course asc",
-	)
-	pe_names = list({c["program_enrollment"] for c in ce_rows if c.get("program_enrollment")})
-	pe_by_name = {}
-	if pe_names:
-		for pe in frappe.get_all(
-			"Program Enrollment",
-			filters={"name": ["in", pe_names], "docstatus": 1},
-			fields=["name", "program", "academic_year", "academic_term"],
-		):
-			pe_by_name[pe["name"]] = pe
-
-	ce_data = []
-	for c in ce_rows:
-		pe = pe_by_name.get(c.get("program_enrollment"))
-		if not pe:
-			continue
-		if program and pe.get("program") != program:
-			continue
-		ce_data.append(
-			{
-				"student": c["student"],
-				"course": c["course"],
-				"course_enrollment": c["name"],
-				"enrollment_date": c.get("enrollment_date"),
-				"program_enrollment": pe["name"],
-				"program": pe.get("program"),
-				"academic_year": pe.get("academic_year"),
-				"academic_term": pe.get("academic_term"),
-			}
-		)
-
-	student_ce: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
-	for row in ce_data:
-		student_ce[row["student"]][row["course"]].append(row)
-
-	student_names = {
-		s["name"]: s["student_name"]
-		for s in frappe.get_all(
-			"Student",
-			filters={"name": ["in", students]},
-			fields=["name", "student_name"],
-		)
-	}
-
-	results = {}
-	max_plan_len = 0
-
-	for student_id in students:
-		student_name = student_names.get(student_id, student_id)
-		allowed = [program] if program else _active_programs_for_student(student_id)
-		plan_courses = _program_plan_courses(program) if program else _merged_plan_courses(allowed)
-
-		if program and not plan_courses:
-			frappe.throw(_("Program {0} has no courses defined.").format(program))
-
-		pe_any = frappe.db.exists(
-			"Program Enrollment", {"student": student_id, "docstatus": 1}
-		)
-		if program:
-			pe_ok = frappe.db.exists(
-				"Program Enrollment",
-				{"student": student_id, "docstatus": 1, "program": program},
-			)
-		else:
-			pe_ok = bool(allowed)
-
-		if not pe_any:
-			results[student_id] = {
-				"student_name": student_name,
-				"warning": _("No active Program Enrollment found."),
-				"courses": [],
-				"inferred_programs": allowed,
-				"kpis": {
-					"total": 0,
-					"current": 0,
-					"history": 0,
-					"missing": 0,
-					"missing_mandatory": 0,
-				},
-			}
-			continue
-
-		if program and not pe_ok:
-			results[student_id] = {
-				"student_name": student_name,
-				"warning": _("No active Program Enrollment for {0}").format(program),
-				"courses": [],
-				"inferred_programs": allowed,
-				"kpis": {
-					"total": len(plan_courses),
-					"current": 0,
-					"history": 0,
-					"missing": len(plan_courses),
-					"missing_mandatory": sum(1 for pc in plan_courses if pc["required"]),
-				},
-			}
-			continue
-
-		enrollments = student_ce.get(student_id, {})
-		courses_out = []
-		kpis = {"total": 0, "current": 0, "history": 0, "missing": 0, "missing_mandatory": 0}
-
-		if plan_courses:
-			kpis["total"] = len(plan_courses)
-			if len(plan_courses) > max_plan_len:
-				max_plan_len = len(plan_courses)
-			for pc in plan_courses:
-				course_code = pc["course"]
-				ce_list = _filtered_ce_entries(enrollments.get(course_code, []), allowed if not program else None)
-				is_mandatory = bool(pc["required"])
-
-				if not ce_list:
-					status = "missing"
-					detail = ""
-					kpis["missing"] += 1
-					if is_mandatory:
-						kpis["missing_mandatory"] += 1
-				else:
-					in_current = [
-						e
-						for e in ce_list
-						if e["academic_year"] == academic_year and e["academic_term"] == academic_term
-					]
-					if in_current:
-						status = "current_period"
-						detail = in_current[0]["course_enrollment"]
-						kpis["current"] += 1
-					else:
-						status = "history"
-						terms = list({e["academic_term"] or "" for e in ce_list})
-						detail = ", ".join(terms) if terms else ""
-						kpis["history"] += 1
-
-				courses_out.append(
-					{
-						"course": course_code,
-						"course_name": pc["course_name"],
-						"mandatory": is_mandatory,
-						"status": status,
-						"detail": detail,
-					}
-				)
-		else:
-			all_courses = sorted(enrollments.keys())
-			course_titles = {}
-			if all_courses:
-				course_titles = {
-					row["name"]: (row.get("course_name") or row["name"])
-					for row in frappe.get_all(
-						"Course",
-						filters={"name": ["in", all_courses]},
-						fields=["name", "course_name"],
-					)
-				}
-			kpis["total"] = len(all_courses)
-			for course_code in all_courses:
-				ce_list = _filtered_ce_entries(enrollments.get(course_code, []), allowed if not program else None)
-				in_current = [
-					e
-					for e in ce_list
-					if e["academic_year"] == academic_year and e["academic_term"] == academic_term
-				]
-				if in_current:
-					status = "current_period"
-					kpis["current"] += 1
-					detail = in_current[0]["course_enrollment"]
-				else:
-					status = "history"
-					kpis["history"] += 1
-					parts = []
-					for e in ce_list:
-						prog = e.get("program") or ""
-						term = e.get("academic_term") or ""
-						if prog and term:
-							parts.append(f"{prog} ({term})")
-						elif term:
-							parts.append(term)
-						elif prog:
-							parts.append(prog)
-					parts = list(dict.fromkeys(parts))
-					detail = "; ".join(parts)
-
-				courses_out.append(
-					{
-						"course": course_code,
-						"course_name": course_titles.get(course_code, course_code),
-						"mandatory": False,
-						"status": status,
-						"detail": detail,
-					}
-				)
-
-		results[student_id] = {
-			"student_name": student_name,
-			"courses": courses_out,
-			"inferred_programs": allowed,
-			"kpis": kpis,
-		}
-
-	return {
-		"coverage_mode": COV_MODE_BY_PERIOD,
-		"program": program or "",
-		"academic_year": academic_year,
-		"academic_term": academic_term,
-		"plan_total": max_plan_len,
-		"students": results,
-	}
+	program_filter = (frappe.utils.cstr(program).strip() or None)
+	return get_student_history_coverage(students=students, program_filter=program_filter)

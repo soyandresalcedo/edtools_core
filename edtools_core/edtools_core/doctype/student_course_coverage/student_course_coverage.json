@@ -4,11 +4,7 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "coverage_mode",
   "program",
-  "column_break_period",
-  "academic_year",
-  "academic_term",
   "section_break_selection",
   "selection_mode",
   "student",
@@ -21,40 +17,11 @@
  ],
  "fields": [
   {
-   "default": "by_period",
-   "description": "By period: plan vs selected Academic Year/Term. Student history: all enrollments and submitted Assessment Results for the selected students.",
-   "fieldname": "coverage_mode",
-   "fieldtype": "Select",
-   "label": "Coverage Mode",
-   "options": "by_period\nstudent_history",
-   "reqd": 1
-  },
-  {
    "description": "Optional filter. If empty, programs are taken from each student's submitted Program Enrollment(s) to build the merged course plan.",
    "fieldname": "program",
    "fieldtype": "Link",
    "label": "Program",
    "options": "Program"
-  },
-  {
-   "fieldname": "column_break_period",
-   "fieldtype": "Column Break"
-  },
-  {
-   "depends_on": "eval:doc.coverage_mode=='by_period'",
-   "fieldname": "academic_year",
-   "fieldtype": "Link",
-   "label": "Academic Year",
-   "mandatory_depends_on": "eval:doc.coverage_mode=='by_period'",
-   "options": "Academic Year"
-  },
-  {
-   "depends_on": "eval:doc.coverage_mode=='by_period' && doc.academic_year",
-   "fieldname": "academic_term",
-   "fieldtype": "Link",
-   "label": "Academic Term",
-   "mandatory_depends_on": "eval:doc.coverage_mode=='by_period'",
-   "options": "Academic Term"
   },
   {
    "fieldname": "section_break_selection",
