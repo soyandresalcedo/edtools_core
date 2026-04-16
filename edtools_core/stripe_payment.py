@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 import frappe
 from frappe import _
+from frappe.query_builder.functions import Sum
 from frappe.utils import flt, getdate, today
 
 
@@ -37,6 +38,35 @@ def _get_fee_description(fee_name):
 		return ""
 
 
+def _get_draft_stripe_allocated_by_fee(student_name):
+	"""Per Fees.name, sum allocated_amount on draft Payment Entries (Stripe pi_*) for this student.
+
+	While PE is draft, ERPNext often still shows full outstanding on Fees; without this, cascade
+	would allocate again to the same quota and double-charge intent.
+	"""
+	if not student_name:
+		return {}
+	try:
+		ref = frappe.qb.DocType("Payment Entry Reference")
+		pe = frappe.qb.DocType("Payment Entry")
+		q = (
+			frappe.qb.from_(ref)
+			.inner_join(pe)
+			.on(ref.parent == pe.name)
+			.select(ref.reference_name, Sum(ref.allocated_amount).as_("allocated"))
+			.where(pe.party_type == "Student")
+			.where(pe.party == student_name)
+			.where(pe.docstatus == 0)
+			.where(pe.reference_no.like("pi%"))
+			.where(ref.reference_doctype == "Fees")
+			.groupby(ref.reference_name)
+		)
+		rows = q.run(as_dict=True) or []
+	except Exception:
+		return {}
+	return {r["reference_name"]: flt(r.get("allocated") or 0) for r in rows if r.get("reference_name")}
+
+
 def get_fee_cascade_breakdown(student_name, pay_amount, starting_fee_name=None):
 	"""
 	Compute how a single payment amount will be allocated across the student's fees (cascade).
@@ -48,8 +78,14 @@ def get_fee_cascade_breakdown(student_name, pay_amount, starting_fee_name=None):
 	When starting_fee_name is None (e.g. webhook fallback):
 	- Order: due_date asc (overdue first, then future).
 
+	Draft Stripe Payment Entries (reference_no pi_*) already allocate amounts on Fees; those
+	amounts are subtracted from the DB outstanding for cascade purposes so quotas awaiting
+	reconciliation are not paid twice.
+
 	Returns list of dicts: { "fee_name", "program", "outstanding_amount", "allocated_amount", "currency" }.
 	"""
+	draft_alloc = _get_draft_stripe_allocated_by_fee(student_name)
+
 	fees_with_outstanding = frappe.db.get_all(
 		"Fees",
 		filters={"student": student_name, "docstatus": 1},
@@ -57,7 +93,15 @@ def get_fee_cascade_breakdown(student_name, pay_amount, starting_fee_name=None):
 		order_by="due_date asc",
 		ignore_permissions=True,
 	)
-	fees = [f for f in fees_with_outstanding if flt(f.get("outstanding_amount") or 0) > 0]
+	fees = []
+	for f in fees_with_outstanding:
+		db_out = flt(f.get("outstanding_amount") or 0)
+		held = flt(draft_alloc.get(f.get("name"), 0))
+		effective = max(0, round(db_out - held, 2))
+		if effective > 0:
+			ff = dict(f)
+			ff["outstanding_amount"] = effective
+			fees.append(ff)
 	if not fees:
 		return []
 
@@ -85,6 +129,7 @@ def get_fee_cascade_breakdown(student_name, pay_amount, starting_fee_name=None):
 	for f in ordered_fees:
 		if remaining <= 0:
 			break
+		# outstanding_amount may already be effective (post-filter); keep flt for safety
 		outstanding = flt(f.get("outstanding_amount") or 0)
 		if outstanding <= 0:
 			continue
@@ -181,13 +226,20 @@ def create_payment_intent(fee_name, student_name=None, amount=None):
 		frappe.throw(_("This fee does not belong to you."), frappe.PermissionError)
 
 	outstanding = flt(fee.outstanding_amount or 0)
-	if outstanding <= 0:
-		frappe.throw(_("This fee has no outstanding amount to pay."))
+	draft_alloc = _get_draft_stripe_allocated_by_fee(student)
+	held_on_fee = flt(draft_alloc.get(fee_name, 0))
+	effective_outstanding = max(0, round(outstanding - held_on_fee, 2))
+	if effective_outstanding <= 0:
+		frappe.throw(
+			_(
+				"This fee has a payment pending reconciliation. You cannot pay again until it is processed."
+			)
+		)
 
-	# Minimum = selected fee's outstanding. User cannot pay less than the fee they chose.
-	pay_amount = flt(amount) if amount is not None else outstanding
-	if pay_amount < outstanding:
-		frappe.throw(_("Amount must be at least {0} (outstanding for this fee).").format(outstanding))
+	# Minimum = selected fee's effective outstanding (DB minus draft Stripe PE allocations).
+	pay_amount = flt(amount) if amount is not None else effective_outstanding
+	if pay_amount < effective_outstanding:
+		frappe.throw(_("Amount must be at least {0} (outstanding for this fee).").format(effective_outstanding))
 	if pay_amount <= 0:
 		frappe.throw(_("Amount to pay must be greater than zero."))
 	# Allow amount >= outstanding for cascade payments: extra goes to overdue first, then future.
