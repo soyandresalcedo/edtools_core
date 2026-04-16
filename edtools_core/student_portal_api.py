@@ -554,6 +554,41 @@ def _get_invoices_from_fees(student):
 	return out
 
 
+def _get_draft_stripe_pi_by_fee_for_student(student_name):
+	"""Map Fees.name -> Stripe payment_intent_id for draft Payment Entries created from the portal.
+
+	Used so the student portal can show 'Validando pago…' / Descargar volante after closing incognito
+	(localStorage is lost; this state lives in DB until accounting submits the PE).
+	"""
+	if not student_name:
+		return {}
+	try:
+		pe = frappe.qb.DocType("Payment Entry")
+		ref = frappe.qb.DocType("Payment Entry Reference")
+		q = (
+			frappe.qb.from_(pe)
+			.inner_join(ref)
+			.on(pe.name == ref.parent)
+			.select(ref.reference_name, pe.reference_no, pe.modified)
+			.where(pe.party_type == "Student")
+			.where(pe.party == student_name)
+			.where(pe.docstatus == 0)
+			.where(pe.reference_no.like("pi%"))
+			.where(ref.reference_doctype == "Fees")
+			.orderby(pe.modified, order=frappe.qb.desc)
+		)
+		rows = q.run(as_dict=True) or []
+	except Exception:
+		return {}
+	out = {}
+	for r in rows:
+		fn = r.get("reference_name")
+		pi = r.get("reference_no")
+		if fn and pi and fn not in out:
+			out[fn] = pi
+	return out
+
+
 def _build_installment_labels(raw_list, from_sales_invoice):
 	"""Pre-compute installment labels (e.g. 'Cuota 3/14') for all fees sharing a fee_schedule.
 	Groups by fee_schedule in a single pass to avoid N+1 queries."""
@@ -620,6 +655,7 @@ def get_student_invoices(student):
 		tagged.append(fee)
 
 	installment_labels = _build_installment_labels(fees_list, False) if fees_list else {}
+	draft_stripe_pi_by_fee = _get_draft_stripe_pi_by_fee_for_student(student)
 
 	total_outstanding = 0
 	total_paid = 0
@@ -657,6 +693,14 @@ def get_student_invoices(student):
 		else:
 			row["due_date"] = si.get("due_date") or "-"
 			row["payment_date"] = "-"
+		if is_si:
+			row["pending_stripe_reconciliation"] = False
+			row["stripe_payment_intent_id"] = None
+		else:
+			fee_key = si.get("name")
+			pi_id = draft_stripe_pi_by_fee.get(fee_key)
+			row["pending_stripe_reconciliation"] = bool(pi_id)
+			row["stripe_payment_intent_id"] = pi_id
 		total_outstanding += outstanding
 		total_paid += (grand_total - outstanding)
 		student_sales_invoices.append(row)
