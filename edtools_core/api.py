@@ -2606,7 +2606,7 @@ def import_grade_single(**kwargs):
 
     Campos (POST JSON o args):
         - student_id (obligatorio): ID del estudiante (ej. EDU-STU-2025-02806).
-        - semester (obligatorio): 6 dígitos, ej. 202601 (Spring A), 202602 (Spring B).
+        - semester (obligatorio): 6 dígitos, ej. 202601 (Spring A), 202600 (Homologado).
         - course (obligatorio): short name del curso, con o sin espacios (STA 530, STA530).
         - final_grade (obligatorio): número (0-100) o letra de la escala (A, B+, etc.).
         - full_name (opcional): solo visual.

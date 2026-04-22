@@ -17,9 +17,10 @@ from frappe.utils import flt
 REQUIRED_COLUMNS = ["ID", "SEMESTER", "COURSE", "FINAL GRADE"]
 OPTIONAL_COLUMNS = ["FULL NAME", "COURSE TITLE"]
 
-# Mapeo código SEMESTER (últimos 2 dígitos) -> nombre del periodo para Academic Term
-# Formato del nombre en Frappe (Academic Term): "YYYY (Spring A)", "YYYY (Fall B)", etc.
+# Mapeo código SEMESTER (últimos 2 dígitos) -> Term Name del Academic Term en Frappe
+# Formato del name del DocType: academic_year + " (" + term_name + ")" (ver Academic Term.autoname)
 SEMESTER_SUFFIX_TO_TERM = {
+    "00": "Homologado",
     "01": "Spring A",
     "02": "Spring B",
     "03": "Summer A",
@@ -222,11 +223,16 @@ def validate_format(
         if not semester:
             errors.append({"row": row_num, "message": _("Fila {0}: SEMESTER no puede estar vacío.").format(row_num)})
         elif not semester_re.match(semester):
-            errors.append({"row": row_num, "message": _("Fila {0}: SEMESTER debe ser 6 dígitos (YYYY01 a YYYY06).").format(row_num)})
+            errors.append({"row": row_num, "message": _("Fila {0}: SEMESTER debe ser 6 dígitos numéricos (ej. 202601 o 202600).").format(row_num)})
         else:
             suffix = semester[-2:]
             if suffix not in SEMESTER_SUFFIX_TO_TERM:
-                errors.append({"row": row_num, "message": _("Fila {0}: SEMESTER debe terminar en 01-06 (ej. 202601).").format(row_num)})
+                errors.append({
+                    "row": row_num,
+                    "message": _(
+                        "Fila {0}: SEMESTER inválido; use 00 (Homologado) o 01–06 (semestres), ej. 202600 o 202601."
+                    ).format(row_num),
+                })
         course = (row.get("COURSE") or "").strip()
         if not course:
             errors.append({"row": row_num, "message": _("Fila {0}: COURSE no puede estar vacío.").format(row_num)})
@@ -261,8 +267,8 @@ def _grade_value_valid(grade: str, grading_scale_name: str) -> bool:
 
 def semester_to_academic_year_and_term(semester_code: str) -> tuple[str, str] | None:
     """
-    Convierte código 202601 a (academic_year, academic_term_name).
-    academic_year = "2026", academic_term_name = "2026 (Spring A)" (formato del DocType Academic Term).
+    Convierte código YYYYMM (6 dígitos) a (academic_year, academic_term_name).
+    Ej.: 202601 -> ("2026", "2026 (Spring A)"), 202600 -> ("2026", "2026 (Homologado)").
     """
     semester_code = (semester_code or "").strip().replace(" ", "")
     if len(semester_code) != 6:
@@ -916,16 +922,16 @@ def validate_grade_single_input(data: dict) -> tuple[bool, list[dict]]:
     final_grade = str(data.get("final_grade", "")).strip()
     grading_scale_name = (data.get("grading_scale") or "").strip() or None
 
-    # 2) Formato SEMESTER: 6 dígitos, sufijo 01-06
+    # 2) Formato SEMESTER: 6 dígitos, sufijo en SEMESTER_SUFFIX_TO_TERM (00=Homologado, 01-06=semestres)
     if not SEMESTER_RE.match(semester):
         errors.append({
             "field": "semester",
-            "message": _("Debe ser 6 dígitos (YYYY01 a YYYY06, ej. 202601)."),
+            "message": _("Debe ser 6 dígitos numéricos (ej. 202601 o 202600)."),
         })
     elif semester[-2:] not in SEMESTER_SUFFIX_TO_TERM:
         errors.append({
             "field": "semester",
-            "message": _("Los dos últimos dígitos deben ser 01-06 (01=Spring A, 02=Spring B, etc.)."),
+            "message": _("Últimos dos dígitos: 00 (Homologado) o 01–06 (semestres), ej. 202600 o 202601."),
         })
 
     # 3) COURSE no vacío (el formato con/sin espacios se tolera en _resolve_course)
@@ -976,7 +982,7 @@ def process_grade_single(data: dict) -> dict[str, Any]:
     Args:
         data: {
             "student_id": "EDU-STU-2025-02806" (obligatorio),
-            "semester": "202601" (obligatorio, 6 dígitos),
+            "semester": "202601" o "202600" (obligatorio, 6 dígitos; 00=Homologado),
             "course": "STA 530" o "STA530" (obligatorio),
             "final_grade": "85" o "A" (obligatorio),
             "full_name": "..." (opcional),
@@ -1023,7 +1029,7 @@ def process_grade_single(data: dict) -> dict[str, Any]:
             "validation_errors": [],
             "assessment_result": None,
             "created": False,
-            "error_detail": _("Semester debe ser 6 dígitos (ej. 202601)."),
+            "error_detail": _("SEMESTER inválido (use 6 dígitos, ej. 202601 o 202600)."),
         }
 
     # semester_to_academic_year_and_term ya devuelve (year, academic_term_name)

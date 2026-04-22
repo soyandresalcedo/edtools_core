@@ -176,7 +176,7 @@ def validate_import_format(file_path: str) -> tuple[bool, list[dict[str, Any]]]:
 			errors.append(
 				{
 					"row": row_num,
-					"message": _("Fila {0}: SEMESTER debe ser 6 dígitos (YYYY01 a YYYY06).").format(
+					"message": _("Fila {0}: SEMESTER debe ser 6 dígitos numéricos (ej. 202601 o 202600).").format(
 						row_num
 					),
 				}
@@ -187,7 +187,9 @@ def validate_import_format(file_path: str) -> tuple[bool, list[dict[str, Any]]]:
 				errors.append(
 					{
 						"row": row_num,
-						"message": _("Fila {0}: SEMESTER debe terminar en 01-06.").format(row_num),
+						"message": _(
+							"Fila {0}: SEMESTER inválido; use 00 (Homologado) o 01–06 (semestres), ej. 202600 o 202601."
+						).format(row_num),
 					}
 				)
 			else:
