@@ -4,6 +4,7 @@
 import json
 import frappe
 import requests
+from urllib.parse import quote
 from edtools_core.fees_events import ensure_local_lang_for_num2words
 from edtools_core.moodle_sync import sync_student_enrollment_to_moodle
 from frappe import _
@@ -1787,14 +1788,89 @@ def _financial_tool_batch_status_label(status_key):
     }.get(status_key, cstr(status_key))
 
 
+def _create_and_submit_inscription_payment_entry(fee_name: str) -> str:
+    """
+    Crea y presenta un Payment Entry (Receive, Student) contra una Fee de inscripción,
+    con Mode of Payment Stripe y cuenta destino según configuración del sitio (igual que stripe_payment).
+    Devuelve el name del PE, cadena vacía si no hay nada que cobrar (outstanding 0).
+    """
+    from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
+
+    from edtools_core.stripe_payment import _get_stripe_mode_of_payment, _get_stripe_paid_to_account
+
+    fee_row = frappe.db.get_value(
+        "Fees",
+        fee_name,
+        ["name", "docstatus", "outstanding_amount", "company", "student"],
+        as_dict=True,
+    )
+    if not fee_row or cint(fee_row.docstatus) != 1:
+        frappe.throw(_("La fee {0} no existe o no está enviada.").format(fee_name))
+    if flt(fee_row.outstanding_amount) <= 0:
+        return ""
+
+    pe = get_payment_entry(
+        "Fees",
+        fee_name,
+        party_type="Student",
+        payment_type="Receive",
+        ignore_permissions=True,
+    )
+
+    mode_of_payment = _get_stripe_mode_of_payment() or "Stripe"
+    pe.mode_of_payment = mode_of_payment
+
+    paid_to = _get_stripe_paid_to_account()
+    if not paid_to:
+        paid_to = frappe.db.get_value(
+            "Mode of Payment Account",
+            {"parent": mode_of_payment, "company": fee_row.company},
+            "default_account",
+        )
+    if not paid_to:
+        frappe.throw(
+            _(
+                "Cuenta destino Stripe no configurada. Defina stripe_paid_to_account (site_config/env) "
+                "o la cuenta en Mode of Payment Account para '{0}' y compañía {1}."
+            ).format(mode_of_payment, fee_row.company)
+        )
+    pe.paid_to = paid_to
+
+    auto_note = _("Inscripción – generado automáticamente (Student Financial Tool)")
+    pe.remarks = "\n".join(x for x in [(pe.remarks or "").strip(), auto_note] if x).strip()
+    if not (pe.reference_no or "").strip():
+        pe.reference_no = f"AUTO-SFT-{fee_name}"
+
+    pe.set_missing_values()
+    pe.set_missing_ref_details(force=True)
+    pe.set_amounts()
+
+    pe.insert(ignore_permissions=True)
+    pe.submit()
+
+    return pe.name
+
+
 def _build_financial_tool_batch_summary_html(results):
-    headers = [_("Estudiante"), _("Fees creados"), _("Estado"), _("Detalle")]
+    headers = [_("Estudiante"), _("Fees creados"), _("PE inscripción"), _("Estado"), _("Detalle")]
     rows_html = []
     for r in results:
+        pe_cell = ""
+        if r.get("payment_entry"):
+            pe_nm = cstr(r.get("payment_entry"))
+            pe_cell = "<a href='/app/payment-entry/{0}'>{1}</a>".format(
+                quote(pe_nm, safe=""),
+                escape_html(pe_nm),
+            )
+        elif r.get("inscription_pe_error"):
+            pe_cell = "<span class='text-danger'>{0}</span>".format(
+                escape_html(cstr(r.get("inscription_pe_error"))[:200])
+            )
         rows_html.append(
-            "<tr><td>{name}</td><td class='text-right'>{count}</td><td>{status}</td><td>{detail}</td></tr>".format(
+            "<tr><td>{name}</td><td class='text-right'>{count}</td><td>{pe}</td><td>{status}</td><td>{detail}</td></tr>".format(
                 name=escape_html(cstr(r.get("student_name") or "")),
                 count=cint(r.get("fees_count") or 0),
+                pe=pe_cell,
                 status=escape_html(_financial_tool_batch_status_label(r.get("status_key"))),
                 detail=escape_html(cstr(r.get("detail") or "")[:500]),
             )
@@ -1914,6 +1990,8 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 "fees_count": 0,
                 "status_key": "sin_id",
                 "detail": _("Fila sin ID válido: {0}").format(cstr(stu)[:200]),
+                "payment_entry": None,
+                "inscription_pe_error": None,
             })
             continue
 
@@ -1931,11 +2009,15 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 "fees_count": 0,
                 "status_key": "no_enrollment",
                 "detail": _("No hay Program Enrollment enviado (docstatus=1)."),
+                "payment_entry": None,
+                "inscription_pe_error": None,
             })
             continue
 
         fee_schedule_created = False
         fees_created = 0
+        inscription_pe_name = None
+        inscription_pe_error = None
         try:
             # --- A. CREAR FEE SCHEDULE ---
             fs = frappe.new_doc("Fee Schedule")
@@ -2005,13 +2087,32 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 fee.submit()
                 fees_created += 1
 
+                if row_type == "Inscripcion" and row_amount > 0:
+                    try:
+                        pe_created = _create_and_submit_inscription_payment_entry(fee.name)
+                        if pe_created:
+                            inscription_pe_name = pe_created
+                    except Exception as pe_exc:
+                        inscription_pe_error = cstr(pe_exc)
+                        frappe.log_error(
+                            title=f"Student Financial Tool – PE inscripción {student_id}",
+                            message=frappe.get_traceback(),
+                        )
+
             generated_count += 1
+            detail = fs.name
+            if inscription_pe_name:
+                detail = f"{detail} · {_('PE inscripción')}: {inscription_pe_name}"
+            if inscription_pe_error:
+                detail = f"{detail} · {_('Error PE inscripción')}: {inscription_pe_error[:280]}"
             results.append({
                 "student_id": student_id,
                 "student_name": student_name,
                 "fees_count": fees_created,
                 "status_key": "ok",
-                "detail": fs.name,
+                "detail": detail,
+                "payment_entry": inscription_pe_name,
+                "inscription_pe_error": inscription_pe_error,
             })
 
         except Exception as e:
@@ -2031,6 +2132,8 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 "fees_count": fees_created,
                 "status_key": status_key,
                 "detail": detail,
+                "payment_entry": None,
+                "inscription_pe_error": None,
             })
             continue
 
