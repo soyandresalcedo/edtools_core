@@ -341,7 +341,8 @@ def create_stripe_checkout_session_for_fee(fee_name, amount=None):
 			_("Stripe is not configured. Please set stripe_secret_key in Site Config or environment.")
 		)
 
-	if not frappe.has_permission("Fees", "write", fee_name, raise_exception=False):
+	# frappe.has_permission usa el kwarg `throw`, no `raise_exception` (Frappe v15).
+	if not frappe.has_permission("Fees", "write", fee_name, throw=False):
 		frappe.throw(
 			_("You do not have permission to generate a payment link for this fee."),
 			frappe.PermissionError,
