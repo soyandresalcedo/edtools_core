@@ -197,6 +197,80 @@ def _get_current_student_name():
 	return students[0]["name"] if students else None
 
 
+def _compute_stripe_charge_for_fee(fee_name, student_name, amount=None):
+	"""
+	Shared validation + cascade computation for a Stripe charge targeting a Fee.
+
+	Used by both the student portal (PaymentIntent + Elements) and the Desk flow
+	(Checkout Session generated for WhatsApp). Does NOT depend on the current user
+	session: callers must authorize the student_name themselves.
+
+	Returns: {
+		"fee": <dict with name, student, student_name, company, currency>,
+		"pay_amount": <float>,
+		"amount_cents": <int>,
+		"currency_stripe": <str; Stripe-normalized, lowercase or USD uppercase>,
+		"cascade_breakdown": <list from get_fee_cascade_breakdown>,
+	}
+	"""
+	fee = frappe.db.get_value(
+		"Fees",
+		fee_name,
+		[
+			"name",
+			"student",
+			"student_name",
+			"company",
+			"receivable_account",
+			"currency",
+			"outstanding_amount",
+			"grand_total",
+		],
+		as_dict=True,
+	)
+	if not fee:
+		frappe.throw(_("Fee not found: {0}").format(fee_name))
+	if fee.student != student_name:
+		frappe.throw(_("This fee does not belong to the given student."), frappe.ValidationError)
+
+	outstanding = flt(fee.outstanding_amount or 0)
+	draft_alloc = _get_draft_stripe_allocated_by_fee(student_name)
+	held_on_fee = flt(draft_alloc.get(fee_name, 0))
+	effective_outstanding = max(0, round(outstanding - held_on_fee, 2))
+	if effective_outstanding <= 0:
+		frappe.throw(
+			_(
+				"This fee has a payment pending reconciliation. You cannot pay again until it is processed."
+			)
+		)
+
+	# Minimum = selected fee's effective outstanding (DB minus draft Stripe PE allocations).
+	pay_amount = flt(amount) if amount is not None else effective_outstanding
+	if pay_amount < effective_outstanding:
+		frappe.throw(_("Amount must be at least {0} (outstanding for this fee).").format(effective_outstanding))
+	if pay_amount <= 0:
+		frappe.throw(_("Amount to pay must be greater than zero."))
+	# Allow amount >= outstanding for cascade payments: extra goes to overdue first, then future.
+	cascade_breakdown = get_fee_cascade_breakdown(student_name, pay_amount, fee_name)
+
+	# Stripe amounts in cents (minimum 50 cents). USD stays uppercase for legacy compatibility;
+	# other currencies must be lowercase ISO code for the Stripe API.
+	currency = (fee.currency or "USD").strip().upper()
+	if currency != "USD":
+		currency = currency.lower()
+	amount_cents = int(round(pay_amount * 100))
+	if amount_cents < 50:
+		frappe.throw(_("Amount too small for Stripe (minimum 0.50)."))
+
+	return {
+		"fee": fee,
+		"pay_amount": pay_amount,
+		"amount_cents": amount_cents,
+		"currency_stripe": currency,
+		"cascade_breakdown": cascade_breakdown,
+	}
+
+
 @frappe.whitelist()
 def create_payment_intent(fee_name, student_name=None, amount=None):
 	"""
@@ -214,44 +288,12 @@ def create_payment_intent(fee_name, student_name=None, amount=None):
 	if student_name and student != student_name:
 		frappe.throw(_("You can only pay for your own fees."), frappe.PermissionError)
 
-	fee = frappe.db.get_value(
-		"Fees",
-		fee_name,
-		["name", "student", "student_name", "company", "receivable_account", "currency", "outstanding_amount", "grand_total"],
-		as_dict=True,
-	)
-	if not fee:
-		frappe.throw(_("Fee not found: {0}").format(fee_name))
-	if fee.student != student:
-		frappe.throw(_("This fee does not belong to you."), frappe.PermissionError)
-
-	outstanding = flt(fee.outstanding_amount or 0)
-	draft_alloc = _get_draft_stripe_allocated_by_fee(student)
-	held_on_fee = flt(draft_alloc.get(fee_name, 0))
-	effective_outstanding = max(0, round(outstanding - held_on_fee, 2))
-	if effective_outstanding <= 0:
-		frappe.throw(
-			_(
-				"This fee has a payment pending reconciliation. You cannot pay again until it is processed."
-			)
-		)
-
-	# Minimum = selected fee's effective outstanding (DB minus draft Stripe PE allocations).
-	pay_amount = flt(amount) if amount is not None else effective_outstanding
-	if pay_amount < effective_outstanding:
-		frappe.throw(_("Amount must be at least {0} (outstanding for this fee).").format(effective_outstanding))
-	if pay_amount <= 0:
-		frappe.throw(_("Amount to pay must be greater than zero."))
-	# Allow amount >= outstanding for cascade payments: extra goes to overdue first, then future.
-	cascade_breakdown = get_fee_cascade_breakdown(student, pay_amount, fee_name)
-
-	# Stripe amounts in cents (minimum 50 cents)
-	currency = (fee.currency or "USD").strip().upper()
-	if currency != "USD":
-		currency = currency.lower()
-	amount_cents = int(round(pay_amount * 100))
-	if amount_cents < 50:
-		frappe.throw(_("Amount too small for Stripe (minimum 0.50)."))
+	charge = _compute_stripe_charge_for_fee(fee_name, student, amount)
+	fee = charge["fee"]
+	pay_amount = charge["pay_amount"]
+	amount_cents = charge["amount_cents"]
+	currency = charge["currency_stripe"]
+	cascade_breakdown = charge["cascade_breakdown"]
 
 	try:
 		import stripe
@@ -278,6 +320,100 @@ def create_payment_intent(fee_name, student_name=None, amount=None):
 		"amount_display": f"{pay_amount:.2f}",
 		"currency": currency,
 		"cascade_breakdown": cascade_breakdown,
+	}
+
+
+@frappe.whitelist()
+def create_stripe_checkout_session_for_fee(fee_name, amount=None):
+	"""
+	Create a Stripe Checkout Session for a Fees document and return the hosted URL.
+
+	Intended for Desk staff who need to share a one-off payment link (e.g. via WhatsApp)
+	with a student. Reuses the same cascade logic as the portal: if `amount` exceeds the
+	selected fee's outstanding, the surplus is applied to overdue fees first, then future
+	ones, via the existing webhook + Payment Entry flow (idempotent on PaymentIntent id).
+
+	Permissions: caller must have write access to the Fees document.
+	"""
+	secret = _get_stripe_secret_key()
+	if not secret:
+		frappe.throw(
+			_("Stripe is not configured. Please set stripe_secret_key in Site Config or environment.")
+		)
+
+	if not frappe.has_permission("Fees", "write", fee_name, raise_exception=False):
+		frappe.throw(
+			_("You do not have permission to generate a payment link for this fee."),
+			frappe.PermissionError,
+		)
+
+	student_name = frappe.db.get_value("Fees", fee_name, "student")
+	if not student_name:
+		frappe.throw(_("Fee not found: {0}").format(fee_name))
+
+	charge = _compute_stripe_charge_for_fee(fee_name, student_name, amount)
+	fee = charge["fee"]
+	pay_amount = charge["pay_amount"]
+	amount_cents = charge["amount_cents"]
+	currency = charge["currency_stripe"]
+	cascade_breakdown = charge["cascade_breakdown"]
+
+	program = _get_program_for_fee(fee_name) or ""
+	fee_description = _get_fee_description(fee_name)
+	description_parts = [p for p in [fee.student_name or student_name, program, fee_description] if p]
+	product_name = _("Pago CUC University - {0}").format(fee_name)
+	product_description = " | ".join(description_parts) if description_parts else _("Pago de cuota")
+
+	base_url = frappe.utils.get_url()
+	return_base = f"{base_url}/stripe-fee-return?fee={quote(fee_name)}"
+	success_url = f"{return_base}&status=success&session_id={{CHECKOUT_SESSION_ID}}"
+	cancel_url = f"{return_base}&status=cancel"
+
+	try:
+		import stripe
+		stripe.api_key = secret
+		session = stripe.checkout.Session.create(
+			mode="payment",
+			line_items=[
+				{
+					"quantity": 1,
+					"price_data": {
+						"currency": currency,
+						"unit_amount": amount_cents,
+						"product_data": {
+							"name": product_name,
+							"description": product_description[:500],
+						},
+					},
+				}
+			],
+			payment_intent_data={
+				# Metadata is propagated to the PaymentIntent, matching what the webhook expects.
+				"metadata": {
+					"fee_name": fee_name,
+					"student_name": student_name,
+					"site": frappe.local.site,
+					"source": "desk_checkout",
+				},
+			},
+			success_url=success_url,
+			cancel_url=cancel_url,
+		)
+	except Exception as e:
+		frappe.log_error(
+			title="Stripe create_checkout_session",
+			message=frappe.get_traceback(),
+		)
+		frappe.throw(_("Payment link could not be created: {0}").format(str(e)))
+
+	return {
+		"url": session.url,
+		"session_id": session.id,
+		"amount_display": f"{pay_amount:.2f}",
+		"currency": currency,
+		"cascade_breakdown": cascade_breakdown,
+		"fee_name": fee_name,
+		"student_name": fee.student_name or student_name,
 	}
 
 
