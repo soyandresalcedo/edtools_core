@@ -5,6 +5,27 @@ import json
 import frappe
 
 
+def _get_program_portal_title(program_name: str) -> str:
+	"""Título para el portal: `program_abbreviation` si está informado; si no, `program_name` (nombre del documento)."""
+	if not program_name:
+		return ""
+	try:
+		row = frappe.db.get_value(
+			"Program",
+			program_name,
+			["program_abbreviation", "program_name"],
+			as_dict=True,
+		)
+		if not row:
+			return program_name
+		abbr = (row.get("program_abbreviation") or "").strip()
+		if abbr:
+			return abbr
+		return row.get("program_name") or program_name
+	except Exception:
+		return program_name
+
+
 @frappe.whitelist()
 def get_user_info():
 	"""Compat con Student Portal Vue (education develop). Education v15 no lo tiene.
@@ -66,7 +87,13 @@ def get_student_curriculum(student, program_enrollment=None):
 		ignore_permissions=True,
 	)
 	if not pe_list:
-		return {"program_name": None, "program_enrollment": None, "courses": [], "summary": {"total": 0, "completed": 0, "in_progress": 0, "upcoming": 0}}
+		return {
+			"program_name": None,
+			"program_enrollment": None,
+			"program_portal_title": None,
+			"courses": [],
+			"summary": {"total": 0, "completed": 0, "in_progress": 0, "upcoming": 0},
+		}
 	# Elegir el enrollment
 	if program_enrollment:
 		pe = next((p for p in pe_list if p["name"] == program_enrollment), None)
@@ -76,7 +103,13 @@ def get_student_curriculum(student, program_enrollment=None):
 		pe = pe_list[0]
 	program_name = pe.get("program")
 	if not program_name:
-		return {"program_name": None, "program_enrollment": pe["name"], "courses": [], "summary": {"total": 0, "completed": 0, "in_progress": 0, "upcoming": 0}}
+		return {
+			"program_name": None,
+			"program_enrollment": pe["name"],
+			"program_portal_title": None,
+			"courses": [],
+			"summary": {"total": 0, "completed": 0, "in_progress": 0, "upcoming": 0},
+		}
 	# Cursos del programa (Program Course) en orden
 	program_doc = frappe.get_doc("Program", program_name)
 	if not program_doc or not getattr(program_doc, "courses", None):
@@ -84,6 +117,7 @@ def get_student_curriculum(student, program_enrollment=None):
 			"program_name": program_name,
 			"program_enrollment": pe["name"],
 			"enrollment_date": pe.get("enrollment_date"),
+			"program_portal_title": _get_program_portal_title(program_name),
 			"courses": [],
 			"summary": {"total": 0, "completed": 0, "in_progress": 0, "upcoming": 0},
 		}
@@ -175,6 +209,7 @@ def get_student_curriculum(student, program_enrollment=None):
 		"program_name": program_name,
 		"program_enrollment": pe["name"],
 		"enrollment_date": pe.get("enrollment_date"),
+		"program_portal_title": _get_program_portal_title(program_name),
 		"current_term": current_term,
 		"courses": courses_out,
 		"summary": summary,
@@ -337,6 +372,9 @@ def get_student_info():
 	student_info.setdefault("current_program", {})
 	current_program = _get_current_enrollment_edtools(student_info["name"])
 	if current_program:
+		prog = current_program.get("program")
+		if prog:
+			current_program["program_portal_title"] = _get_program_portal_title(prog)
 		student_info["current_program"] = current_program
 		student_info["student_groups"] = _get_student_groups_edtools(
 			student_info["name"],
@@ -403,7 +441,15 @@ def get_student_programs(student):
 		filters={"docstatus": 1, "student": student},
 		ignore_permissions=True,
 	)
-	return programs or []
+	if not programs:
+		return []
+	for p in programs:
+		pn = p.get("program")
+		if pn:
+			p["program_portal_title"] = _get_program_portal_title(pn)
+		else:
+			p["program_portal_title"] = None
+	return programs
 
 
 @frappe.whitelist()
