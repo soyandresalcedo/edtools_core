@@ -14,10 +14,12 @@ LABELS_TO_HIDE = [
     "User Forum",
     "CUC University School",
     "IDITEK School",
+    "Colegio Anglo Hispano School",
     "Report an Issue",
     "Foro de usuarios",
     "Escuela CUC University",
     "Escuela IDITEK",
+    "Escuela Colegio Anglo Hispano",
     "Reportar un problema",
 ]
 

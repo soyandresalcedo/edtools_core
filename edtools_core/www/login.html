@@ -54,13 +54,13 @@
 {{ include_style('login.bundle.css') }}
 <link type="text/css" rel="stylesheet" href="/assets/edtools_core/css/edtools.css">
 <style>
-/* Logo IDITEK: anular max-height 42px de Frappe y mostrar más grande */
+/* Logo institucional: anular max-height 42px de Frappe y mostrar más grande */
 .for-login .page-card-head .app-logo,
 .for-email-login .page-card-head .app-logo,
 .page-card-head img.app-logo {
-    max-height: 140px !important;
-    height: 140px !important;
-    min-width: 200px !important;
+    max-height: 110px !important;
+    height: auto !important;
+    max-width: 260px !important;
     width: auto !important;
     object-fit: contain;
 }
@@ -69,12 +69,12 @@
 
 {% macro logo_section(title=null) %}
 <div class="page-card-head">
-	{# Logo fijo: PNG negro con transparencia (evita app_logo de BD) #}
-	<img class="app-logo" src="/assets/edtools_core/images/logo-iditek.png?v={{ build_version }}">
+	{# Logo fijo institucional (evita app_logo de BD) #}
+	<img class="app-logo" src="/assets/edtools_core/images/colegio_anglo_hispano-logoblanco.png?v={{ build_version }}">
 	{% if title %}
 	<h4>{{ _(title)}}</h4>
 	{% else %}
-	<h4>{{ _('Login to {0}').format(app_name or _("Frappe")) }}</h4>
+	<h4>{{ _('Iniciar sesión en {0}').format(app_name or _("Frappe")) }}</h4>
 	{% endif %}
 </div>
 {% endmacro %}
@@ -82,7 +82,7 @@
 {% block page_content %}
 <!-- {{ for_test }} -->
 <div class="login-split-wrapper">
-	<div class="login-split-left" style="background-image: url('/assets/edtools_core/images/fondo-cuc.png?v=20260331');"></div>
+	<div class="login-split-left" style="background-image: url('/assets/edtools_core/images/colegio_anglo_hispano-55-1-scaled.webp?v={{ build_version }}');"></div>
 	<div class="login-split-right">
 <div>
 	<noscript>

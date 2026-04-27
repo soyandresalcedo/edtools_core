@@ -270,17 +270,17 @@ override_whitelisted_methods = {
 # Website Settings
 # Override the default website title
 website_context = {
-	"brand_html": "IDITEK",
+	"brand_html": "Colegio Anglo Hispano",
 	"top_bar_items": [],
 	"footer_items": []
 }
 
-# Brand overrides - IDITEK
-brand_html = "IDITEK"
+# Brand overrides - Colegio Anglo Hispano
+brand_html = "Colegio Anglo Hispano"
 app_name = "edtools_core"
-app_title = "IDITEK"
+app_title = "Colegio Anglo Hispano"
 
 # Logo de login y páginas web (transparente, se ve sobre fondo claro u oscuro)
-app_logo_url = ["/assets/edtools_core/images/logo-iditek.png"]
+app_logo_url = ["/assets/edtools_core/images/colegio_anglo_hispano-logoblanco.png"]
 
 # Nota: El menú Ayuda se filtra en sessions.get() vía sessions_navbar_patch (sessions sobrescribe navbar después de boot)

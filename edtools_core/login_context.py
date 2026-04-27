@@ -2,7 +2,7 @@
 
 
 def patch_login_context():
-	"""Override get_context del login para inyectar logo y app_name de IDITEK."""
+	"""Override get_context del login para inyectar logo y app_name institucional."""
 	import frappe
 	from frappe.www import login as login_module
 
@@ -11,7 +11,7 @@ def patch_login_context():
 	def get_context(context):
 		original_get_context(context)
 		# Forzar logo y nombre en la página de login
-		context["logo"] = "/assets/edtools_core/images/logo-iditek.png?v=20260401"
-		context["app_name"] = "IDITEK"
+		context["logo"] = "/assets/edtools_core/images/colegio_anglo_hispano-logoblanco.png?v=20260427"
+		context["app_name"] = "Colegio Anglo Hispano"
 
 	login_module.get_context = get_context

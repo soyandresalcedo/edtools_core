@@ -139,7 +139,7 @@ def _send_credentials_email(
 <p>Si no puedes acceder de inmediato, espera un momento e inténtalo de nuevo, o usa "¿Olvidaste tu contraseña?" con tu correo institucional.</p>
 
 <p>Saludos,<br>
-Equipo IDITEK</p>
+Equipo Colegio Anglo Hispano</p>
 """
 	try:
 		# print() para que aparezca en Railway Deploy Logs al hacer "Inscribir estudiantes"

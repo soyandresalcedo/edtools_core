@@ -53,8 +53,8 @@ def filter_navbar_settings_in_boot(bootinfo):
         # 2) Ocultar por etiqueta (por si la URL es distinta)
         if label in (
             "About", "Acerca de",
-            "User Forum", "CUC University School", "IDITEK School", "Report an Issue",
-            "Foro de usuarios", "Escuela CUC University", "Escuela IDITEK", "Reportar un problema",
+            "User Forum", "CUC University School", "IDITEK School", "Colegio Anglo Hispano School", "Report an Issue",
+            "Foro de usuarios", "Escuela CUC University", "Escuela IDITEK", "Escuela Colegio Anglo Hispano", "Reportar un problema",
             "Frappe School",
         ):
             _set(item, "hidden", 1)

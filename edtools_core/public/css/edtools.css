@@ -38,9 +38,9 @@ footer a[href*="erpnext"] {
     line-height: 0 !important;
 }
 
-/* Replace with "Iniciar sesión en IDITEK" */
+/* Replace with institutional login text */
 .page-card-head .page-card-head-title::before {
-    content: "Iniciar sesión en IDITEK";
+    content: "Iniciar sesión en Colegio Anglo Hispano";
     font-size: 1.5rem !important;
     line-height: 1.2 !important;
     display: block;
@@ -52,23 +52,39 @@ footer a[href*="erpnext"] {
     display: none !important;
 }
 
-/* Add Edtools subtitle */
-.page-card-head::after {
+/* Add institutional subtitle */
+.login-split-right .page-card-head::after {
     content: "Sistema de Gestión Educativa";
     display: block;
     font-size: 0.9rem;
-    color: #6c757d;
+    color: rgba(255, 255, 255, 0.78);
     margin-top: 10px;
 }
 
-/* Logo de login: tamaño amplio y visible (IDITEK) */
+/* Logo de login: tamaño amplio y visible */
 .for-login .page-card-head .app-logo,
 .for-email-login .page-card-head .app-logo {
-    max-height: 140px !important;
-    height: 140px !important;
-    min-width: 200px !important;
-    width: auto !important;
+    max-height: 110px !important;
+    height: auto !important;
+    max-width: 260px !important;
+    width: 100% !important;
     object-fit: contain;
+}
+
+.login-split-right .page-card-head {
+    background: #12314a;
+    border-radius: 18px;
+    box-shadow: 0 10px 30px rgba(18, 49, 74, 0.18);
+    margin-bottom: 1.25rem;
+    padding: 1.25rem 1.5rem;
+}
+
+.login-split-right .page-card-head h4 {
+    color: #fff;
+    font-size: 1.05rem;
+    font-weight: 600;
+    line-height: 1.25;
+    margin-top: 0.9rem;
 }
 
 /* ============================= */

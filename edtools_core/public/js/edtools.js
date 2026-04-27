@@ -1,10 +1,10 @@
 // Edtools Text Replacement - Keep Frappe design, only change text
 
-var BRAND_NAME = "IDITEK";
+var BRAND_NAME = "Colegio Anglo Hispano";
 
-// Help dropdown: Documentation URL, hide 3 items, Soporte + CUC School non-clickable
+// Help dropdown: Documentation URL, hide 3 items, Soporte + School non-clickable
 var DOCS_EDTOOLS_URL = "https://docs.edtools.co/api-reference/introduction";
-var HELP_LABELS_TO_HIDE = ["About", "Acerca de", "User Forum", "CUC University School", "IDITEK School", "Report an Issue", "Foro de usuarios", "Escuela CUC University", "Escuela IDITEK", "Reportar un problema"];
+var HELP_LABELS_TO_HIDE = ["About", "Acerca de", "User Forum", "CUC University School", "IDITEK School", "Colegio Anglo Hispano School", "Report an Issue", "Foro de usuarios", "Escuela CUC University", "Escuela IDITEK", "Escuela Colegio Anglo Hispano", "Reportar un problema"];
 
 function makeLinkNonClickable(el) {
     if (el.getAttribute("data-edtools-noclick") === "1") return;
@@ -41,7 +41,7 @@ function customizeHelpDropdown() {
                 makeLinkNonClickable(el);
             }
             // 3) School institucional: no clickeable por si no se ocultó
-            if (text.indexOf("CUC University School") !== -1 || text.indexOf("IDITEK School") !== -1) {
+            if (text.indexOf("CUC University School") !== -1 || text.indexOf("IDITEK School") !== -1 || text.indexOf("Colegio Anglo Hispano School") !== -1) {
                 makeLinkNonClickable(el);
                 el.style.display = "none";
             }
@@ -50,7 +50,7 @@ function customizeHelpDropdown() {
         // 4) Hide About, User Forum, School, Report an Issue (exact or partial)
         var t = text.trim();
         var hide = (t === "About" || t === "Acerca de") ||
-            text.indexOf("User Forum") !== -1 || text.indexOf("CUC University School") !== -1 || text.indexOf("IDITEK School") !== -1 || text.indexOf("Report an Issue") !== -1 ||
+            text.indexOf("User Forum") !== -1 || text.indexOf("CUC University School") !== -1 || text.indexOf("IDITEK School") !== -1 || text.indexOf("Colegio Anglo Hispano School") !== -1 || text.indexOf("Report an Issue") !== -1 ||
             text.indexOf("Foro de usuarios") !== -1 || text.indexOf("Reportar un problema") !== -1;
         if (hide) {
             el.style.display = "none";
@@ -98,6 +98,7 @@ function replaceTextInPage() {
         'Frappe': BRAND_NAME,
         'ERPNext': BRAND_NAME,
         'Edtools': BRAND_NAME,
+        'IDITEK': BRAND_NAME,
         'CUC University': BRAND_NAME,
         'with ERPNext': 'with ' + BRAND_NAME,
         'Powered by Frappe': 'Powered by ' + BRAND_NAME,
