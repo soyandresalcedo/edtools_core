@@ -141,7 +141,7 @@ body:has(.login-split-wrapper) .page-content-wrapper .container,
 .login-split-left {
 	min-width: 0;
 	min-height: 0;
-	background-size: cover;
+	background-size: contain;
 	background-position: center center;
 	background-repeat: no-repeat;
 	background-color: #fff;
@@ -209,7 +209,7 @@ body:has(.login-split-wrapper) .page-content-wrapper .container,
 	.login-split-left {
 		min-width: 0;
 		min-height: 0;
-		background-size: cover;
+		background-size: contain;
 		background-position: center center;
 	}
 
