@@ -64,10 +64,10 @@ footer a[href*="erpnext"] {
 /* Logo de login: tamaño amplio y visible */
 .for-login .page-card-head .app-logo,
 .for-email-login .page-card-head .app-logo {
-    max-height: 110px !important;
+    max-height: 170px !important;
     height: auto !important;
-    max-width: 260px !important;
-    width: 100% !important;
+    max-width: 360px !important;
+    width: min(100%, 360px) !important;
     object-fit: contain;
 }
 
@@ -77,6 +77,8 @@ footer a[href*="erpnext"] {
     box-shadow: 0 10px 30px rgba(18, 49, 74, 0.18);
     margin-bottom: 1.25rem;
     padding: 1.25rem 1.5rem;
+    text-align: center;
+    width: 100%;
 }
 
 .login-split-right .page-card-head h4 {
@@ -114,10 +116,10 @@ body:has(.login-split-wrapper) .page-content-wrapper .container,
 .login-split-left {
 	flex: 3;
 	min-width: 75%;
-	background-size: cover;
-	background-position: left center;
+	background-size: contain;
+	background-position: center center;
 	background-repeat: no-repeat;
-	background-color: #0b1030;
+	background-color: #fff;
 }
 
 .login-split-right {
@@ -134,7 +136,7 @@ body:has(.login-split-wrapper) .page-content-wrapper .container,
 
 .login-split-right > div {
 	width: 100%;
-	max-width: 420px;
+	max-width: 460px;
 }
 
 /* Móvil: imagen arriba (reducida), formulario abajo */
