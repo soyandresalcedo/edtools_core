@@ -53,18 +53,6 @@
 {% block head_include %}
 {{ include_style('login.bundle.css') }}
 <link type="text/css" rel="stylesheet" href="/assets/edtools_core/css/edtools.css">
-<style>
-/* Logo institucional: anular max-height 42px de Frappe y mostrar más grande */
-.for-login .page-card-head .app-logo,
-.for-email-login .page-card-head .app-logo,
-.page-card-head img.app-logo {
-    max-height: 170px !important;
-    height: auto !important;
-    max-width: 360px !important;
-    width: min(100%, 360px) !important;
-    object-fit: contain;
-}
-</style>
 {% endblock %}
 
 {% macro logo_section(title=null) %}

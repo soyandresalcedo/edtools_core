@@ -56,18 +56,18 @@ footer a[href*="erpnext"] {
 .login-split-right .page-card-head::after {
     content: "Sistema de Gestión Educativa";
     display: block;
-    font-size: 0.9rem;
+    font-size: clamp(0.72rem, 1.2vh, 0.9rem);
     color: rgba(255, 255, 255, 0.78);
-    margin-top: 10px;
+    margin-top: clamp(4px, 1vh, 10px);
 }
 
 /* Logo de login: tamaño amplio y visible */
 .for-login .page-card-head .app-logo,
 .for-email-login .page-card-head .app-logo {
-    max-height: 170px !important;
+    max-height: clamp(86px, 15dvh, 160px) !important;
     height: auto !important;
-    max-width: 360px !important;
-    width: min(100%, 360px) !important;
+    max-width: clamp(220px, 24vw, 340px) !important;
+    width: min(100%, 340px) !important;
     object-fit: contain;
 }
 
@@ -75,84 +75,175 @@ footer a[href*="erpnext"] {
     background: #12314a;
     border-radius: 18px;
     box-shadow: 0 10px 30px rgba(18, 49, 74, 0.18);
-    margin-bottom: 1.25rem;
-    padding: 1.25rem 1.5rem;
+    margin-bottom: clamp(0.65rem, 2vh, 1.25rem);
+    padding: clamp(0.75rem, 2vh, 1.5rem);
     text-align: center;
     width: 100%;
 }
 
 .login-split-right .page-card-head h4 {
     color: #fff;
-    font-size: 1.05rem;
+    font-size: clamp(0.8rem, 1.6vh, 1.05rem);
     font-weight: 600;
     line-height: 1.25;
-    margin-top: 0.9rem;
+    margin-top: clamp(0.4rem, 1.3vh, 0.9rem);
+    margin-bottom: 0;
 }
 
 /* ============================= */
 /* LOGIN SPLIT LAYOUT - 75% imagen, 25% formulario */
 /* ============================= */
 
-/* Romper contenedor para que el split ocupe toda la pantalla */
+/* Romper contenedor para que el split ocupe exactamente una pantalla */
+html:has(.login-split-wrapper),
+body:has(.login-split-wrapper) {
+	height: 100dvh !important;
+	max-height: 100dvh !important;
+	overflow: hidden !important;
+}
+
+body:has(.login-split-wrapper) * {
+	box-sizing: border-box;
+}
+
+body:has(.login-split-wrapper) .navbar,
+body:has(.login-split-wrapper) footer,
+body:has(.login-split-wrapper) .web-footer {
+	display: none !important;
+}
+
 body:has(.login-split-wrapper) .page-content-wrapper,
 body:has(.login-split-wrapper) .page-content-wrapper main,
 body:has(.login-split-wrapper) .page-content-wrapper .container,
 #page-login .page-content-wrapper,
 #page-login .page-content-wrapper main,
 #page-login .page-content-wrapper .container {
-	min-height: 100vh !important;
+	height: 100dvh !important;
+	max-height: 100dvh !important;
+	min-height: 0 !important;
 	max-width: none !important;
-	width: 100% !important;
+	width: 100vw !important;
 	padding: 0 !important;
 	margin: 0 !important;
+	overflow: hidden !important;
 }
 
 .login-split-wrapper {
-	display: flex;
-	min-height: 100vh;
-	width: 100%;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) clamp(340px, 28vw, 460px);
+	height: 100dvh;
+	max-height: 100dvh;
+	width: 100vw;
+	overflow: hidden;
+	background: #fff;
 }
 
 .login-split-left {
-	flex: 3;
-	min-width: 75%;
-	background-size: contain;
+	min-width: 0;
+	min-height: 0;
+	background-size: cover;
 	background-position: center center;
 	background-repeat: no-repeat;
 	background-color: #fff;
 }
 
 .login-split-right {
-	flex: 1;
-	min-width: max(25%, 320px); /* 25% mínimo, o 320px en pantallas pequeñas */
+	min-width: 0;
+	height: 100dvh;
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	overflow-y: auto;
-	padding: 2rem;
+	overflow: hidden;
+	padding: clamp(0.75rem, 2vw, 2rem);
 	background-color: #fff;
 }
 
 .login-split-right > div {
 	width: 100%;
-	max-width: 460px;
+	max-width: 100%;
+	min-width: 0;
+}
+
+.login-split-right .login-content.page-card {
+	margin: 0 !important;
+	padding: clamp(0.75rem, 2vh, 1.25rem) !important;
+	width: 100%;
+}
+
+.login-split-right .page-card-body {
+	padding: 0 !important;
+}
+
+.login-split-right .form-group {
+	margin-bottom: clamp(0.45rem, 1.5vh, 0.9rem);
+}
+
+.login-split-right .page-card-actions {
+	margin-top: clamp(0.5rem, 1.5vh, 1rem);
+}
+
+@media (max-width: 1024px) {
+	.login-split-wrapper {
+		grid-template-columns: minmax(0, 1fr) clamp(320px, 34vw, 420px);
+	}
+
+	.for-login .page-card-head .app-logo,
+	.for-email-login .page-card-head .app-logo {
+		max-height: clamp(76px, 13dvh, 130px) !important;
+		max-width: clamp(190px, 22vw, 300px) !important;
+	}
+
+	.login-split-right {
+		padding: clamp(0.6rem, 1.6vw, 1.25rem);
+	}
 }
 
 /* Móvil: imagen arriba (reducida), formulario abajo */
 @media (max-width: 767px) {
 	.login-split-wrapper {
-		flex-direction: column;
+		grid-template-columns: 1fr;
+		grid-template-rows: clamp(120px, 28dvh, 220px) minmax(0, 1fr);
 	}
 
 	.login-split-left {
-		min-height: 35vh;
-		min-width: 100%;
+		min-width: 0;
+		min-height: 0;
+		background-size: cover;
+		background-position: center center;
 	}
 
 	.login-split-right {
-		min-width: 100%;
-		padding: 1.5rem;
+		height: auto;
+		min-width: 0;
+		padding: 0.75rem;
+		justify-content: center;
+	}
+
+	.login-split-right .page-card-head {
+		border-radius: 14px;
+		margin-bottom: 0.75rem;
+		padding: 0.75rem;
+	}
+
+	.for-login .page-card-head .app-logo,
+	.for-email-login .page-card-head .app-logo {
+		max-height: clamp(62px, 11dvh, 96px) !important;
+		max-width: min(220px, 72vw) !important;
+	}
+
+	.login-split-right .page-card-head h4 {
+		font-size: clamp(0.78rem, 3vw, 0.95rem);
+		margin-top: 0.4rem;
+	}
+
+	.login-split-right .page-card-head::after {
+		font-size: clamp(0.68rem, 2.6vw, 0.82rem);
+		margin-top: 4px;
+	}
+
+	.login-split-right .login-content.page-card {
+		padding: 0.75rem !important;
 	}
 }
 
