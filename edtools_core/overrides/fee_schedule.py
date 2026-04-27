@@ -5,6 +5,11 @@ from frappe import _
 from frappe.utils import cstr
 from frappe.utils.background_jobs import enqueue
 
+from edtools_core.fee_schedule_fees import (
+    create_fees_doc_from_fee_schedule,
+    use_fees_doctype_from_fee_schedule,
+)
+
 try:
     from education.education.education.doctype.fee_schedule.fee_schedule import (
         FeeSchedule as EducationFeeSchedule,
@@ -50,6 +55,7 @@ def generate_fees_for_schedule(fee_schedule: str) -> None:
     error = False
     err_msg = ""
     create_so = frappe.db.get_single_value("Education Settings", "create_so")
+    use_fees = use_fees_doctype_from_fee_schedule()
     total_records = sum([int(d.total_students) for d in doc.student_groups])
     created_records = 0
 
@@ -63,7 +69,9 @@ def generate_fees_for_schedule(fee_schedule: str) -> None:
         for student in students:
             try:
                 student_id = student.student
-                if create_so:
+                if use_fees:
+                    create_fees_doc_from_fee_schedule(fee_schedule, student_id)
+                elif create_so:
                     create_sales_order(fee_schedule, student_id)
                 else:
                     create_sales_invoice(fee_schedule, student_id)
@@ -87,7 +95,11 @@ def generate_fees_for_schedule(fee_schedule: str) -> None:
         frappe.db.set_value("Fee Schedule", fee_schedule, "error_log", err_msg)
 
     else:
-        if create_so:
+        if use_fees:
+            frappe.db.set_value(
+                "Fee Schedule", fee_schedule, "status", "Invoice Created"
+            )
+        elif create_so:
             frappe.db.set_value("Fee Schedule", fee_schedule, "status", "Order Created")
         else:
             frappe.db.set_value("Fee Schedule", fee_schedule, "status", "Invoice Created")
