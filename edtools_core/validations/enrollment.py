@@ -41,15 +41,17 @@ def validate_student_status(doc, method=None):
 	)
 
 	if not student:
-		frappe.throw(_("Student {0} not found").format(frappe.bold(doc.student)))
+		frappe.throw(_("No se encontró el estudiante {0}.").format(doc.student))
 
-	student_name_bold = frappe.bold(student.student_name or doc.student)
+	display_name = (student.student_name or doc.student or "").strip() or doc.student
 
 	# Validation 1: Student must be enabled (technical access control)
 	if not student.enabled:
 		frappe.throw(
-			_("Cannot enroll {0}. Student account is disabled.").format(student_name_bold),
-			title=_("Student Account Disabled"),
+			_("No se puede matricular a {0}: la cuenta del estudiante está deshabilitada.").format(
+				display_name
+			),
+			title=_("Cuenta deshabilitada"),
 		)
 
 	# Validation 2: Student must be in Active status (academic/administrative control)
@@ -59,10 +61,10 @@ def validate_student_status(doc, method=None):
 	if student_status != "Active":
 		frappe.throw(
 			_(
-				"Cannot enroll {0}. Student status is <strong>{1}</strong>. "
-				"Only Active students can be enrolled in programs."
-			).format(student_name_bold, student_status),
-			title=_("Invalid Student Status"),
+				"No se puede matricular a {0}: el estado del estudiante es {1}. "
+				"Solo se permite matricular estudiantes en estado Activo."
+			).format(display_name, student_status),
+			title=_("Estado del estudiante no válido"),
 		)
 
 	# Log successful validation for audit trail

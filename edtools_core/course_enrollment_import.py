@@ -30,6 +30,17 @@ OPTIONAL_COLUMNS = ["ENROLLMENT DATE"]
 SEMESTER_RE = re.compile(r"^\d{6}$")
 
 
+def _plain_user_message_from_exception(exc: BaseException, max_len: int = 220) -> str:
+	"""Quita etiquetas HTML y compacta espacios para tablas de importación (Text Editor)."""
+	s = str(exc) if exc else ""
+	s = re.sub(r"<[^>]+>", " ", s)
+	s = html.unescape(s)
+	s = " ".join(s.split()).strip()
+	if len(s) > max_len:
+		return s[: max_len - 1] + "…"
+	return s
+
+
 def coerce_enrollment_date_str(val) -> str | None:
 	"""
 	Normaliza fechas desde el formulario Single (Date puede ser date/datetime/str),
@@ -636,7 +647,7 @@ def process_enrollments(
 					detail=detail,
 				)
 			except Exception as e:
-				msg = _("Error CE: {0}").format(str(e)[:180])
+				msg = _plain_user_message_from_exception(e)
 				out["errors"].append(
 					{"row": row_num, "message": msg}
 				)
