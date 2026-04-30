@@ -308,20 +308,32 @@ def ensure_student_group_for_course_import(
 	return doc.name
 
 
-def get_unique_program_enrollment(student: str, academic_year: str) -> tuple[str | None, str | None]:
-	"""Retorna (pe_name, None) si hay exactamente un PE submitted; si no (None, mensaje)."""
-	pes = frappe.get_all(
-		"Program Enrollment",
-		filters={"student": student, "academic_year": academic_year, "docstatus": 1},
-		fields=["name"],
-	)
-	if len(pes) == 0:
-		return None, _("Sin Program Enrollment para año {0}").format(academic_year)
-	if len(pes) > 1:
-		return None, _("Varios Program Enrollment para año {0}; consolida matrículas").format(
-			academic_year
+def get_unique_program_enrollment(student: str, academic_year: str) -> tuple[str | None, str | None, str | None]:
+	"""
+	Retorna (pe_name, pe_year, error).
+
+	Prioriza el PE submitted del año solicitado y, si no existe, usa el PE
+	submitted más reciente del estudiante para permitir cursos de años posteriores.
+	"""
+
+	def _pick_latest(filters: dict[str, Any]) -> list[dict[str, Any]]:
+		return frappe.get_all(
+			"Program Enrollment",
+			filters=filters,
+			fields=["name", "academic_year"],
+			order_by="modified desc",
+			limit_page_length=1,
 		)
-	return pes[0].name, None
+
+	pes = _pick_latest({"student": student, "academic_year": academic_year, "docstatus": 1})
+	if not pes:
+		pes = _pick_latest({"student": student, "docstatus": 1})
+
+	if not pes:
+		return None, None, _("Estudiante sin Program Enrollment activo")
+
+	pe = pes[0]
+	return pe.get("name"), pe.get("academic_year"), None
 
 
 def process_enrollments(
@@ -518,7 +530,7 @@ def process_enrollments(
 		for row_num, student_name, enroll_date in unique_rows:
 			_bump(_("Inscribiendo: {0} — {1}").format(student_name, term_name))
 
-			pe_name, pe_err = get_unique_program_enrollment(student_name, year)
+			pe_name, pe_year, pe_err = get_unique_program_enrollment(student_name, year)
 			if pe_err or not pe_name:
 				msg = pe_err or _("Error PE")
 				out["errors"].append({"row": row_num, "message": msg})
@@ -610,6 +622,9 @@ def process_enrollments(
 				enrollment.insert(ignore_permissions=True)
 				enrollment.submit()
 				total_ok += 1
+				detail = enrollment.name
+				if pe_year and str(pe_year) != str(year):
+					detail = _("{0} (PE {1})").format(enrollment.name, pe_year)
 				_add_result(
 					row=row_num,
 					student_id=student_name,
@@ -618,7 +633,7 @@ def process_enrollments(
 					course=course_frappe,
 					academic_term=term_name,
 					status="Creado",
-					detail=enrollment.name,
+					detail=detail,
 				)
 			except Exception as e:
 				msg = _("Error CE: {0}").format(str(e)[:180])

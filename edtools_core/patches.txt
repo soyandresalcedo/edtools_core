@@ -19,3 +19,4 @@ edtools_core.patches.add_course_short_name_field
 edtools_core.patches.add_fees_edtools_manual_paid
 edtools_core.patches.make_fee_component_description_manual
 edtools_core.patches.clear_student_course_coverage_legacy_singles
+edtools_core.patches.ensure_course_short_name_field_v2

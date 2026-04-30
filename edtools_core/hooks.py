@@ -288,3 +288,17 @@ app_title = "CUC University"
 app_logo_url = ["/assets/edtools_core/images/cuc-university-logo.png"]
 
 # Nota: El menú Ayuda se filtra en sessions.get() vía sessions_navbar_patch (sessions sobrescribe navbar después de boot)
+
+# Fixtures
+# --------
+# Mantiene Course.short_name versionado en edtools_core aunque el Custom Field
+# se borre desde Customize Form o se restaure el DocType base de Education.
+fixtures = [
+	{
+		"doctype": "Custom Field",
+		"filters": [
+			["dt", "=", "Course"],
+			["fieldname", "=", "short_name"],
+		],
+	},
+]

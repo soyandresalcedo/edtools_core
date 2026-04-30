@@ -1,0 +1,18 @@
+[
+ {
+  "description": "Codigo corto del curso (ej. ACG 200, MBA 550).",
+  "docstatus": 0,
+  "doctype": "Custom Field",
+  "dt": "Course",
+  "fieldname": "short_name",
+  "fieldtype": "Data",
+  "in_list_view": 1,
+  "in_standard_filter": 1,
+  "insert_after": "course_name",
+  "label": "Short Name",
+  "length": 140,
+  "name": "Course-short_name",
+  "reqd": 0,
+  "translatable": 0
+ }
+]
