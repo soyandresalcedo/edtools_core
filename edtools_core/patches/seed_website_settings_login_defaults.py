@@ -12,7 +12,7 @@ import frappe
 
 _SEED = {
 	"app_name": "CUC University",
-	"app_logo": "/assets/edtools_core/images/cuc-university-logo.png",
+	"login_logo_image": "/assets/edtools_core/images/cuc-university-logo.png",
 	"login_background_image": "/assets/edtools_core/images/fondo-cuc.png",
 	"login_subtitle": "Sistema de Gestión Educativa",
 }

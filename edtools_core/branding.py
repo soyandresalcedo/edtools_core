@@ -2,24 +2,25 @@
 Lectura centralizada del branding del login desde Website Settings.
 
 Devuelve el contexto que consume www/login.py para inyectar logo, nombre,
-título, subtítulo y fondo en la página /login. Respeta la cadena nativa
-de Frappe para resolver el logo: Website Settings -> Navbar Settings -> hooks.
+título, subtítulo y fondo en la página /login.
 
-Cache buster: se añade ?v=<timestamp> a las URLs de /files/ para que el
-navegador descargue la versión nueva tras un Save en Website Settings.
+Prioridad del logo en /login:
+  login_logo_image → app_logo → Navbar Settings → hooks → asset por defecto
+
+Cache buster: ?v=<timestamp> en URLs /files/ tras guardar Website Settings.
 """
 
 import frappe
 from frappe import _
 
 DEFAULT_LOGIN_BACKGROUND = "/assets/edtools_core/images/fondo-cuc.png"
+DEFAULT_LOGIN_LOGO = "/assets/edtools_core/images/cuc-university-logo.png"
 
 
 def get_login_branding() -> dict:
 	"""Devuelve dict listo para `context.update(...)` en el get_context del login."""
-	from frappe.core.doctype.navbar_settings.navbar_settings import get_app_logo
-
-	ws = frappe.get_cached_doc("Website Settings")
+	# Lectura fresca (no cacheada): /login tiene no_cache=True
+	ws = frappe.get_doc("Website Settings")
 
 	app_name = (
 		ws.app_name
@@ -33,7 +34,7 @@ def get_login_branding() -> dict:
 	background = ws.get("login_background_image") or DEFAULT_LOGIN_BACKGROUND
 	background = _with_cache_buster(background, ws.modified)
 
-	logo = get_app_logo()
+	logo = _resolve_login_logo(ws)
 	logo = _with_cache_buster(logo, ws.modified)
 
 	return {
@@ -45,11 +46,19 @@ def get_login_branding() -> dict:
 	}
 
 
-def _with_cache_buster(url: str | None, modified) -> str | None:
-	"""Añade `?v=<timestamp>` a URLs servidas desde /files/.
+def _resolve_login_logo(ws) -> str:
+	"""Logo del formulario de login: campo dedicado primero, luego fallbacks."""
+	logo = (ws.get("login_logo_image") or ws.get("app_logo") or "").strip()
+	if logo:
+		return logo
 
-	No toca `/assets/` (ya tienen hash por bench build) ni URLs externas.
-	"""
+	from frappe.core.doctype.navbar_settings.navbar_settings import get_app_logo
+
+	return get_app_logo() or DEFAULT_LOGIN_LOGO
+
+
+def _with_cache_buster(url: str | None, modified) -> str | None:
+	"""Añade `?v=<timestamp>` a URLs servidas desde /files/."""
 	if not url or not url.startswith("/files/"):
 		return url
 	try:

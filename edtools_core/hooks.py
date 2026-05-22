@@ -10,7 +10,7 @@ app_license = "MIT"
 # Logo de fallback genérico cuando Website Settings.app_logo y Navbar Settings.app_logo
 # están vacíos. NO usar logo institucional aquí: el branding se administra desde
 # Website Settings (ver edtools_core.branding y patches de seed).
-app_logo_url = "/assets/frappe/images/frappe-favicon.svg"
+app_logo_url = ["/assets/frappe/images/frappe-favicon.svg"]
 
 # Normaliza frappe.local.lang al inicio de cada petición (num2words llama .lower() al idioma).
 before_request = ["edtools_core.fees_events.ensure_local_lang_before_request"]
@@ -302,7 +302,7 @@ fixtures = [
 		"doctype": "Custom Field",
 		"filters": [
 			["dt", "=", "Website Settings"],
-			["fieldname", "in", ["login_background_image", "login_title_override", "login_subtitle"]],
+			["fieldname", "in", ["login_logo_image", "login_background_image", "login_title_override", "login_subtitle"]],
 		],
 	},
 ]
