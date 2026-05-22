@@ -1,7 +1,8 @@
-/* Edtools Text-Only Branding CSS */
-/* Only replaces text, keeps Frappe's original colors and design */
+/* Edtools branding CSS */
+/* El texto del login (título, subtítulo, nombre) se administra desde Website Settings */
+/* vía edtools_core.branding; este archivo sólo aporta layout y reglas visuales. */
 
-/* Help dropdown: Soporte de CUC University - non-clickable, disabled look */
+/* Help dropdown: ítems disabled con look no-clickable */
 #toolbar-help .dropdown-item.disabled {
     cursor: default !important;
     opacity: 0.7;
@@ -29,46 +30,27 @@ footer a[href*="erpnext"] {
 }
 
 /* ============================= */
-/* LOGIN PAGE - REPLACE TEXT */
+/* LOGIN PAGE - LOGO Y SUBTÍTULO */
 /* ============================= */
 
-/* Hide the original "Iniciar sesión en Frappe" text */
-.page-card-head .page-card-head-title {
-    font-size: 0 !important;
-    line-height: 0 !important;
+/* Logo del login: sobrescribe el max-height: 42px de Frappe sin deformar */
+/* logos cuadrados o pequeños (sin min-width). */
+.for-login .page-card-head .app-logo,
+.for-email-login .page-card-head .app-logo,
+.page-card-head img.app-logo {
+    max-height: 140px !important;
+    max-width: 280px;
+    height: auto;
+    width: auto;
+    object-fit: contain;
 }
 
-/* Replace with "Iniciar sesión en CUC University" */
-.page-card-head .page-card-head-title::before {
-    content: "Iniciar sesión en CUC University";
-    font-size: 1.5rem !important;
-    line-height: 1.2 !important;
-    display: block;
-    font-weight: 500;
-}
-
-/* Hide any subtitle that mentions Frappe */
-.page-card-head .text-muted {
-    display: none !important;
-}
-
-/* Add Edtools subtitle */
-.page-card-head::after {
-    content: "Sistema de Gestión Educativa";
-    display: block;
+/* Subtítulo opcional bajo el título del login (Website Settings → Login Subtitle) */
+.page-card-head .login-subtitle {
     font-size: 0.9rem;
     color: #6c757d;
-    margin-top: 10px;
-}
-
-/* Logo de login: tamaño amplio y visible (CUC University) */
-.for-login .page-card-head .app-logo,
-.for-email-login .page-card-head .app-logo {
-    max-height: 140px !important;
-    height: 140px !important;
-    min-width: 200px !important;
-    width: auto !important;
-    object-fit: contain;
+    margin-top: 0.5rem;
+    text-align: center;
 }
 
 /* ============================= */

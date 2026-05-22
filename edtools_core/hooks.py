@@ -7,6 +7,11 @@ app_description = "Custom branding and features for Edtools Educational System"
 app_email = "soyandresalcedo@gmail.com"
 app_license = "MIT"
 
+# Logo de fallback genérico cuando Website Settings.app_logo y Navbar Settings.app_logo
+# están vacíos. NO usar logo institucional aquí: el branding se administra desde
+# Website Settings (ver edtools_core.branding y patches de seed).
+app_logo_url = "/assets/frappe/images/frappe-favicon.svg"
+
 # Normaliza frappe.local.lang al inicio de cada petición (num2words llama .lower() al idioma).
 before_request = ["edtools_core.fees_events.ensure_local_lang_before_request"]
 
@@ -271,34 +276,33 @@ override_whitelisted_methods = {
 # For example: Role, Gender, etc.
 # translated_search_doctypes = []
 
-# Website Settings
-# Override the default website title
+# Website context: dejar vacío top_bar y footer items institucionales.
+# El brand_html y demás se administran desde Website Settings (sección Brand).
 website_context = {
-	"brand_html": "CUC University",
 	"top_bar_items": [],
-	"footer_items": []
+	"footer_items": [],
 }
-
-# Brand overrides - CUC University
-brand_html = "CUC University"
-app_name = "edtools_core"
-app_title = "CUC University"
-
-# Logo de login y páginas web (transparente, se ve sobre fondo claro u oscuro)
-app_logo_url = ["/assets/edtools_core/images/cuc-university-logo.png"]
 
 # Nota: El menú Ayuda se filtra en sessions.get() vía sessions_navbar_patch (sessions sobrescribe navbar después de boot)
 
 # Fixtures
 # --------
-# Mantiene Course.short_name versionado en edtools_core aunque el Custom Field
-# se borre desde Customize Form o se restaure el DocType base de Education.
+# Versionan Custom Fields propios del proyecto:
+# - Course.short_name (legacy)
+# - Website Settings.login_* (branding dinámico del login, ver Fase 1 del plan)
 fixtures = [
 	{
 		"doctype": "Custom Field",
 		"filters": [
 			["dt", "=", "Course"],
 			["fieldname", "=", "short_name"],
+		],
+	},
+	{
+		"doctype": "Custom Field",
+		"filters": [
+			["dt", "=", "Website Settings"],
+			["fieldname", "in", ["login_background_image", "login_title_override", "login_subtitle"]],
 		],
 	},
 ]

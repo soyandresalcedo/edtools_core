@@ -28,15 +28,6 @@ def _patch_education_api():
 		pass
 
 
-def _patch_login_context():
-	"""Login siempre con logo CUC University y nombre 'CUC University'."""
-	try:
-		from edtools_core.login_context import patch_login_context
-		patch_login_context()
-	except Exception:
-		pass
-
-
 def _patch_email_footer():
 	"""Quitar 'Sent via ERPNext' del pie de los correos."""
 	try:
@@ -49,7 +40,6 @@ def _patch_email_footer():
 _patch_portal_redirect()
 _patch_student_portal_csrf()
 _patch_education_api()
-_patch_login_context()
 _patch_email_footer()
 
 

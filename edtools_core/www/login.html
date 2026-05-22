@@ -53,27 +53,18 @@
 {% block head_include %}
 {{ include_style('login.bundle.css') }}
 <link type="text/css" rel="stylesheet" href="/assets/edtools_core/css/edtools.css">
-<style>
-/* Logo CUC University: anular max-height 42px de Frappe y mostrar más grande */
-.for-login .page-card-head .app-logo,
-.for-email-login .page-card-head .app-logo,
-.page-card-head img.app-logo {
-    max-height: 140px !important;
-    height: 140px !important;
-    min-width: 200px !important;
-    width: auto !important;
-    object-fit: contain;
-}
-</style>
 {% endblock %}
 
 {% macro logo_section(title=null) %}
 <div class="page-card-head">
-	<img class="app-logo" src="{{ logo }}">
+	<img class="app-logo" src="{{ logo }}" alt="{{ app_name }}">
 	{% if title %}
-	<h4>{{ _(title)}}</h4>
+	<h4>{{ _(title) }}</h4>
 	{% else %}
-	<h4>{{ _('Login to {0}').format(app_name or _("Frappe")) }}</h4>
+	<h4>{{ login_title or _('Login to {0}').format(app_name or _("Frappe")) }}</h4>
+	{% endif %}
+	{% if login_subtitle and not title %}
+	<p class="login-subtitle text-muted">{{ login_subtitle }}</p>
 	{% endif %}
 </div>
 {% endmacro %}
@@ -81,7 +72,7 @@
 {% block page_content %}
 <!-- {{ for_test }} -->
 <div class="login-split-wrapper">
-	<div class="login-split-left" style="background-image: url('/assets/edtools_core/images/fondo-cuc.png');"></div>
+	<div class="login-split-left" style="background-image: url('{{ login_background }}');"></div>
 	<div class="login-split-right">
 <div>
 	<noscript>
