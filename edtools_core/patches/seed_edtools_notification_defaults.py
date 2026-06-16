@@ -41,12 +41,7 @@ TEMPLATES = [
 {% else %}
 <p>Se publicaron calificaciones en tu record académico:</p>
 {% endif %}
-<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
-<tr><th>Curso</th><th>Calificación</th><th>Periodo</th></tr>
-{% for g in grades %}
-<tr><td>{{ g.course }}</td><td>{{ g.grade }}</td><td>{{ g.term }}</td></tr>
-{% endfor %}
-</table>
+{{ grades_table_html | safe }}
 <p>Consulta el detalle en el portal: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
 <p>Saludos,<br><strong>CUC University</strong></p>""",
 	},
@@ -59,12 +54,7 @@ TEMPLATES = [
 {% else %}
 <p>Grades have been published to your academic record:</p>
 {% endif %}
-<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
-<tr><th>Course</th><th>Grade</th><th>Term</th></tr>
-{% for g in grades %}
-<tr><td>{{ g.course }}</td><td>{{ g.grade }}</td><td>{{ g.term }}</td></tr>
-{% endfor %}
-</table>
+{{ grades_table_html | safe }}
 <p>View details in the portal: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
 <p>Regards,<br><strong>CUC University</strong></p>""",
 	},

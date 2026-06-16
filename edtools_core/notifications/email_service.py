@@ -13,6 +13,32 @@ LANGUAGE_ES = "es"
 LANGUAGE_EN = "en"
 
 
+def render_grades_table_html(grades: list[dict], *, lang: str = LANGUAGE_ES) -> str:
+	"""Genera la tabla HTML de calificaciones (evita {% for %} en Email Template Text Editor)."""
+	import html
+
+	if lang == LANGUAGE_EN:
+		h1, h2, h3 = "Course", "Grade", "Term"
+	else:
+		h1, h2, h3 = "Curso", "Calificación", "Periodo"
+
+	rows = []
+	for g in grades:
+		rows.append(
+			"<tr>"
+			f"<td>{html.escape(str(g.get('course') or ''))}</td>"
+			f"<td>{html.escape(str(g.get('grade') or ''))}</td>"
+			f"<td>{html.escape(str(g.get('term') or ''))}</td>"
+			"</tr>"
+		)
+	return (
+		'<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">'
+		f"<tr><th>{h1}</th><th>{h2}</th><th>{h3}</th></tr>"
+		f"{''.join(rows)}"
+		"</table>"
+	)
+
+
 def get_notification_settings():
 	"""Carga el Single DocType de configuración (cache por request)."""
 	if not hasattr(frappe.local, "_edtools_notification_settings"):

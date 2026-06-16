@@ -11,6 +11,7 @@ from edtools_core.notifications.email_service import (
 	get_portal_url,
 	get_student_institutional_email,
 	pick_template,
+	render_grades_table_html,
 	resolve_notification_language,
 	send_templated_email,
 )
@@ -116,6 +117,7 @@ def _flush_grade_notifications_impl() -> None:
 		context = {
 			"student_name": student_name,
 			"grades": grades,
+			"grades_table_html": render_grades_table_html(grades, lang=lang),
 			"grade_count": len(grades),
 			"is_correction": has_correction,
 			"portal_url": get_portal_url(),
