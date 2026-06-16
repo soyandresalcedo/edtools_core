@@ -161,7 +161,7 @@ doc_events = {
 	"Course Enrollment": {
 		"validate": "edtools_core.validations.enrollment.validate_student_status",
 		"on_trash": "edtools_core.moodle_sync.on_course_enrollment_trash",
-		"on_submit": "edtools_core.notifications.course_enrollment.send_course_enrollment_email",
+		"after_insert": "edtools_core.notifications.course_enrollment.send_course_enrollment_email",
 	},
 	"Assessment Result": {
 		"on_submit": "edtools_core.notifications.grades.queue_grade_notification",

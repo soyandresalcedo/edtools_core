@@ -17,7 +17,19 @@ from edtools_core.notifications.dispatch import try_dispatch_rules
 
 
 def send_course_enrollment_email(doc, method=None):
-	if doc.docstatus != 1 or not doc.student:
+	"""Hook al crear una matrícula a curso. Nunca debe romper el guardado."""
+	try:
+		_send_course_enrollment_email_impl(doc)
+	except Exception:
+		frappe.log_error(
+			title="Error enviando correo de matrícula a curso",
+			message=frappe.get_traceback(),
+		)
+
+
+def _send_course_enrollment_email_impl(doc):
+	# Course Enrollment NO es submittable: docstatus siempre es 0, no validar docstatus.
+	if not doc.student:
 		return
 
 	settings = get_notification_settings()

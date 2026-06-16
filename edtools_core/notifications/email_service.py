@@ -104,8 +104,6 @@ def send_templated_email(
 ) -> bool:
 	if getattr(frappe.flags, "mute_emails", False):
 		return False
-	if frappe.utils.cint(frappe.db.get_single_value("System Settings", "disable_emails")):
-		return False
 
 	valid_recipients = [r for r in recipients if r and validate_email_address(r, throw=False)]
 	if not valid_recipients:
