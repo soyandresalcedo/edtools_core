@@ -780,6 +780,8 @@ def create_or_update_assessment_result(
     Devuelve (name, error_message, created, updated_submitted).
     updated_submitted=True cuando se actualizó un resultado que ya estaba presentado (sin cancelar).
     """
+    from edtools_core.notifications.grades import queue_grade_after_assessment_result_update
+
     try:
         from education.education.api import (
             get_assessment_result_doc,
@@ -832,6 +834,9 @@ def create_or_update_assessment_result(
         frappe.db.set_value("Assessment Result", result_name, "grade", grade_letter or "")
         frappe.db.commit()
         frappe.clear_document_cache("Assessment Result", result_name)
+        queue_grade_after_assessment_result_update(
+            plan, student_name, score_val, via_submit=False
+        )
         return result_name, None, False, True
     doc = get_assessment_result_doc(student_name, assessment_plan_name)
     if not doc:
@@ -860,6 +865,9 @@ def create_or_update_assessment_result(
     if doc.docstatus == 0:
         doc.submit()
     frappe.db.commit()
+    queue_grade_after_assessment_result_update(
+        plan, student_name, flt(score, 2), via_submit=True
+    )
     return doc.name, None, is_new, False
 
 
@@ -1319,127 +1327,135 @@ def process_grades(
         groups[key].append((i + 2, student_name, score, course_frappe))
 
     # 3) Por cada grupo: Assessment Group leaf, Student Group, Assessment Plan, Assessment Results
-    created_sg = set()
-    created_ap = set()
-    total_processed = 0
-    total_created = 0
-    total_updated = 0
-    total_updated_submitted = 0
-    total_errors = len(out["errors"])
+    from edtools_core.notifications.grades import flush_grade_notifications
 
-    for (course_frappe, year, term_label), rows in groups.items():
-        term_name = f"{year} ({term_label})"
-        if progress_callback:
-            progress_callback(total_processed, len(data_rows), _("Procesando grupo {0} - {1}").format(course_frappe, term_name))
-        leaf = get_or_create_assessment_group_leaf(year, term_label)
-        if not leaf:
-            for (row_num, __unused1, __unused2, __unused3) in rows:
-                msg = _("No se pudo crear el grupo de evaluación para {0}.").format(term_name)
-                out["errors"].append({"row": row_num, "message": msg})
-                _add_result(
-                    row=row_num,
-                    student=__unused1,
-                    course=course_frappe,
-                    academic_term=term_name,
-                    status="ErrorProcesamiento",
-                    detail=msg,
-                )
-            continue
-        student_names = list({r[1] for r in rows})
-        sg_name = get_or_create_student_group(course_frappe, year, term_name, student_names)
-        if not sg_name:
-            for (row_num, __unused1, __unused2, __unused3) in rows:
-                msg = _("No se pudo crear el grupo de estudiantes.")
-                out["errors"].append({"row": row_num, "message": msg})
-                _add_result(
-                    row=row_num,
-                    student=__unused1,
-                    course=course_frappe,
-                    academic_term=term_name,
-                    status="ErrorProcesamiento",
-                    detail=msg,
-                )
-            continue
-        if sg_name not in created_sg:
-            created_sg.add(sg_name)
-        course_doc = frappe.get_cached_doc("Course", course_frappe)
-        scale = getattr(course_doc, "default_grading_scale", None) or grading_scale_name
-        ap_name = get_or_create_assessment_plan(sg_name, leaf, course_frappe, scale, academic_term_name=term_name)
-        if not ap_name:
-            for (row_num, __unused1, __unused2, __unused3) in rows:
-                msg = _("No se pudo crear el plan de evaluación.")
-                out["errors"].append({"row": row_num, "message": msg})
-                _add_result(
-                    row=row_num,
-                    student=__unused1,
-                    course=course_frappe,
-                    academic_term=term_name,
-                    status="ErrorProcesamiento",
-                    detail=msg,
-                )
-            continue
-        if ap_name not in created_ap:
-            created_ap.add(ap_name)
-        # Una sola fila por estudiante por grupo: la última en el archivo gana (evita que una fila con 0 o vacía sobrescriba la nota correcta).
-        seen_student = {}
-        for row_num, student_name, score, __unused_course in rows:
-            seen_student[student_name] = (row_num, student_name, score, __unused_course)
-        unique_rows = list(seen_student.values())
-        for row_num, student_name, score, __unused_course in unique_rows:
+    frappe.flags.in_grade_import = True
+    try:
+        created_sg = set()
+        created_ap = set()
+        total_processed = 0
+        total_created = 0
+        total_updated = 0
+        total_updated_submitted = 0
+        total_errors = len(out["errors"])
+
+        for (course_frappe, year, term_label), rows in groups.items():
+            term_name = f"{year} ({term_label})"
             if progress_callback:
-                progress_callback(total_processed, len(data_rows), _("Procesando resultado: {0}").format(student_name))
-            ar_name, err, created, updated_submitted = create_or_update_assessment_result(ap_name, student_name, score, scale)
-            if err:
-                out["errors"].append({"row": row_num, "message": err})
-                _add_result(
-                    row=row_num,
-                    student=student_name,
-                    course=course_frappe,
-                    academic_term=term_name,
-                    status="ErrorProcesamiento",
-                    detail=err,
-                )
-            else:
-                total_processed += 1
-                if created:
-                    total_created += 1
+                progress_callback(total_processed, len(data_rows), _("Procesando grupo {0} - {1}").format(course_frappe, term_name))
+            leaf = get_or_create_assessment_group_leaf(year, term_label)
+            if not leaf:
+                for (row_num, __unused1, __unused2, __unused3) in rows:
+                    msg = _("No se pudo crear el grupo de evaluación para {0}.").format(term_name)
+                    out["errors"].append({"row": row_num, "message": msg})
+                    _add_result(
+                        row=row_num,
+                        student=__unused1,
+                        course=course_frappe,
+                        academic_term=term_name,
+                        status="ErrorProcesamiento",
+                        detail=msg,
+                    )
+                continue
+            student_names = list({r[1] for r in rows})
+            sg_name = get_or_create_student_group(course_frappe, year, term_name, student_names)
+            if not sg_name:
+                for (row_num, __unused1, __unused2, __unused3) in rows:
+                    msg = _("No se pudo crear el grupo de estudiantes.")
+                    out["errors"].append({"row": row_num, "message": msg})
+                    _add_result(
+                        row=row_num,
+                        student=__unused1,
+                        course=course_frappe,
+                        academic_term=term_name,
+                        status="ErrorProcesamiento",
+                        detail=msg,
+                    )
+                continue
+            if sg_name not in created_sg:
+                created_sg.add(sg_name)
+            course_doc = frappe.get_cached_doc("Course", course_frappe)
+            scale = getattr(course_doc, "default_grading_scale", None) or grading_scale_name
+            ap_name = get_or_create_assessment_plan(sg_name, leaf, course_frappe, scale, academic_term_name=term_name)
+            if not ap_name:
+                for (row_num, __unused1, __unused2, __unused3) in rows:
+                    msg = _("No se pudo crear el plan de evaluación.")
+                    out["errors"].append({"row": row_num, "message": msg})
+                    _add_result(
+                        row=row_num,
+                        student=__unused1,
+                        course=course_frappe,
+                        academic_term=term_name,
+                        status="ErrorProcesamiento",
+                        detail=msg,
+                    )
+                continue
+            if ap_name not in created_ap:
+                created_ap.add(ap_name)
+            # Una sola fila por estudiante por grupo: la última en el archivo gana (evita que una fila con 0 o vacía sobrescriba la nota correcta).
+            seen_student = {}
+            for row_num, student_name, score, __unused_course in rows:
+                seen_student[student_name] = (row_num, student_name, score, __unused_course)
+            unique_rows = list(seen_student.values())
+            for row_num, student_name, score, __unused_course in unique_rows:
+                if progress_callback:
+                    progress_callback(total_processed, len(data_rows), _("Procesando resultado: {0}").format(student_name))
+                ar_name, err, created, updated_submitted = create_or_update_assessment_result(ap_name, student_name, score, scale)
+                if err:
+                    out["errors"].append({"row": row_num, "message": err})
                     _add_result(
                         row=row_num,
                         student=student_name,
                         course=course_frappe,
                         academic_term=term_name,
-                        status="Creado",
-                        detail=ar_name or "",
+                        status="ErrorProcesamiento",
+                        detail=err,
                     )
                 else:
-                    total_updated += 1
-                    if updated_submitted:
-                        total_updated_submitted += 1
+                    total_processed += 1
+                    if created:
+                        total_created += 1
                         _add_result(
                             row=row_num,
                             student=student_name,
                             course=course_frappe,
                             academic_term=term_name,
-                            status="ActualizadoSubmitted",
+                            status="Creado",
                             detail=ar_name or "",
                         )
                     else:
-                        _add_result(
-                            row=row_num,
-                            student=student_name,
-                            course=course_frappe,
-                            academic_term=term_name,
-                            status="Actualizado",
-                            detail=ar_name or "",
-                        )
+                        total_updated += 1
+                        if updated_submitted:
+                            total_updated_submitted += 1
+                            _add_result(
+                                row=row_num,
+                                student=student_name,
+                                course=course_frappe,
+                                academic_term=term_name,
+                                status="ActualizadoSubmitted",
+                                detail=ar_name or "",
+                            )
+                        else:
+                            _add_result(
+                                row=row_num,
+                                student=student_name,
+                                course=course_frappe,
+                                academic_term=term_name,
+                                status="Actualizado",
+                                detail=ar_name or "",
+                            )
 
-    out["summary"]["student_groups_created"] = len(created_sg)
-    out["summary"]["assessment_plans_created"] = len(created_ap)
-    out["summary"]["assessment_results_created"] = total_created
-    out["summary"]["assessment_results_updated"] = total_updated
-    out["summary"]["assessment_results_updated_submitted"] = total_updated_submitted
-    out["summary"]["rows_processed"] = total_processed
-    out["summary"]["rows_with_errors"] = len(out["errors"])
-    out["results"] = results
-    out["success"] = True
+        out["summary"]["student_groups_created"] = len(created_sg)
+        out["summary"]["assessment_plans_created"] = len(created_ap)
+        out["summary"]["assessment_results_created"] = total_created
+        out["summary"]["assessment_results_updated"] = total_updated
+        out["summary"]["assessment_results_updated_submitted"] = total_updated_submitted
+        out["summary"]["rows_processed"] = total_processed
+        out["summary"]["rows_with_errors"] = len(out["errors"])
+        out["results"] = results
+        out["success"] = True
+    finally:
+        frappe.flags.in_grade_import = False
+        flush_grade_notifications()
+
     return out

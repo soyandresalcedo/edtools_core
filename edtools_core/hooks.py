@@ -155,11 +155,23 @@ override_doctype_class = {
 
 doc_events = {
 	"Program Enrollment": {
-		"validate": "edtools_core.validations.enrollment.validate_student_status"
+		"validate": "edtools_core.validations.enrollment.validate_student_status",
+		"on_submit": "edtools_core.notifications.dispatch.on_submit_notification",
 	},
 	"Course Enrollment": {
 		"validate": "edtools_core.validations.enrollment.validate_student_status",
-		"on_trash": "edtools_core.moodle_sync.on_course_enrollment_trash"
+		"on_trash": "edtools_core.moodle_sync.on_course_enrollment_trash",
+		"on_submit": "edtools_core.notifications.course_enrollment.send_course_enrollment_email",
+	},
+	"Assessment Result": {
+		"on_submit": "edtools_core.notifications.grades.queue_grade_notification",
+		"on_update_after_submit": "edtools_core.notifications.grades.queue_grade_notification",
+	},
+	"Fees": {
+		"before_validate": "edtools_core.fees_events.ensure_local_lang_for_num2words",
+		"before_save": "edtools_core.fees_events.update_components_description",
+		"before_print": "edtools_core.fees_events.set_payment_date_for_print",
+		"on_submit": "edtools_core.notifications.dispatch.on_submit_notification",
 	},
 	"Student": {
 		"before_save": "edtools_core.validations.student.track_status_change",
@@ -174,11 +186,6 @@ doc_events = {
 	},
 	"Fee Schedule": {
 		"before_validate": "edtools_core.fees_events.ensure_local_lang_for_num2words",
-	},
-	"Fees": {
-		"before_validate": "edtools_core.fees_events.ensure_local_lang_for_num2words",
-		"before_save": "edtools_core.fees_events.update_components_description",
-		"before_print": "edtools_core.fees_events.set_payment_date_for_print",
 	},
 }
 

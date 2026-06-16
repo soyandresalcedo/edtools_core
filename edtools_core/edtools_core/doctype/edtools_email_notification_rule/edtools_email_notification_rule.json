@@ -1,0 +1,81 @@
+{
+ "actions": [],
+ "creation": "2026-06-16 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "reference_doctype",
+  "trigger_event",
+  "recipient_student_field",
+  "email_template_spanish",
+  "email_template_english",
+  "condition"
+ ],
+ "fields": [
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Document Type",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "fieldname": "trigger_event",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Trigger Event",
+   "options": "Submit\nSave\nUpdate After Submit",
+   "reqd": 1
+  },
+  {
+   "default": "student",
+   "description": "Campo Link Student en el documento (ej. student)",
+   "fieldname": "recipient_student_field",
+   "fieldtype": "Data",
+   "label": "Recipient Student Field"
+  },
+  {
+   "fieldname": "email_template_spanish",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Email Template (Spanish)",
+   "options": "Email Template"
+  },
+  {
+   "fieldname": "email_template_english",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Email Template (English)",
+   "options": "Email Template"
+  },
+  {
+   "description": "Expresión Python opcional. Contexto: doc. Ejemplo: doc.docstatus == 1",
+   "fieldname": "condition",
+   "fieldtype": "Code",
+   "label": "Condition",
+   "options": "PythonExpression"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EdTools Core",
+ "name": "EdTools Email Notification Rule",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

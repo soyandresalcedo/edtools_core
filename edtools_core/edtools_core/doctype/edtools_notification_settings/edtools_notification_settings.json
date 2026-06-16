@@ -1,0 +1,141 @@
+{
+ "actions": [],
+ "creation": "2026-06-16 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_general",
+  "enable_course_enrollment_emails",
+  "enable_grade_emails",
+  "default_notification_language",
+  "portal_url",
+  "sender_email",
+  "column_break_general",
+  "section_templates",
+  "course_enrollment_template_es",
+  "course_enrollment_template_en",
+  "grade_template_es",
+  "grade_template_en",
+  "section_rules",
+  "rules"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_general",
+   "fieldtype": "Section Break",
+   "label": "General"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_course_enrollment_emails",
+   "fieldtype": "Check",
+   "label": "Enable Course Enrollment Emails"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_grade_emails",
+   "fieldtype": "Check",
+   "label": "Enable Grade Emails"
+  },
+  {
+   "default": "Spanish",
+   "description": "Idioma por defecto si el estudiante no tiene preferencia",
+   "fieldname": "default_notification_language",
+   "fieldtype": "Select",
+   "label": "Default Notification Language",
+   "options": "Spanish\nEnglish",
+   "reqd": 1
+  },
+  {
+   "description": "Opcional. Si está vacío se usa /student-portal del sitio",
+   "fieldname": "portal_url",
+   "fieldtype": "Data",
+   "label": "Student Portal URL"
+  },
+  {
+   "description": "Opcional. Si está vacío se usa la Email Account Default Outgoing",
+   "fieldname": "sender_email",
+   "fieldtype": "Data",
+   "label": "Sender Email Override",
+   "options": "Email"
+  },
+  {
+   "fieldname": "column_break_general",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_templates",
+   "fieldtype": "Section Break",
+   "label": "Email Templates"
+  },
+  {
+   "fieldname": "course_enrollment_template_es",
+   "fieldtype": "Link",
+   "label": "Course Enrollment Template (Spanish)",
+   "options": "Email Template"
+  },
+  {
+   "fieldname": "course_enrollment_template_en",
+   "fieldtype": "Link",
+   "label": "Course Enrollment Template (English)",
+   "options": "Email Template"
+  },
+  {
+   "fieldname": "grade_template_es",
+   "fieldtype": "Link",
+   "label": "Grade Template (Spanish)",
+   "options": "Email Template"
+  },
+  {
+   "fieldname": "grade_template_en",
+   "fieldtype": "Link",
+   "label": "Grade Template (English)",
+   "options": "Email Template"
+  },
+  {
+   "fieldname": "section_rules",
+   "fieldtype": "Section Break",
+   "label": "Additional Notification Rules"
+  },
+  {
+   "description": "Reglas extra para otros DocTypes (Program Enrollment, Fees, etc.)",
+   "fieldname": "rules",
+   "fieldtype": "Table",
+   "label": "Rules",
+   "options": "EdTools Email Notification Rule"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-06-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EdTools Core",
+ "name": "EdTools Notification Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Education Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
