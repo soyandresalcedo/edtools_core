@@ -3,6 +3,8 @@
 
 import frappe
 
+from edtools_core.patches.notification_context_seed import ensure_context_settings
+
 LEGACY_COURSE_ENROLLMENT_TEMPLATES = {
 	"EdTools Course Enrollment ES": {
 		"subject": "Inscripción a curso: {{ course_name }}",
@@ -63,50 +65,6 @@ ENRICHED_COURSE_ENROLLMENT_TEMPLATES = {
 	},
 }
 
-DEFAULT_CONTEXT_DOCTYPES = [
-	{"reference_doctype": "Academic Term", "context_key": "academic_term"},
-	{"reference_doctype": "Academic Year", "context_key": "academic_year"},
-	{"reference_doctype": "Program", "context_key": "program"},
-	{"reference_doctype": "Course", "context_key": "course"},
-	{"reference_doctype": "Student", "context_key": "student"},
-	{"reference_doctype": "Program Enrollment", "context_key": "program_enrollment"},
-	{"reference_doctype": "Student Group", "context_key": "student_group"},
-]
-
-
-def _ensure_context_settings() -> None:
-	if not frappe.db.exists("DocType", "EdTools Notification Settings"):
-		return
-
-	settings = frappe.get_single("EdTools Notification Settings")
-	changed = False
-
-	for field, value in {
-		"enable_context_enrichment": 1,
-		"context_namespace": "ref",
-		"context_max_depth": 2,
-	}.items():
-		current = settings.get(field)
-		if current in (None, ""):
-			settings.set(field, value)
-			changed = True
-
-	if not settings.get("context_doctypes"):
-		for row in DEFAULT_CONTEXT_DOCTYPES:
-			settings.append(
-				"context_doctypes",
-				{
-					"enabled": 1,
-					"reference_doctype": row["reference_doctype"],
-					"context_key": row["context_key"],
-				},
-			)
-		changed = True
-
-	if changed:
-		settings.flags.ignore_permissions = True
-		settings.save(ignore_permissions=True)
-
 
 def execute():
 	for name, legacy in LEGACY_COURSE_ENROLLMENT_TEMPLATES.items():
@@ -124,6 +82,6 @@ def execute():
 		doc.flags.ignore_permissions = True
 		doc.save(ignore_permissions=True)
 
-	_ensure_context_settings()
+	ensure_context_settings()
 	frappe.db.commit()
 	frappe.clear_cache()

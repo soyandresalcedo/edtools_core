@@ -1,3 +1,4 @@
+[pre_model_sync]
 edtools_core.patches.add_personal_email_student_applicant
 edtools_core.patches.add_personal_email_to_student_applicant_webform
 edtools_core.patches.make_student_email_id_optional_in_webform
@@ -25,4 +26,6 @@ edtools_core.patches.seed_website_settings_login_defaults
 edtools_core.patches.add_website_settings_login_logo_field
 edtools_core.patches.seed_edtools_notification_defaults
 edtools_core.patches.fix_edtools_grade_email_templates
+
+[post_model_sync]
 edtools_core.patches.refresh_edtools_enriched_templates

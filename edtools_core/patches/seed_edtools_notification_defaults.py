@@ -3,6 +3,12 @@
 
 import frappe
 
+from edtools_core.patches.notification_context_seed import (
+	CONTEXT_DEFAULTS,
+	DEFAULT_CONTEXT_DOCTYPES,
+	context_enrichment_fields_ready,
+)
+
 TEMPLATES = [
 	{
 		"name": "EdTools Course Enrollment ES",
@@ -62,16 +68,6 @@ TEMPLATES = [
 	},
 ]
 
-DEFAULT_CONTEXT_DOCTYPES = [
-	{"reference_doctype": "Academic Term", "context_key": "academic_term"},
-	{"reference_doctype": "Academic Year", "context_key": "academic_year"},
-	{"reference_doctype": "Program", "context_key": "program"},
-	{"reference_doctype": "Course", "context_key": "course"},
-	{"reference_doctype": "Student", "context_key": "student"},
-	{"reference_doctype": "Program Enrollment", "context_key": "program_enrollment"},
-	{"reference_doctype": "Student Group", "context_key": "student_group"},
-]
-
 
 def _ensure_email_template(spec: dict) -> None:
 	if frappe.db.exists("Email Template", spec["name"]):
@@ -106,10 +102,11 @@ def _ensure_student_notification_language_field() -> None:
 
 
 def _ensure_context_doctypes(settings) -> bool:
+	if not context_enrichment_fields_ready():
+		return False
 	if settings.get("context_doctypes"):
 		return False
 
-	changed = False
 	for row in DEFAULT_CONTEXT_DOCTYPES:
 		settings.append(
 			"context_doctypes",
@@ -119,8 +116,7 @@ def _ensure_context_doctypes(settings) -> bool:
 				"context_key": row["context_key"],
 			},
 		)
-		changed = True
-	return changed
+	return True
 
 
 def _ensure_notification_settings() -> None:
@@ -133,14 +129,14 @@ def _ensure_notification_settings() -> None:
 		"enable_course_enrollment_emails": 1,
 		"enable_grade_emails": 1,
 		"default_notification_language": "Spanish",
-		"enable_context_enrichment": 1,
-		"context_namespace": "ref",
-		"context_max_depth": 2,
 		"course_enrollment_template_es": "EdTools Course Enrollment ES",
 		"course_enrollment_template_en": "EdTools Course Enrollment EN",
 		"grade_template_es": "EdTools Grade Posted ES",
 		"grade_template_en": "EdTools Grade Posted EN",
 	}
+	if context_enrichment_fields_ready():
+		defaults.update(CONTEXT_DEFAULTS)
+
 	for field, value in defaults.items():
 		current = settings.get(field)
 		if current in (None, ""):
