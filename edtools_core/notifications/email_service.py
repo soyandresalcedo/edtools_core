@@ -16,10 +16,15 @@ LANGUAGE_EN = "en"
 def get_notification_settings():
 	"""Carga el Single DocType de configuración (cache por request)."""
 	if not hasattr(frappe.local, "_edtools_notification_settings"):
-		if not frappe.db.exists("DocType", SETTINGS_DOCTYPE):
-			frappe.local._edtools_notification_settings = None
-		else:
-			frappe.local._edtools_notification_settings = frappe.get_single(SETTINGS_DOCTYPE)
+		frappe.local._edtools_notification_settings = None
+		if frappe.db.exists("DocType", SETTINGS_DOCTYPE):
+			try:
+				frappe.local._edtools_notification_settings = frappe.get_single(SETTINGS_DOCTYPE)
+			except Exception:
+				frappe.log_error(
+					title="Error cargando EdTools Notification Settings",
+					message=frappe.get_traceback(),
+				)
 	return frappe.local._edtools_notification_settings
 
 
@@ -80,7 +85,7 @@ def get_portal_url() -> str:
 
 def render_email_template(template_name: str, context: dict) -> tuple[str, str]:
 	if not template_name or not frappe.db.exists("Email Template", template_name):
-		frappe.throw(_("Plantilla de correo no encontrada: {0}").format(template_name))
+		raise ValueError(_("Plantilla de correo no encontrada: {0}").format(template_name))
 	template = frappe.get_doc("Email Template", template_name)
 	# response_ devuelve response_html cuando use_html=1, si no response (Text Editor).
 	body_source = getattr(template, "response_", None) or template.response or ""

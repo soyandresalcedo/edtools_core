@@ -65,7 +65,20 @@ def schedule_grade_flush() -> None:
 
 
 def flush_grade_notifications() -> None:
-	setattr(frappe.local, _FLUSH_REGISTERED, False)
+	"""Envía correos agrupados. Nunca debe propagar excepciones (corre tras commit del doc)."""
+	try:
+		_flush_grade_notifications_impl()
+	except Exception:
+		frappe.log_error(
+			title="Error en flush de notificaciones de calificaciones",
+			message=frappe.get_traceback(),
+		)
+		_clear_buffer()
+	finally:
+		setattr(frappe.local, _FLUSH_REGISTERED, False)
+
+
+def _flush_grade_notifications_impl() -> None:
 	if getattr(frappe.flags, "mute_emails", False):
 		_clear_buffer()
 		return
@@ -148,23 +161,39 @@ def readable_term_from_plan(plan) -> str:
 def _course_and_term_from_result(doc) -> tuple[str, str]:
 	course_name = ""
 	term_label = doc.get("assessment_group") or ""
-	if doc.get("assessment_plan"):
-		plan = frappe.get_cached_doc("Assessment Plan", doc.assessment_plan)
-		if plan.get("course"):
-			course_name = frappe.db.get_value("Course", plan.course, "course_name") or plan.course
-		elif plan.get("assessment_name"):
-			course_name = plan.assessment_name
-		term_label = readable_term_from_plan(plan) or term_label
+	plan_name = doc.get("assessment_plan")
+	if not plan_name or not frappe.db.exists("Assessment Plan", plan_name):
+		return course_name, term_label
+	try:
+		plan = frappe.get_cached_doc("Assessment Plan", plan_name)
+	except Exception:
+		return course_name, term_label
+	if plan.get("course"):
+		course_name = frappe.db.get_value("Course", plan.course, "course_name") or plan.course
+	elif plan.get("assessment_name"):
+		course_name = plan.assessment_name
+	term_label = readable_term_from_plan(plan) or term_label
 	return course_name, term_label
 
 
 def queue_grade_notification(doc, method=None):
+	"""Hook Assessment Result — nunca debe fallar el guardado del documento."""
+	try:
+		_queue_grade_notification_impl(doc, method)
+	except Exception:
+		frappe.log_error(
+			title="Error encolando notificación de calificación",
+			message=frappe.get_traceback(),
+		)
+
+
+def _queue_grade_notification_impl(doc, method=None):
 	if getattr(frappe.flags, "in_grade_import", False):
 		return
 	if doc.docstatus != 1 or not doc.student:
 		return
 
-	is_correction = method == "on_update_after_submit"
+	is_correction = method in ("on_update_after_submit", "Update After Submit")
 
 	grade_display = _grade_display_from_result(doc)
 	if not grade_display:
