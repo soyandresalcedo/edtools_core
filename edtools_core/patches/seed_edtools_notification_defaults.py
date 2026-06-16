@@ -98,7 +98,7 @@ def _ensure_student_notification_language_field() -> None:
 			"fieldtype": "Select",
 			"options": "\nSpanish\nEnglish",
 			"insert_after": "student_email_id",
-			"description": "Preferencia de idioma para correos académicos. Vacío = idioma por defecto del sistema.",
+			"description": "Preferencia explícita para correos académicos. Vacío = idioma por defecto de EdTools Notification Settings (Spanish).",
 		}
 	).insert(ignore_permissions=True)
 

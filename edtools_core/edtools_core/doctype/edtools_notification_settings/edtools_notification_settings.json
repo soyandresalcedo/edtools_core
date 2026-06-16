@@ -39,7 +39,7 @@
   },
   {
    "default": "Spanish",
-   "description": "Idioma por defecto si el estudiante no tiene preferencia",
+   "description": "Idioma por defecto para correos académicos. Se aplica cuando el estudiante no tiene Notification Language. No depende del idioma del User (Frappe suele crear usuarios en inglés).",
    "fieldname": "default_notification_language",
    "fieldtype": "Select",
    "label": "Default Notification Language",

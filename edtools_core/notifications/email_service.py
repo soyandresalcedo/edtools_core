@@ -38,7 +38,12 @@ def get_student_institutional_email(student_name: str) -> str | None:
 
 
 def resolve_notification_language(student_name: str) -> str:
-	"""es | en — prioridad: Student.notification_language → User.language → Settings."""
+	"""es | en — prioridad: Student.notification_language → Settings → User.language (solo español).
+
+	User.language en inglés se ignora: Frappe crea usuarios con en-US por defecto y no
+	refleja la preferencia real del estudiante. Para inglés explícito usar
+	Student.notification_language = English.
+	"""
 	if student_name and frappe.db.has_column("Student", "notification_language"):
 		student_lang = frappe.db.get_value("Student", student_name, "notification_language")
 		if student_lang == "English":
@@ -46,17 +51,21 @@ def resolve_notification_language(student_name: str) -> str:
 		if student_lang == "Spanish":
 			return LANGUAGE_ES
 
+	settings = get_notification_settings()
+	if settings:
+		default = settings.get("default_notification_language")
+		if default == "English":
+			return LANGUAGE_EN
+		if default == "Spanish":
+			return LANGUAGE_ES
+
+	# Señal positiva de español en el perfil de usuario (no usar en como señal de inglés).
 	user_id = frappe.db.get_value("Student", student_name, "user") if student_name else None
 	if user_id:
 		user_lang = (frappe.db.get_value("User", user_id, "language") or "").lower()
 		if user_lang.startswith("es"):
 			return LANGUAGE_ES
-		if user_lang.startswith("en"):
-			return LANGUAGE_EN
 
-	settings = get_notification_settings()
-	if settings and settings.get("default_notification_language") == "English":
-		return LANGUAGE_EN
 	return LANGUAGE_ES
 
 
