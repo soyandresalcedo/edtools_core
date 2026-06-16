@@ -16,6 +16,11 @@
   "course_enrollment_template_en",
   "grade_template_es",
   "grade_template_en",
+  "section_context",
+  "enable_context_enrichment",
+  "context_namespace",
+  "context_max_depth",
+  "context_doctypes",
   "section_rules",
   "rules"
  ],
@@ -91,6 +96,39 @@
    "fieldtype": "Link",
    "label": "Grade Template (English)",
    "options": "Email Template"
+  },
+  {
+   "fieldname": "section_context",
+   "fieldtype": "Section Break",
+   "label": "Email Context Enrichment"
+  },
+  {
+   "default": "1",
+   "description": "Carga DocTypes relacionados en el namespace ref.* para todas las plantillas de correo.",
+   "fieldname": "enable_context_enrichment",
+   "fieldtype": "Check",
+   "label": "Enable Context Enrichment"
+  },
+  {
+   "default": "ref",
+   "description": "Prefijo Jinja para datos enriquecidos (ej. ref.academic_term.term_start_date).",
+   "fieldname": "context_namespace",
+   "fieldtype": "Data",
+   "label": "Context Namespace"
+  },
+  {
+   "default": "2",
+   "description": "Profundidad máxima al recorrer campos Link desde el documento disparador.",
+   "fieldname": "context_max_depth",
+   "fieldtype": "Int",
+   "label": "Context Max Depth"
+  },
+  {
+   "description": "DocTypes a exponer en ref.*. Resolución automática por links; use Link Path Override solo cuando haga falta.",
+   "fieldname": "context_doctypes",
+   "fieldtype": "Table",
+   "label": "Context DocTypes",
+   "options": "EdTools Notification Context Doctype"
   },
   {
    "fieldname": "section_rules",

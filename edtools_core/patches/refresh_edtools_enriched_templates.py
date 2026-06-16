@@ -1,11 +1,39 @@
 # Copyright (c) 2026, EdTools and contributors
-"""Crea plantillas de correo, Settings iniciales y campo notification_language en Student."""
+"""Actualiza plantillas de matrícula al formato enriquecido (ref.*) si aún tienen el contenido semilla anterior."""
 
 import frappe
 
-TEMPLATES = [
-	{
-		"name": "EdTools Course Enrollment ES",
+LEGACY_COURSE_ENROLLMENT_TEMPLATES = {
+	"EdTools Course Enrollment ES": {
+		"subject": "Inscripción a curso: {{ course_name }}",
+		"response": """<p>Hola {{ student_name }},</p>
+<p>Te confirmamos tu inscripción al siguiente curso:</p>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+<tr><td><strong>Curso</strong></td><td>{{ course_name }}</td></tr>
+<tr><td><strong>Programa</strong></td><td>{{ program }}</td></tr>
+<tr><td><strong>Periodo</strong></td><td>{{ academic_term }}</td></tr>
+<tr><td><strong>Fecha</strong></td><td>{{ enrollment_date }}</td></tr>
+</table>
+<p>Portal del estudiante: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
+<p>Saludos,<br><strong>CUC University</strong></p>""",
+	},
+	"EdTools Course Enrollment EN": {
+		"subject": "Course enrollment: {{ course_name }}",
+		"response": """<p>Hello {{ student_name }},</p>
+<p>Your enrollment in the following course has been confirmed:</p>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+<tr><td><strong>Course</strong></td><td>{{ course_name }}</td></tr>
+<tr><td><strong>Program</strong></td><td>{{ program }}</td></tr>
+<tr><td><strong>Term</strong></td><td>{{ academic_term }}</td></tr>
+<tr><td><strong>Date</strong></td><td>{{ enrollment_date }}</td></tr>
+</table>
+<p>Student portal: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
+<p>Regards,<br><strong>CUC University</strong></p>""",
+	},
+}
+
+ENRICHED_COURSE_ENROLLMENT_TEMPLATES = {
+	"EdTools Course Enrollment ES": {
 		"subject": "Inscripción a curso: {% if ref.course %}{{ ref.course.course_name }}{% else %}{{ course_name }}{% endif %}",
 		"response": """<p>Hola {{ student_name }},</p>
 <p>Te confirmamos tu inscripción al siguiente curso:</p>
@@ -19,8 +47,7 @@ TEMPLATES = [
 <p>Portal del estudiante: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
 <p>Saludos,<br><strong>CUC University</strong></p>""",
 	},
-	{
-		"name": "EdTools Course Enrollment EN",
+	"EdTools Course Enrollment EN": {
 		"subject": "Course enrollment: {% if ref.course %}{{ ref.course.course_name }}{% else %}{{ course_name }}{% endif %}",
 		"response": """<p>Hello {{ student_name }},</p>
 <p>Your enrollment in the following course has been confirmed:</p>
@@ -34,33 +61,7 @@ TEMPLATES = [
 <p>Student portal: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
 <p>Regards,<br><strong>CUC University</strong></p>""",
 	},
-	{
-		"name": "EdTools Grade Posted ES",
-		"subject": "{% if is_correction %}Calificación actualizada{% else %}Calificaciones publicadas{% endif %}",
-		"response": """<p>Hola {{ student_name }},</p>
-{% if is_correction %}
-<p>Se actualizó la calificación en tu record académico:</p>
-{% else %}
-<p>Se publicaron calificaciones en tu record académico:</p>
-{% endif %}
-{{ grades_table_html | safe }}
-<p>Consulta el detalle en el portal: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
-<p>Saludos,<br><strong>CUC University</strong></p>""",
-	},
-	{
-		"name": "EdTools Grade Posted EN",
-		"subject": "{% if is_correction %}Grade updated{% else %}Grades published{% endif %}",
-		"response": """<p>Hello {{ student_name }},</p>
-{% if is_correction %}
-<p>Your grade record has been updated:</p>
-{% else %}
-<p>Grades have been published to your academic record:</p>
-{% endif %}
-{{ grades_table_html | safe }}
-<p>View details in the portal: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
-<p>Regards,<br><strong>CUC University</strong></p>""",
-	},
-]
+}
 
 DEFAULT_CONTEXT_DOCTYPES = [
 	{"reference_doctype": "Academic Term", "context_key": "academic_term"},
@@ -73,81 +74,33 @@ DEFAULT_CONTEXT_DOCTYPES = [
 ]
 
 
-def _ensure_email_template(spec: dict) -> None:
-	if frappe.db.exists("Email Template", spec["name"]):
-		return
-	doc = frappe.get_doc(
-		{
-			"doctype": "Email Template",
-			"name": spec["name"],
-			"subject": spec["subject"],
-			"use_html": 0,
-			"response": spec["response"],
-		}
-	)
-	doc.insert(ignore_permissions=True)
-
-
-def _ensure_student_notification_language_field() -> None:
-	if frappe.db.exists("Custom Field", {"dt": "Student", "fieldname": "notification_language"}):
-		return
-	frappe.get_doc(
-		{
-			"doctype": "Custom Field",
-			"dt": "Student",
-			"fieldname": "notification_language",
-			"label": "Notification Language",
-			"fieldtype": "Select",
-			"options": "\nSpanish\nEnglish",
-			"insert_after": "student_email_id",
-			"description": "Preferencia explícita para correos académicos. Vacío = idioma por defecto de EdTools Notification Settings (Spanish).",
-		}
-	).insert(ignore_permissions=True)
-
-
-def _ensure_context_doctypes(settings) -> bool:
-	if settings.get("context_doctypes"):
-		return False
-
-	changed = False
-	for row in DEFAULT_CONTEXT_DOCTYPES:
-		settings.append(
-			"context_doctypes",
-			{
-				"enabled": 1,
-				"reference_doctype": row["reference_doctype"],
-				"context_key": row["context_key"],
-			},
-		)
-		changed = True
-	return changed
-
-
-def _ensure_notification_settings() -> None:
+def _ensure_context_settings() -> None:
 	if not frappe.db.exists("DocType", "EdTools Notification Settings"):
 		return
 
 	settings = frappe.get_single("EdTools Notification Settings")
 	changed = False
-	defaults = {
-		"enable_course_enrollment_emails": 1,
-		"enable_grade_emails": 1,
-		"default_notification_language": "Spanish",
+
+	for field, value in {
 		"enable_context_enrichment": 1,
 		"context_namespace": "ref",
 		"context_max_depth": 2,
-		"course_enrollment_template_es": "EdTools Course Enrollment ES",
-		"course_enrollment_template_en": "EdTools Course Enrollment EN",
-		"grade_template_es": "EdTools Grade Posted ES",
-		"grade_template_en": "EdTools Grade Posted EN",
-	}
-	for field, value in defaults.items():
+	}.items():
 		current = settings.get(field)
 		if current in (None, ""):
 			settings.set(field, value)
 			changed = True
 
-	if _ensure_context_doctypes(settings):
+	if not settings.get("context_doctypes"):
+		for row in DEFAULT_CONTEXT_DOCTYPES:
+			settings.append(
+				"context_doctypes",
+				{
+					"enabled": 1,
+					"reference_doctype": row["reference_doctype"],
+					"context_key": row["context_key"],
+				},
+			)
 		changed = True
 
 	if changed:
@@ -156,9 +109,21 @@ def _ensure_notification_settings() -> None:
 
 
 def execute():
-	for spec in TEMPLATES:
-		_ensure_email_template(spec)
-	_ensure_student_notification_language_field()
-	_ensure_notification_settings()
+	for name, legacy in LEGACY_COURSE_ENROLLMENT_TEMPLATES.items():
+		if not frappe.db.exists("Email Template", name):
+			continue
+
+		doc = frappe.get_doc("Email Template", name)
+		if doc.subject != legacy["subject"] or doc.response != legacy["response"]:
+			continue
+
+		enriched = ENRICHED_COURSE_ENROLLMENT_TEMPLATES[name]
+		doc.subject = enriched["subject"]
+		doc.response = enriched["response"]
+		doc.use_html = 0
+		doc.flags.ignore_permissions = True
+		doc.save(ignore_permissions=True)
+
+	_ensure_context_settings()
 	frappe.db.commit()
 	frappe.clear_cache()

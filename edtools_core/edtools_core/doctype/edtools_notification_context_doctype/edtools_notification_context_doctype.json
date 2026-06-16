@@ -1,0 +1,71 @@
+{
+ "actions": [],
+ "creation": "2026-06-16 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "reference_doctype",
+  "context_key",
+  "fields",
+  "link_path",
+  "source_doctype"
+ ],
+ "fields": [
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "description": "DocType cuyos datos se exponen bajo ref.* (ej. Academic Term, Program).",
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Reference DocType",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "description": "Nombre de variable bajo ref. Vacío = nombre del DocType en snake_case.",
+   "fieldname": "context_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Context Key"
+  },
+  {
+   "description": "Campos a incluir separados por coma. Vacío = todos los campos del documento.",
+   "fieldname": "fields",
+   "fieldtype": "Small Text",
+   "label": "Fields (CSV)"
+  },
+  {
+   "description": "Override manual: ruta punteada desde el documento disparador (ej. program_enrollment.academic_term).",
+   "fieldname": "link_path",
+   "fieldtype": "Data",
+   "label": "Link Path Override"
+  },
+  {
+   "description": "Opcional. Limita el override manual a un DocType disparador concreto.",
+   "fieldname": "source_doctype",
+   "fieldtype": "Link",
+   "label": "Source DocType",
+   "options": "DocType"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EdTools Core",
+ "name": "EdTools Notification Context Doctype",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

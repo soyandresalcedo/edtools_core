@@ -6,9 +6,9 @@ from __future__ import annotations
 import frappe
 from frappe.utils import flt
 
+from edtools_core.notifications.context import build_template_context
 from edtools_core.notifications.email_service import (
 	get_notification_settings,
-	get_portal_url,
 	get_student_institutional_email,
 	pick_template,
 	render_grades_table_html,
@@ -114,14 +114,18 @@ def _flush_grade_notifications_impl() -> None:
 
 		student_name = frappe.db.get_value("Student", student, "student_name") or student
 		has_correction = any(g.get("is_correction") for g in grades)
-		context = {
-			"student_name": student_name,
-			"grades": grades,
-			"grades_table_html": render_grades_table_html(grades, lang=lang),
-			"grade_count": len(grades),
-			"is_correction": has_correction,
-			"portal_url": get_portal_url(),
-		}
+		student_doc = frappe.get_cached_doc("Student", student)
+		context = build_template_context(
+			student_doc,
+			student=student,
+			extra={
+				"student_name": student_name,
+				"grades": grades,
+				"grades_table_html": render_grades_table_html(grades, lang=lang),
+				"grade_count": len(grades),
+				"is_correction": has_correction,
+			},
+		)
 
 		send_templated_email(
 			recipients=[recipient],

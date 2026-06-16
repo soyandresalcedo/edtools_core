@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import frappe
 
+from edtools_core.notifications.context import build_template_context
 from edtools_core.notifications.email_service import (
 	get_notification_settings,
-	get_portal_url,
 	get_student_institutional_email,
 	pick_template,
 	resolve_notification_language,
@@ -75,11 +75,11 @@ def _send_rule_email(doc, rule) -> None:
 		return
 
 	student_name = frappe.db.get_value("Student", student, "student_name") or student
-	context = {
-		"doc": doc,
-		"student_name": student_name,
-		"portal_url": get_portal_url(),
-	}
+	context = build_template_context(
+		doc,
+		student=student,
+		extra={"student_name": student_name},
+	)
 
 	send_templated_email(
 		recipients=[recipient],

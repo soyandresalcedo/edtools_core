@@ -25,3 +25,4 @@ edtools_core.patches.seed_website_settings_login_defaults
 edtools_core.patches.add_website_settings_login_logo_field
 edtools_core.patches.seed_edtools_notification_defaults
 edtools_core.patches.fix_edtools_grade_email_templates
+edtools_core.patches.refresh_edtools_enriched_templates

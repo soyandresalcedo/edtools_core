@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import frappe
 
+from edtools_core.notifications.context import build_template_context
 from edtools_core.notifications.email_service import (
 	get_notification_settings,
-	get_portal_url,
 	get_student_institutional_email,
 	pick_template,
 	resolve_notification_language,
@@ -55,15 +55,19 @@ def _send_course_enrollment_email_impl(doc):
 				if program_name:
 					program_name = frappe.db.get_value("Program", doc.program, "program_name") or doc.program
 				student_name = doc.student_name or frappe.db.get_value("Student", doc.student, "student_name")
-				context = {
-					"student_name": student_name,
-					"course_name": course_name or doc.course,
-					"program": program_name or "",
-					"academic_term": term or "",
-					"enrollment_date": frappe.utils.formatdate(doc.enrollment_date) if doc.get("enrollment_date") else "",
-					"portal_url": get_portal_url(),
-					"doc": doc,
-				}
+				context = build_template_context(
+					doc,
+					student=doc.student,
+					extra={
+						"student_name": student_name,
+						"course_name": course_name or doc.course,
+						"program": program_name or "",
+						"academic_term": term or "",
+						"enrollment_date": frappe.utils.formatdate(doc.enrollment_date)
+						if doc.get("enrollment_date")
+						else "",
+					},
+				)
 				send_templated_email(
 					recipients=[recipient],
 					template_name=template,
