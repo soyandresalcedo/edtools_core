@@ -3,70 +3,12 @@
 
 import frappe
 
+from edtools_core.notifications.email_templates import BRANDED_TEMPLATES as TEMPLATES
 from edtools_core.patches.notification_context_seed import (
 	CONTEXT_DEFAULTS,
 	DEFAULT_CONTEXT_DOCTYPES,
 	context_enrichment_fields_ready,
 )
-
-TEMPLATES = [
-	{
-		"name": "EdTools Course Enrollment ES",
-		"subject": "Inscripción a curso: {% if ref.course %}{{ ref.course.course_name }}{% else %}{{ course_name }}{% endif %}",
-		"response": """<p>Hola {{ student_name }},</p>
-<p>Te confirmamos tu inscripción al siguiente curso:</p>
-<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
-<tr><td><strong>Curso</strong></td><td>{% if ref.course %}{{ ref.course.course_name }}{% else %}{{ course_name }}{% endif %}</td></tr>
-<tr><td><strong>Programa</strong></td><td>{% if ref.program %}{{ ref.program.program_name }}{% else %}{{ program }}{% endif %}</td></tr>
-<tr><td><strong>Periodo</strong></td><td>{% if ref.academic_term %}{{ ref.academic_term.term_name }}{% else %}{{ academic_term }}{% endif %}</td></tr>
-<tr><td><strong>Inicio periodo</strong></td><td>{% if ref.academic_term and ref.academic_term.term_start_date %}{{ ref.academic_term.term_start_date }}{% else %}—{% endif %}</td></tr>
-<tr><td><strong>Fecha inscripción</strong></td><td>{{ enrollment_date }}</td></tr>
-</table>
-<p>Portal del estudiante: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
-<p>Saludos,<br><strong>CUC University</strong></p>""",
-	},
-	{
-		"name": "EdTools Course Enrollment EN",
-		"subject": "Course enrollment: {% if ref.course %}{{ ref.course.course_name }}{% else %}{{ course_name }}{% endif %}",
-		"response": """<p>Hello {{ student_name }},</p>
-<p>Your enrollment in the following course has been confirmed:</p>
-<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
-<tr><td><strong>Course</strong></td><td>{% if ref.course %}{{ ref.course.course_name }}{% else %}{{ course_name }}{% endif %}</td></tr>
-<tr><td><strong>Program</strong></td><td>{% if ref.program %}{{ ref.program.program_name }}{% else %}{{ program }}{% endif %}</td></tr>
-<tr><td><strong>Term</strong></td><td>{% if ref.academic_term %}{{ ref.academic_term.term_name }}{% else %}{{ academic_term }}{% endif %}</td></tr>
-<tr><td><strong>Term start</strong></td><td>{% if ref.academic_term and ref.academic_term.term_start_date %}{{ ref.academic_term.term_start_date }}{% else %}—{% endif %}</td></tr>
-<tr><td><strong>Enrollment date</strong></td><td>{{ enrollment_date }}</td></tr>
-</table>
-<p>Student portal: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
-<p>Regards,<br><strong>CUC University</strong></p>""",
-	},
-	{
-		"name": "EdTools Grade Posted ES",
-		"subject": "{% if is_correction %}Calificación actualizada{% else %}Calificaciones publicadas{% endif %}",
-		"response": """<p>Hola {{ student_name }},</p>
-{% if is_correction %}
-<p>Se actualizó la calificación en tu record académico:</p>
-{% else %}
-<p>Se publicaron calificaciones en tu record académico:</p>
-{% endif %}
-{{ grades_table_html | safe }}
-<p>Consulta el detalle en el portal: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
-<p>Saludos,<br><strong>CUC University</strong></p>""",
-	},
-	{
-		"name": "EdTools Grade Posted EN",
-		"subject": "{% if is_correction %}Grade updated{% else %}Grades published{% endif %}",
-		"response": """<p>Hello {{ student_name }},</p>
-{% if is_correction %}
-<p>Your grade record has been updated:</p>
-{% else %}
-<p>Grades have been published to your academic record:</p>
-{% endif %}
-{{ grades_table_html | safe }}
-<p>View details in the portal: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
-<p>Regards,<br><strong>CUC University</strong></p>""",
-	},
-]
 
 
 def _ensure_email_template(spec: dict) -> None:
@@ -77,8 +19,8 @@ def _ensure_email_template(spec: dict) -> None:
 			"doctype": "Email Template",
 			"name": spec["name"],
 			"subject": spec["subject"],
-			"use_html": 0,
-			"response": spec["response"],
+			"use_html": 1,
+			"response_html": spec["response"],
 		}
 	)
 	doc.insert(ignore_permissions=True)

@@ -29,3 +29,5 @@ edtools_core.patches.fix_edtools_grade_email_templates
 
 [post_model_sync]
 edtools_core.patches.refresh_edtools_enriched_templates
+edtools_core.patches.fix_edtools_email_templates_use_html
+edtools_core.patches.redesign_edtools_branded_email_templates

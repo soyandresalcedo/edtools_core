@@ -78,7 +78,8 @@ def execute():
 		enriched = ENRICHED_COURSE_ENROLLMENT_TEMPLATES[name]
 		doc.subject = enriched["subject"]
 		doc.response = enriched["response"]
-		doc.use_html = 0
+		doc.response_html = enriched["response"]
+		doc.use_html = 1
 		doc.flags.ignore_permissions = True
 		doc.save(ignore_permissions=True)
 

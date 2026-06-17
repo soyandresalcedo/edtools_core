@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import html as html_stdlib
+import re
+
 import frappe
 from frappe import _
 from frappe.utils import validate_email_address
@@ -12,9 +15,21 @@ SETTINGS_DOCTYPE = "EdTools Notification Settings"
 LANGUAGE_ES = "es"
 LANGUAGE_EN = "en"
 
+_HTML_TAG_RE = re.compile(r"<\s*(p|table|div|h[1-6]|ul|ol|br|a|img|span|strong|em|tbody|tr|td|th)\b", re.I)
+
+
+_GRADE_TABLE_FONT = "Arial,'Helvetica Neue',Helvetica,sans-serif"
+_GRADE_TABLE_PURPLE = "#b7a8ff"
+_GRADE_TABLE_BORDER = "#e5e7eb"
+_GRADE_TABLE_STRIPE = "#faf9ff"
+
 
 def render_grades_table_html(grades: list[dict], *, lang: str = LANGUAGE_ES) -> str:
-	"""Genera la tabla HTML de calificaciones (evita {% for %} en Email Template Text Editor)."""
+	"""Genera la tabla HTML branded de calificaciones.
+
+	Evita ``{% for %}`` en el Text Editor de Email Template (lo rompe) y usa estilos
+	inline para que sobreviva a premailer y a los clientes de correo.
+	"""
 	import html
 
 	if lang == LANGUAGE_EN:
@@ -22,18 +37,30 @@ def render_grades_table_html(grades: list[dict], *, lang: str = LANGUAGE_ES) -> 
 	else:
 		h1, h2, h3 = "Curso", "Calificación", "Periodo"
 
+	th = (
+		'style="padding:10px 12px;background-color:' + _GRADE_TABLE_PURPLE + ';color:#ffffff;'
+		'text-align:left;font-weight:bold;border-bottom:1px solid ' + _GRADE_TABLE_BORDER + ';"'
+	)
+
 	rows = []
-	for g in grades:
+	for index, g in enumerate(grades):
+		stripe = _GRADE_TABLE_STRIPE if index % 2 else "#ffffff"
+		td = (
+			'style="padding:9px 12px;background-color:' + stripe + ';'
+			'border-bottom:1px solid ' + _GRADE_TABLE_BORDER + ';"'
+		)
 		rows.append(
 			"<tr>"
-			f"<td>{html.escape(str(g.get('course') or ''))}</td>"
-			f"<td>{html.escape(str(g.get('grade') or ''))}</td>"
-			f"<td>{html.escape(str(g.get('term') or ''))}</td>"
+			f"<td {td}>{html.escape(str(g.get('course') or ''))}</td>"
+			f"<td {td}>{html.escape(str(g.get('grade') or ''))}</td>"
+			f"<td {td}>{html.escape(str(g.get('term') or ''))}</td>"
 			"</tr>"
 		)
 	return (
-		'<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">'
-		f"<tr><th>{h1}</th><th>{h2}</th><th>{h3}</th></tr>"
+		'<table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" '
+		'style="border-collapse:collapse;border:1px solid ' + _GRADE_TABLE_BORDER + ';'
+		"font-family:" + _GRADE_TABLE_FONT + ';font-size:14px;color:#000000;">'
+		f"<tr><th {th}>{h1}</th><th {th}>{h2}</th><th {th}>{h3}</th></tr>"
 		f"{''.join(rows)}"
 		"</table>"
 	)
@@ -113,11 +140,32 @@ def render_email_template(template_name: str, context: dict) -> tuple[str, str]:
 	if not template_name or not frappe.db.exists("Email Template", template_name):
 		raise ValueError(_("Plantilla de correo no encontrada: {0}").format(template_name))
 	template = frappe.get_doc("Email Template", template_name)
-	# response_ devuelve response_html cuando use_html=1, si no response (Text Editor).
-	body_source = getattr(template, "response_", None) or template.response or ""
+	body_source = _template_body_source(template)
 	subject = frappe.render_template(template.subject or "", context)
 	body = frappe.render_template(body_source, context)
-	return subject, body
+	return subject, _prepare_html_body(body, use_html=bool(template.use_html))
+
+
+def _template_body_source(template) -> str:
+	if template.use_html:
+		return template.response_html or template.response or ""
+	return template.response or template.response_html or ""
+
+
+def _prepare_html_body(body: str, *, use_html: bool = False) -> str:
+	"""Frappe trata como markdown el cuerpo que no empieza con '<', mostrando tags literales."""
+	content = (body or "").strip()
+	if not content:
+		return content
+
+	if "&lt;" in content and not _HTML_TAG_RE.search(content):
+		content = html_stdlib.unescape(content)
+
+	if use_html or _HTML_TAG_RE.search(content):
+		if not content.startswith("<"):
+			content = f"<div>{content}</div>"
+
+	return content
 
 
 def send_templated_email(

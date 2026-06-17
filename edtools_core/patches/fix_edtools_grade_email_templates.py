@@ -33,7 +33,8 @@ def execute():
 		if doc.response == response and "grades_table_html" in (doc.response or ""):
 			continue
 		doc.response = response
-		doc.use_html = 0
+		doc.response_html = response
+		doc.use_html = 1
 		doc.flags.ignore_permissions = True
 		doc.save(ignore_permissions=True)
 
