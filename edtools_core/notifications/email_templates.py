@@ -168,13 +168,25 @@ _COURSE_ENROLLMENT_EN = _shell(
 # ---------------------------------------------------------------------------
 
 _GRADE_POSTED_ES = _shell(
-	title_html="{% if is_correction %}Calificación<br>actualizada{% else %}Calificaciones<br>publicadas{% endif %}",
+	title_html="{% if is_correction %}Calificación<br>actualizada{% else %}Nueva<br>calificación{% endif %}",
 	body_html=(
 		'<p style="margin:0 0 12px 0;">Hola {{ student_name }},</p>'
 		"{% if is_correction %}"
-		'<p style="margin:0 0 16px 0;">Se actualizó la calificación en tu record académico:</p>'
+		"{% if grade_count == 1 %}"
+		'<p style="margin:0 0 16px 0;">Se ha modificado la nota del siguiente curso. '
+		"Ingresa al portal para consultar el resultado.</p>"
 		"{% else %}"
-		'<p style="margin:0 0 16px 0;">Se publicaron calificaciones en tu record académico:</p>'
+		'<p style="margin:0 0 16px 0;">Se han modificado calificaciones en los siguientes cursos. '
+		"Ingresa al portal para consultar el resultado.</p>"
+		"{% endif %}"
+		"{% else %}"
+		"{% if grade_count == 1 %}"
+		'<p style="margin:0 0 16px 0;">Se ha agregado una nueva nota al siguiente curso. '
+		"Ingresa al portal para consultar el resultado.</p>"
+		"{% else %}"
+		'<p style="margin:0 0 16px 0;">Se han agregado nuevas calificaciones a tu record académico. '
+		"Ingresa al portal para consultar el resultado.</p>"
+		"{% endif %}"
 		"{% endif %}"
 		"{{ grades_table_html | safe }}"
 	),
@@ -183,13 +195,25 @@ _GRADE_POSTED_ES = _shell(
 )
 
 _GRADE_POSTED_EN = _shell(
-	title_html="{% if is_correction %}Grade<br>updated{% else %}Grades<br>published{% endif %}",
+	title_html="{% if is_correction %}Grade<br>updated{% else %}New<br>grade{% endif %}",
 	body_html=(
 		'<p style="margin:0 0 12px 0;">Hello {{ student_name }},</p>'
 		"{% if is_correction %}"
-		'<p style="margin:0 0 16px 0;">Your grade record has been updated:</p>'
+		"{% if grade_count == 1 %}"
+		'<p style="margin:0 0 16px 0;">The grade for the following course has been updated. '
+		"Sign in to the portal to view the result.</p>"
 		"{% else %}"
-		'<p style="margin:0 0 16px 0;">Grades have been published to your academic record:</p>'
+		'<p style="margin:0 0 16px 0;">Grades have been updated for the following courses. '
+		"Sign in to the portal to view the results.</p>"
+		"{% endif %}"
+		"{% else %}"
+		"{% if grade_count == 1 %}"
+		'<p style="margin:0 0 16px 0;">A new grade has been added for the following course. '
+		"Sign in to the portal to view the result.</p>"
+		"{% else %}"
+		'<p style="margin:0 0 16px 0;">New grades have been added to your academic record. '
+		"Sign in to the portal to view the results.</p>"
+		"{% endif %}"
 		"{% endif %}"
 		"{{ grades_table_html | safe }}"
 	),
@@ -211,12 +235,12 @@ BRANDED_TEMPLATES = [
 	},
 	{
 		"name": "EdTools Grade Posted ES",
-		"subject": "{% if is_correction %}Calificación actualizada{% else %}Calificaciones publicadas{% endif %}",
+		"subject": "{% if is_correction %}Calificación actualizada{% else %}Nueva calificación{% endif %}",
 		"response": _GRADE_POSTED_ES,
 	},
 	{
 		"name": "EdTools Grade Posted EN",
-		"subject": "{% if is_correction %}Grade updated{% else %}Grades published{% endif %}",
+		"subject": "{% if is_correction %}Grade updated{% else %}New grade{% endif %}",
 		"response": _GRADE_POSTED_EN,
 	},
 ]

@@ -25,17 +25,17 @@ _GRADE_TABLE_STRIPE = "#faf9ff"
 
 
 def render_grades_table_html(grades: list[dict], *, lang: str = LANGUAGE_ES) -> str:
-	"""Genera la tabla HTML branded de calificaciones.
+	"""Genera la tabla HTML branded de cursos afectados (sin mostrar la calificación).
 
-	Evita ``{% for %}`` en el Text Editor de Email Template (lo rompe) y usa estilos
-	inline para que sobreviva a premailer y a los clientes de correo.
+	La nota no se incluye en el correo a propósito: el estudiante debe consultarla
+	en el portal. Evita ``{% for %}`` en el Text Editor de Email Template.
 	"""
 	import html
 
 	if lang == LANGUAGE_EN:
-		h1, h2, h3 = "Course", "Grade", "Term"
+		h1, h2 = "Course", "Term"
 	else:
-		h1, h2, h3 = "Curso", "Calificación", "Periodo"
+		h1, h2 = "Curso", "Periodo"
 
 	th = (
 		'style="padding:10px 12px;background-color:' + _GRADE_TABLE_PURPLE + ';color:#ffffff;'
@@ -52,7 +52,6 @@ def render_grades_table_html(grades: list[dict], *, lang: str = LANGUAGE_ES) -> 
 		rows.append(
 			"<tr>"
 			f"<td {td}>{html.escape(str(g.get('course') or ''))}</td>"
-			f"<td {td}>{html.escape(str(g.get('grade') or ''))}</td>"
 			f"<td {td}>{html.escape(str(g.get('term') or ''))}</td>"
 			"</tr>"
 		)
@@ -60,7 +59,7 @@ def render_grades_table_html(grades: list[dict], *, lang: str = LANGUAGE_ES) -> 
 		'<table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" '
 		'style="border-collapse:collapse;border:1px solid ' + _GRADE_TABLE_BORDER + ';'
 		"font-family:" + _GRADE_TABLE_FONT + ';font-size:14px;color:#000000;">'
-		f"<tr><th {th}>{h1}</th><th {th}>{h2}</th><th {th}>{h3}</th></tr>"
+		f"<tr><th {th}>{h1}</th><th {th}>{h2}</th></tr>"
 		f"{''.join(rows)}"
 		"</table>"
 	)
