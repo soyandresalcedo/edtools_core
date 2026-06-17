@@ -66,6 +66,8 @@ def patch_education_api():
 		edu_api.get_student_attendance = get_student_attendance
 		if not hasattr(edu_api, "get_student_curriculum"):
 			edu_api.get_student_curriculum = get_student_curriculum
+		edu_api.get_survey_gate_status = get_survey_gate_status
+		edu_api.mark_survey_complete = mark_survey_complete
 	except Exception:
 		pass
 
@@ -73,6 +75,7 @@ def patch_education_api():
 @frappe.whitelist()
 def get_student_curriculum(student, program_enrollment=None):
 	"""Devuelve el pensum del estudiante para un Program Enrollment: lista de cursos con estado (completed, in_progress, upcoming)."""
+	_assert_portal_not_blocked()
 	if not student:
 		return {}
 	my_student = _get_current_user_student_name()
@@ -219,6 +222,7 @@ def get_student_curriculum(student, program_enrollment=None):
 @frappe.whitelist()
 def get_student_attendance(student, student_group):
 	"""Compat con Student Portal Vue (Attendance). Valida estudiante, devuelve [] si grupo inválido, usa ignore_permissions."""
+	_assert_portal_not_blocked()
 	if not student:
 		return []
 	my_student = _get_current_user_student_name()
@@ -404,6 +408,18 @@ def get_student_info():
 				student_info["student_mobile_number"] = (user_data.get("mobile_no") or user_data.get("phone") or "").strip() or None
 			if not (student_info.get("image") or "").strip() and user_data.get("user_image"):
 				student_info["image"] = user_data["user_image"]
+
+	# Estado de encuestas obligatorias para que el frontend pueda bloquear sin llamada extra.
+	try:
+		from edtools_core.surveys.portal_gate import get_pending_surveys
+
+		pending = get_pending_surveys(student_info["name"])
+		student_info["survey_blocked"] = bool(pending)
+		student_info["pending_surveys_count"] = len(pending)
+	except Exception:
+		student_info["survey_blocked"] = False
+		student_info["pending_surveys_count"] = 0
+
 	return student_info
 
 
@@ -429,6 +445,7 @@ def get_school_abbr_logo():
 def get_student_programs(student):
 	"""Compat con Student Portal Vue (Grades). Education v15 puede no tenerlo.
 	Usa ignore_permissions para que el rol Student pueda ver sus enrollments aunque el DocPerm falle."""
+	_assert_portal_not_blocked()
 	if not student:
 		return []
 	# Solo devolver programas del estudiante vinculado al usuario actual
@@ -456,6 +473,7 @@ def get_student_programs(student):
 def get_student_grades(student):
 	"""Devuelve Assessment Results del estudiante con program resuelto (desde Assessment Result o Student Group).
 	Usado por el portal de estudiantes (Grades) para soportar el filtro por programa correctamente."""
+	_assert_portal_not_blocked()
 	if not student:
 		return []
 	my_student = _get_current_user_student_name()
@@ -513,6 +531,85 @@ def _get_current_user_student_name():
 		ignore_permissions=True,
 	)
 	return students[0]["name"] if students else None
+
+
+def _assert_portal_not_blocked():
+	"""Bloquea las APIs del portal si el estudiante tiene encuestas obligatorias pendientes."""
+	from edtools_core.surveys.portal_gate import is_portal_blocked
+
+	student_name = _get_current_user_student_name()
+	if not student_name:
+		return
+	try:
+		blocked = is_portal_blocked(student_name)
+	except Exception:
+		frappe.log_error(
+			title="Error verificando encuestas obligatorias",
+			message=frappe.get_traceback(),
+		)
+		return
+	if blocked:
+		frappe.throw(
+			frappe._("Debes completar las evaluaciones obligatorias del periodo antes de continuar."),
+			frappe.PermissionError,
+		)
+
+
+@frappe.whitelist()
+def get_survey_gate_status():
+	"""Estado del bloqueo por encuestas para el estudiante actual."""
+	from edtools_core.surveys.portal_gate import get_pending_surveys
+
+	student_name = _get_current_user_student_name()
+	if not student_name:
+		return {"blocked": False, "pending_surveys": [], "completed_count": 0, "total_required": 0}
+
+	try:
+		pending = get_pending_surveys(student_name)
+	except Exception:
+		frappe.log_error(
+			title="Error obteniendo estado de encuestas",
+			message=frappe.get_traceback(),
+		)
+		return {"blocked": False, "pending_surveys": [], "completed_count": 0, "total_required": 0}
+
+	return {
+		"blocked": bool(pending),
+		"pending_surveys": pending,
+		"completed_count": 0,
+		"total_required": len(pending),
+	}
+
+
+@frappe.whitelist()
+def mark_survey_complete(survey_key, academic_term):
+	"""Autodeclaración: el estudiante marca una encuesta como completada."""
+	from edtools_core.surveys.portal_gate import (
+		get_pending_surveys,
+		is_survey_pending,
+		record_completion,
+	)
+
+	student_name = _get_current_user_student_name()
+	if not student_name:
+		frappe.throw(frappe._("Estudiante no encontrado."), frappe.PermissionError)
+
+	survey_key = (survey_key or "").strip()
+	academic_term = (academic_term or "").strip()
+	if not survey_key or not academic_term:
+		frappe.throw(frappe._("Datos de encuesta incompletos."))
+
+	if not is_survey_pending(student_name, academic_term, survey_key):
+		frappe.throw(frappe._("La encuesta no corresponde o ya fue completada."))
+
+	record_completion(student_name, academic_term, survey_key, method="Self Declared")
+	frappe.db.commit()
+
+	pending = get_pending_surveys(student_name)
+	return {
+		"blocked": bool(pending),
+		"pending_surveys": pending,
+	}
 
 
 def _sales_invoice_has_student_field():
@@ -681,6 +778,7 @@ def get_student_invoices(student):
 	Devuelve facturas (Sales Invoice y/o Fees) del estudiante con programa, estado, fechas y monto.
 	Combina ambas fuentes para evitar que una lista vacía de SI oculte Fees existentes."""
 	from frappe.utils import flt
+	_assert_portal_not_blocked()
 	empty = {"invoices": [], "print_format": "Standard", "print_format_fees": "Standard",
 			 "total_outstanding": 0, "total_paid": 0, "currency_symbol": "$"}
 	if not student:
@@ -864,6 +962,7 @@ def get_course_schedule_for_student(program_name=None, student_groups=None):
 	Las clases se definen por Student Group; no exigir coincidencia con program del PE para evitar
 	cronogramas vacíos cuando Course Schedule.program difiere del Program Enrollment.program.
 	"""
+	_assert_portal_not_blocked()
 	try:
 		# Parámetros pueden venir como string (JSON) desde el request
 		if isinstance(student_groups, str):

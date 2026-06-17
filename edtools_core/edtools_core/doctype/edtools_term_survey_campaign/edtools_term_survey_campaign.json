@@ -1,0 +1,97 @@
+{
+ "actions": [],
+ "autoname": "field:academic_term",
+ "creation": "2026-06-17 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "academic_term",
+  "enabled",
+  "column_break_main",
+  "block_portal",
+  "grace_days",
+  "section_surveys",
+  "surveys"
+ ],
+ "fields": [
+  {
+   "description": "Periodo acad\u00e9mico cuyo cierre dispara las encuestas obligatorias.",
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Academic Term",
+   "options": "Academic Term",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "Si est\u00e1 marcado, bloquea el acceso al portal hasta completar las encuestas requeridas.",
+   "fieldname": "block_portal",
+   "fieldtype": "Check",
+   "label": "Block Portal"
+  },
+  {
+   "default": "0",
+   "description": "D\u00edas de gracia tras el fin del periodo antes de activar el bloqueo.",
+   "fieldname": "grace_days",
+   "fieldtype": "Int",
+   "label": "Grace Days"
+  },
+  {
+   "fieldname": "section_surveys",
+   "fieldtype": "Section Break",
+   "label": "Surveys"
+  },
+  {
+   "description": "Formularios que el estudiante debe completar para este periodo.",
+   "fieldname": "surveys",
+   "fieldtype": "Table",
+   "label": "Surveys",
+   "options": "EdTools Term Survey Item"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-06-17 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EdTools Core",
+ "name": "EdTools Term Survey Campaign",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Education Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

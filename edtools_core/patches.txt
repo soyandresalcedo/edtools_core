@@ -31,3 +31,4 @@ edtools_core.patches.fix_edtools_grade_email_templates
 edtools_core.patches.refresh_edtools_enriched_templates
 edtools_core.patches.fix_edtools_email_templates_use_html
 edtools_core.patches.redesign_edtools_branded_email_templates
+edtools_core.patches.seed_edtools_term_survey_campaign

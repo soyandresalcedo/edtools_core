@@ -1,0 +1,74 @@
+{
+ "actions": [],
+ "creation": "2026-06-17 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "survey_key",
+  "title",
+  "form_url",
+  "required",
+  "sort_order"
+ ],
+ "fields": [
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "description": "Identificador interno \u00fanico dentro de la campa\u00f1a (ej. institutional, teacher, instructor).",
+   "fieldname": "survey_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Survey Key",
+   "reqd": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title",
+   "reqd": 1
+  },
+  {
+   "description": "Enlace al formulario externo (Microsoft Forms).",
+   "fieldname": "form_url",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Form URL",
+   "options": "URL",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "description": "Si est\u00e1 marcado, bloquea el portal hasta completarse.",
+   "fieldname": "required",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Required"
+  },
+  {
+   "default": "0",
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Sort Order"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-17 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EdTools Core",
+ "name": "EdTools Term Survey Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
