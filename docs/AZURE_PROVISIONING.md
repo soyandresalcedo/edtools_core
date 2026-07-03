@@ -27,9 +27,12 @@ Con `AZURE_PROVISIONING_ENABLED=0` o ausente, el flujo vuelve al comportamiento 
 
 ## Formato del email institucional
 
-`primernombre.segundonombre.apellido1.apellido2@cucusa.org` (minúsculas, sin acentos). Incluye el segundo nombre si está definido en el Applicant.
+`nombre.primerapellido@cucusa.org` (minúsculas, sin acentos). Formato corto: solo la primera palabra del nombre y el primer apellido. El segundo nombre y el segundo apellido no se incluyen.
 
-Si el correo ya existe (User o Student), no se crea uno nuevo: se lanza un error y el admin debe revisar si el estudiante ya está matriculado.
+- **Apellidos compuestos:** las partículas (de, del, la, las, los, san, etc.) se unen al apellido. Ej.: `De la Hoz Rosa` -> `nombre.delahoz@cucusa.org`.
+- **Nombre con dos palabras:** solo se usa la primera. Ej.: `Maria Jose` -> `maria.apellido@cucusa.org`.
+
+Si el correo ya existe (User o Student), se agrega un sufijo numérico automáticamente (`nombre.apellido2`, `nombre.apellido3`, ...) para evitar duplicados; ya no se lanza error ni se bloquea la matrícula.
 
 ## Logs y correo de credenciales
 

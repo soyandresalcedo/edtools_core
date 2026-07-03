@@ -19,6 +19,13 @@ DOMAIN = "cucusa.org"
 # SKU Office 365 E3 (usar el que tenga la universidad)
 DEFAULT_SKU_ID = "6fd2c87f-b296-42f0-b197-1e91e994b900"
 
+# Partículas de apellidos compuestos: se unen al siguiente token (De la Hoz -> delahoz)
+SURNAME_PARTICLES = frozenset({
+	"de", "del", "la", "las", "los", "y", "e",
+	"san", "santa", "da", "das", "do", "dos",
+	"van", "von", "di", "della", "delle", "mac", "mc",
+})
+
 
 def _normalize_for_email(text: str) -> str:
 	"""Minúsculas, sin acentos, espacios/símbolos -> puntos."""
@@ -41,36 +48,43 @@ def _normalize_for_email(text: str) -> str:
 	return text
 
 
+def _first_token(text: str) -> str:
+	"""Primera palabra normalizada (sin acentos, minúsculas)."""
+	norm = _normalize_for_email(text or "")
+	parts = [p for p in norm.split(".") if p]
+	return parts[0] if parts else ""
+
+
+def _first_surname_unit(last_name: str) -> str:
+	"""Primer apellido, uniendo partículas compuestas.
+	'De la Hoz Rosa' -> 'delahoz'; 'Nunez Albornoz' -> 'nunez'.
+	"""
+	norm = _normalize_for_email(last_name or "")
+	tokens = [t for t in norm.split(".") if t]
+	unit = []
+	for tok in tokens:
+		unit.append(tok)
+		if tok not in SURNAME_PARTICLES:
+			break  # se detiene en el primer token que no es partícula
+	return "".join(unit)
+
+
 def generate_cucusa_email(first_name: str, middle_name: Optional[str], last_name: str) -> str:
+	"""Genera email institucional corto: nombre.primerapellido@cucusa.org.
+	- Solo la primera palabra del nombre.
+	- Solo el primer apellido (partículas compuestas unidas: 'De la Hoz' -> 'delahoz').
+	- Si el correo ya existe, agrega sufijo numérico (2, 3, ...).
 	"""
-	Genera email institucional: primernombre.segundonombre.apellido1.apellido2@cucusa.org
-	Incluye segundo nombre (middle_name) si existe. last_name puede ser "Pérez García" (dos apellidos).
-	"""
-	partes_nombre = [_normalize_for_email(first_name or "")]
-	if middle_name and _normalize_for_email(middle_name):
-		partes_nombre.append(_normalize_for_email(middle_name))
-	nombre = ".".join(p for p in partes_nombre if p)
-	if not nombre:
-		nombre = "estudiante"
+	nombre = _first_token(first_name) or _first_token(middle_name) or "estudiante"
+	apellido = _first_surname_unit(last_name) or _first_token(middle_name) or nombre
 
-	apellidos = _normalize_for_email(last_name or "")
-	if not apellidos:
-		apellidos = _normalize_for_email(middle_name or "")
-	parts_apellidos = [p for p in apellidos.split(".") if p]
-	if not parts_apellidos:
-		parts_apellidos = [nombre]
-
-	# Formato: primernombre.segundonombre.apellido1.apellido2@cucusa.org
-	email = f"{nombre}." + ".".join(parts_apellidos) + f"@{DOMAIN}"
-
-	# No crear correos duplicados: si ya existe, lanzar error
-	if _email_exists_in_edtools(email):
-		frappe.throw(
-			_("El correo institucional {0} ya existe en el sistema. "
-			  "Verifique si el estudiante ya está matriculado o contacte al administrador.").format(email)
-		)
-
-	return email
+	base = f"{nombre}.{apellido}"
+	candidate = f"{base}@{DOMAIN}"
+	suffix = 2
+	while _email_exists_in_edtools(candidate):
+		candidate = f"{base}{suffix}@{DOMAIN}"
+		suffix += 1
+	return candidate
 
 
 def _email_exists_in_edtools(email: str) -> bool:
