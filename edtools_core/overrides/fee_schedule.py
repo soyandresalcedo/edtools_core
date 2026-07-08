@@ -18,7 +18,7 @@ import frappe
 from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Sum
-from frappe.utils import flt
+from frappe.utils import flt, getdate
 
 from edtools_core.fees_events import ensure_local_lang_for_num2words
 
@@ -26,6 +26,10 @@ from edtools_core.fees_events import ensure_local_lang_for_num2words
 class FeeSchedule(EducationFeeSchedule):
 	def validate(self):
 		ensure_local_lang_for_num2words(self, None)
+		if self.get("posting_date"):
+			self.posting_date = getdate(self.posting_date)
+		if self.get("due_date"):
+			self.due_date = getdate(self.due_date)
 		super().validate()
 
 	def validate_total_against_fee_strucuture(self):

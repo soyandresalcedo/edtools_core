@@ -1772,6 +1772,13 @@ def _coerce_financial_tool_text(val, default=""):
     return cstr(val).strip() or default
 
 
+def _coerce_financial_tool_date(val):
+    """Normaliza fechas del plan (str / date) para evitar comparaciones date vs str en validaciones."""
+    if val is None or val == "":
+        return None
+    return getdate(val)
+
+
 def _student_name_for_financial_tool(student_id):
     if not student_id:
         return "—"
@@ -1914,12 +1921,14 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
 
     # 2. Normalizar fechas (evita fallos con MM-DD-YYYY o formatos del frontend)
     for row in schedule_data:
-        raw_date = row.get("due_date")
-        if raw_date is not None:
-            row["due_date"] = getdate(raw_date)
+        coerced = _coerce_financial_tool_date(row.get("due_date"))
+        if coerced is not None:
+            row["due_date"] = coerced
 
     total_schedule_amount = sum(flt(d.get("amount")) for d in schedule_data)
-    first_due_date = getdate(schedule_data[0].get("due_date")) if schedule_data else getdate(frappe.utils.today())
+    first_due_date = _coerce_financial_tool_date(
+        schedule_data[0].get("due_date") if schedule_data else None
+    ) or getdate(today())
 
     # 3. Obtener datos base de la estructura y company (requerido por Fee Schedule y Fees)
     struct_base = frappe.db.get_value(
@@ -1999,7 +2008,12 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
 
         enrollment = frappe.db.get_value(
             "Program Enrollment",
-            {"student": student_id, "docstatus": 1},
+            {
+                "student": student_id,
+                "docstatus": 1,
+                "program": struct_base.program,
+                "academic_year": struct_base.academic_year,
+            },
             "name",
         )
         if not enrollment:
@@ -2027,7 +2041,9 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
             fs.fee_structure = fee_structure
             fs.grand_total = total_schedule_amount
             fs.outstanding_amount = total_schedule_amount
-            fs.due_date = first_due_date
+            fs.due_date = getdate(first_due_date)
+            # posting_date por defecto es "Today" (str); alinear con due_date evita TypeError date < str
+            fs.posting_date = getdate(first_due_date)
             fs.company = company
 
             fs.append("student_groups", {"student_group": student_group})
@@ -2055,8 +2071,8 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 fee.academic_year = fs.academic_year
                 fee.fee_structure = fee_structure
                 fee.fee_schedule = fs.name
-                fee.due_date = getdate(row.get("due_date"))
-                fee.posting_date = getdate(row.get("due_date"))
+                fee.due_date = _coerce_financial_tool_date(row.get("due_date")) or getdate(today())
+                fee.posting_date = fee.due_date
                 fee.currency = "USD"
                 fee.company = company
 
