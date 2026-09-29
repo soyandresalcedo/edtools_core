@@ -246,3 +246,209 @@ BRANDED_TEMPLATES = [
 ]
 
 BRANDED_TEMPLATES_BY_NAME = {tpl["name"]: tpl for tpl in BRANDED_TEMPLATES}
+
+
+# ---------------------------------------------------------------------------
+# Débito automático (autopay) de cuotas — ver edtools_core.stripe_autopay
+# ---------------------------------------------------------------------------
+# Contexto disponible: student_name, program, card, charge_day, amount, fee_description,
+# due_date, charge_date, next_charge_date, failure_reason, will_retry, next_retry_date,
+# portal_url.
+
+BTN_AUTOPAY_ES = "Ver mis pagos"
+BTN_AUTOPAY_EN = "View my payments"
+
+
+def _p(text: str, *, bottom: int = 12) -> str:
+	return '<p style="margin:0 0 ' + str(bottom) + 'px 0;">' + text + "</p>"
+
+
+_AUTOPAY_ACTIVATED_ES = _shell(
+	title_html="Pago automático<br>activado",
+	body_html=(
+		_p("Hola {{ student_name }},")
+		+ _p(
+			"Activaste el pago automático de tus cuotas. A partir de ahora cobraremos la cuota "
+			"pendiente de cada mes a tu tarjeta, sin que tengas que entrar al portal.",
+			bottom=16,
+		)
+		+ _detail_table(
+			[
+				("Programa", "{{ program }}"),
+				("Tarjeta", "{{ card }}"),
+				("Día de cobro", "El {{ charge_day }} de cada mes"),
+				("Primer cobro automático", "{{ next_charge_date }}"),
+			]
+		)
+		+ '<p style="margin:16px 0 0 0;">Te avisaremos por correo unos días antes de cada cobro. '
+		"Puedes cambiar la tarjeta, el día o cancelar el pago automático cuando quieras desde el "
+		"Portal del Estudiante, en la sección <strong>Pagos</strong>.</p>"
+	),
+	button_label=BTN_AUTOPAY_ES,
+	sign_html=SIGN_ES,
+)
+
+_AUTOPAY_ACTIVATED_EN = _shell(
+	title_html="Automatic payments<br>turned on",
+	body_html=(
+		_p("Hello {{ student_name }},")
+		+ _p(
+			"You turned on automatic payments. From now on we will charge each month's pending "
+			"installment to your card, with no need to log in to the portal.",
+			bottom=16,
+		)
+		+ _detail_table(
+			[
+				("Program", "{{ program }}"),
+				("Card", "{{ card }}"),
+				("Charge day", "Day {{ charge_day }} of each month"),
+				("First automatic charge", "{{ next_charge_date }}"),
+			]
+		)
+		+ '<p style="margin:16px 0 0 0;">We will email you a few days before each charge. '
+		"You can change the card or the day, or cancel automatic payments at any time from the "
+		"Student Portal, in the <strong>Fees</strong> section.</p>"
+	),
+	button_label=BTN_AUTOPAY_EN,
+	sign_html=SIGN_EN,
+)
+
+_AUTOPAY_REMINDER_ES = _shell(
+	title_html="Tu próximo<br>cobro automático",
+	body_html=(
+		_p("Hola {{ student_name }},")
+		+ _p("Te recordamos que el <strong>{{ charge_date }}</strong> cobraremos automáticamente:", bottom=16)
+		+ _detail_table(
+			[
+				("Concepto", "{{ fee_description }}"),
+				("Monto", "<strong>{{ amount }}</strong>"),
+				("Tarjeta", "{{ card }}"),
+			]
+		)
+		+ '<p style="margin:16px 0 0 0;">No tienes que hacer nada. Si prefieres pagar con otra tarjeta, '
+		"cámbiala en el portal antes de esa fecha.</p>"
+	),
+	button_label=BTN_AUTOPAY_ES,
+	sign_html=SIGN_ES,
+)
+
+_AUTOPAY_REMINDER_EN = _shell(
+	title_html="Your next<br>automatic charge",
+	body_html=(
+		_p("Hello {{ student_name }},")
+		+ _p("This is a reminder that on <strong>{{ charge_date }}</strong> we will automatically charge:", bottom=16)
+		+ _detail_table(
+			[
+				("Item", "{{ fee_description }}"),
+				("Amount", "<strong>{{ amount }}</strong>"),
+				("Card", "{{ card }}"),
+			]
+		)
+		+ '<p style="margin:16px 0 0 0;">No action is needed. If you would rather use a different card, '
+		"update it in the portal before that date.</p>"
+	),
+	button_label=BTN_AUTOPAY_EN,
+	sign_html=SIGN_EN,
+)
+
+_AUTOPAY_CHARGED_ES = _shell(
+	title_html="Recibimos<br>tu pago",
+	body_html=(
+		_p("Hola {{ student_name }},")
+		+ _p("Cobramos con éxito tu cuota mediante el pago automático:", bottom=16)
+		+ _detail_table(
+			[
+				("Concepto", "{{ fee_description }}"),
+				("Monto", "<strong>{{ amount }}</strong>"),
+				("Tarjeta", "{{ card }}"),
+				("Próximo cobro", "{% if next_charge_date %}{{ next_charge_date }}{% else %}&mdash;{% endif %}"),
+			]
+		)
+		+ '<p style="margin:16px 0 0 0;">El pago quedará reflejado en tu estado de cuenta una vez '
+		"Tesorería lo concilie.</p>"
+	),
+	button_label=BTN_AUTOPAY_ES,
+	sign_html=SIGN_ES,
+)
+
+_AUTOPAY_CHARGED_EN = _shell(
+	title_html="We received<br>your payment",
+	body_html=(
+		_p("Hello {{ student_name }},")
+		+ _p("Your installment was successfully charged through automatic payments:", bottom=16)
+		+ _detail_table(
+			[
+				("Item", "{{ fee_description }}"),
+				("Amount", "<strong>{{ amount }}</strong>"),
+				("Card", "{{ card }}"),
+				("Next charge", "{% if next_charge_date %}{{ next_charge_date }}{% else %}&mdash;{% endif %}"),
+			]
+		)
+		+ '<p style="margin:16px 0 0 0;">The payment will show on your account statement once the '
+		"Treasury office reconciles it.</p>"
+	),
+	button_label=BTN_AUTOPAY_EN,
+	sign_html=SIGN_EN,
+)
+
+_AUTOPAY_FAILED_ES = _shell(
+	title_html="No pudimos<br>cobrar tu cuota",
+	body_html=(
+		_p("Hola {{ student_name }},")
+		+ _p("Intentamos cobrar tu cuota con el pago automático, pero no fue posible:", bottom=16)
+		+ _detail_table(
+			[
+				("Concepto", "{{ fee_description }}"),
+				("Monto", "<strong>{{ amount }}</strong>"),
+				("Tarjeta", "{{ card }}"),
+				("Motivo", "{{ failure_reason }}"),
+			]
+		)
+		+ "{% if will_retry %}"
+		'<p style="margin:16px 0 0 0;">Lo intentaremos de nuevo el <strong>{{ next_retry_date }}</strong>. '
+		"Para evitar recargos, puedes pagar ahora desde el portal o actualizar tu tarjeta.</p>"
+		"{% else %}"
+		'<p style="margin:16px 0 0 0;">Pausamos el pago automático. Entra al portal para pagar la cuota '
+		"y actualizar tu tarjeta; al hacerlo el pago automático se reactivará.</p>"
+		"{% endif %}"
+	),
+	button_label=BTN_AUTOPAY_ES,
+	sign_html=SIGN_ES,
+)
+
+_AUTOPAY_FAILED_EN = _shell(
+	title_html="We could not<br>charge your installment",
+	body_html=(
+		_p("Hello {{ student_name }},")
+		+ _p("We tried to charge your installment through automatic payments, but it did not go through:", bottom=16)
+		+ _detail_table(
+			[
+				("Item", "{{ fee_description }}"),
+				("Amount", "<strong>{{ amount }}</strong>"),
+				("Card", "{{ card }}"),
+				("Reason", "{{ failure_reason }}"),
+			]
+		)
+		+ "{% if will_retry %}"
+		'<p style="margin:16px 0 0 0;">We will try again on <strong>{{ next_retry_date }}</strong>. '
+		"To avoid late fees, you can pay now from the portal or update your card.</p>"
+		"{% else %}"
+		'<p style="margin:16px 0 0 0;">Automatic payments are paused. Log in to the portal to pay the '
+		"installment and update your card; doing so turns automatic payments back on.</p>"
+		"{% endif %}"
+	),
+	button_label=BTN_AUTOPAY_EN,
+	sign_html=SIGN_EN,
+)
+
+
+AUTOPAY_TEMPLATES = [
+	{"name": "EdTools Autopay Activated ES", "subject": "Pago automático activado", "response": _AUTOPAY_ACTIVATED_ES},
+	{"name": "EdTools Autopay Activated EN", "subject": "Automatic payments turned on", "response": _AUTOPAY_ACTIVATED_EN},
+	{"name": "EdTools Autopay Reminder ES", "subject": "Tu cuota se cobrará el {{ charge_date }}", "response": _AUTOPAY_REMINDER_ES},
+	{"name": "EdTools Autopay Reminder EN", "subject": "Your installment will be charged on {{ charge_date }}", "response": _AUTOPAY_REMINDER_EN},
+	{"name": "EdTools Autopay Charged ES", "subject": "Recibimos tu pago de {{ amount }}", "response": _AUTOPAY_CHARGED_ES},
+	{"name": "EdTools Autopay Charged EN", "subject": "We received your payment of {{ amount }}", "response": _AUTOPAY_CHARGED_EN},
+	{"name": "EdTools Autopay Failed ES", "subject": "No pudimos cobrar tu cuota", "response": _AUTOPAY_FAILED_ES},
+	{"name": "EdTools Autopay Failed EN", "subject": "We could not charge your installment", "response": _AUTOPAY_FAILED_EN},
+]

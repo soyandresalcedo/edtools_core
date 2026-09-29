@@ -1,0 +1,328 @@
+{
+ "actions": [],
+ "autoname": "format:AUTOPAY-{#####}",
+ "creation": "2026-09-29 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "student_section",
+  "student",
+  "student_name",
+  "program_enrollment",
+  "program",
+  "column_break_student",
+  "status",
+  "charge_day",
+  "next_charge_date",
+  "retry_count",
+  "status_reason",
+  "card_section",
+  "card_brand",
+  "card_last4",
+  "card_exp_month",
+  "card_exp_year",
+  "column_break_card",
+  "stripe_customer_id",
+  "stripe_payment_method_id",
+  "source_intent_id",
+  "consent_section",
+  "consent_at",
+  "consent_user",
+  "consent_ip",
+  "column_break_consent",
+  "consent_version",
+  "consent_language",
+  "consent_text_section",
+  "consent_text",
+  "tracking_section",
+  "last_attempt_on",
+  "last_error",
+  "last_reminder_for",
+  "column_break_tracking",
+  "cancelled_on",
+  "cancelled_by"
+ ],
+ "fields": [
+  {
+   "fieldname": "student_section",
+   "fieldtype": "Section Break",
+   "label": "Estudiante"
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "Student",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "Student Name",
+   "fetch_from": "student.student_name",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "program_enrollment",
+   "fieldtype": "Link",
+   "label": "Program Enrollment",
+   "options": "Program Enrollment",
+   "reqd": 1,
+   "in_standard_filter": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "program",
+   "fieldtype": "Data",
+   "label": "Program",
+   "fetch_from": "program_enrollment.program",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_student",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Active\nNeeds Attention\nCancelled\nCompleted",
+   "default": "Active",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "charge_day",
+   "fieldtype": "Int",
+   "label": "Charge Day",
+   "description": "Día del mes (1-28) en que se cobra la cuota.",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "next_charge_date",
+   "fieldtype": "Date",
+   "label": "Next Charge Date",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "retry_count",
+   "fieldtype": "Int",
+   "label": "Failed Attempts (current cycle)",
+   "default": "0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status_reason",
+   "fieldtype": "Small Text",
+   "label": "Status Reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "card_section",
+   "fieldtype": "Section Break",
+   "label": "Tarjeta"
+  },
+  {
+   "fieldname": "card_brand",
+   "fieldtype": "Data",
+   "label": "Card Brand",
+   "read_only": 1
+  },
+  {
+   "fieldname": "card_last4",
+   "fieldtype": "Data",
+   "label": "Card Last 4",
+   "length": 4,
+   "read_only": 1
+  },
+  {
+   "fieldname": "card_exp_month",
+   "fieldtype": "Int",
+   "label": "Card Exp. Month",
+   "read_only": 1
+  },
+  {
+   "fieldname": "card_exp_year",
+   "fieldtype": "Int",
+   "label": "Card Exp. Year",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_card",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "stripe_customer_id",
+   "fieldtype": "Data",
+   "label": "Stripe Customer ID",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "stripe_payment_method_id",
+   "fieldtype": "Data",
+   "label": "Stripe Payment Method ID",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_intent_id",
+   "fieldtype": "Data",
+   "label": "Source Intent ID",
+   "description": "PaymentIntent o SetupIntent con el que se autorizó la tarjeta.",
+   "no_copy": 1,
+   "read_only": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "consent_section",
+   "fieldtype": "Section Break",
+   "label": "Autorización del estudiante",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "consent_at",
+   "fieldtype": "Datetime",
+   "label": "Consent At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "consent_user",
+   "fieldtype": "Link",
+   "label": "Consent User",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "consent_ip",
+   "fieldtype": "Data",
+   "label": "Consent IP",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_consent",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "consent_version",
+   "fieldtype": "Data",
+   "label": "Consent Version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "consent_language",
+   "fieldtype": "Data",
+   "label": "Consent Language",
+   "read_only": 1
+  },
+  {
+   "fieldname": "consent_text_section",
+   "fieldtype": "Section Break",
+   "collapsible": 1,
+   "label": "Texto autorizado"
+  },
+  {
+   "fieldname": "consent_text",
+   "fieldtype": "Small Text",
+   "label": "Consent Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tracking_section",
+   "fieldtype": "Section Break",
+   "label": "Seguimiento",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "last_attempt_on",
+   "fieldtype": "Datetime",
+   "label": "Last Attempt On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Last Error",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_reminder_for",
+   "fieldtype": "Date",
+   "label": "Last Reminder For",
+   "description": "Fecha de cobro de la que ya se envió el aviso previo.",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_tracking",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "cancelled_on",
+   "fieldtype": "Datetime",
+   "label": "Cancelled On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cancelled_by",
+   "fieldtype": "Link",
+   "label": "Cancelled By",
+   "options": "User",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [
+  {
+   "link_doctype": "EdTools Autopay Attempt",
+   "link_fieldname": "autopay_enrollment"
+  }
+ ],
+ "modified": "2026-09-29 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EdTools Core",
+ "name": "EdTools Autopay Enrollment",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "write": 1
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "show_title_field_in_link": 1,
+ "track_changes": 1,
+ "search_fields": "student,student_name,program_enrollment"
+}

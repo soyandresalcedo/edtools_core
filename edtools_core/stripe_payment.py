@@ -9,7 +9,7 @@ from urllib.parse import quote
 import frappe
 from frappe import _
 from frappe.query_builder.functions import Sum
-from frappe.utils import flt, getdate, today
+from frappe.utils import cint, flt, getdate, today
 
 
 def _get_program_for_fee(fee_name):
@@ -271,11 +271,42 @@ def _compute_stripe_charge_for_fee(fee_name, student_name, amount=None):
 	}
 
 
+# Klarna (compra ahora, paga después) solo se ofrece a estudiantes de Norteamérica cubiertos
+# por Klarna vía Stripe (EE. UU., incluido Puerto Rico, y Canadá). México no está soportado.
+_KLARNA_COUNTRIES = {
+	"united states", "united states of america", "usa", "us", "u.s.", "u.s.a.",
+	"estados unidos", "eeuu", "ee.uu.", "ee. uu.", "puerto rico", "pr",
+	"canada", "canadá", "ca",
+}
+
+
+def _is_klarna_eligible(student_name, billing_country=None):
+	"""País de facturación escrito en el formulario; si falta, el del perfil del estudiante."""
+	country = (billing_country or "").strip() or (frappe.db.get_value("Student", student_name, "country") or "")
+	return country.strip().lower() in _KLARNA_COUNTRIES
+
+
 @frappe.whitelist()
-def create_payment_intent(fee_name, student_name=None, amount=None):
+def create_payment_intent(
+	fee_name,
+	student_name=None,
+	amount=None,
+	save_for_autopay=0,
+	charge_day=None,
+	autopay_consent=0,
+	billing_country=None,
+	lang=None,
+):
 	"""
 	Create a Stripe PaymentIntent for the given Fee.
 	If amount is provided (partial payment), that amount is charged; otherwise full outstanding.
+
+	Métodos de pago:
+	- save_for_autopay=1: solo tarjeta, guardada en el Customer para el débito automático
+	  (requiere autopay_consent=1 y charge_day; ver edtools_core.stripe_autopay).
+	- Estudiante de Norteamérica: métodos automáticos del Dashboard (incluye Klarna si está activo).
+	- Resto: solo tarjeta (incluye Apple Pay / Google Pay).
+
 	Returns: { "client_secret": "...", "publishable_key": "pk_test_...", "payment_intent_id": "pi_..." }
 	"""
 	secret = _get_stripe_secret_key()
@@ -298,16 +329,26 @@ def create_payment_intent(fee_name, student_name=None, amount=None):
 	try:
 		import stripe
 		stripe.api_key = secret
-		pi = stripe.PaymentIntent.create(
-			amount=amount_cents,
-			currency=currency,
-			automatic_payment_methods={"enabled": True},
-			metadata={
-				"fee_name": fee_name,
-				"student_name": fee.student,
-				"site": frappe.local.site,
-			},
-		)
+		metadata = {
+			"fee_name": fee_name,
+			"student_name": fee.student,
+			"site": frappe.local.site,
+		}
+		intent_kwargs = {"amount": amount_cents, "currency": currency}
+		if cint(save_for_autopay):
+			from edtools_core import stripe_autopay
+
+			opt_in = stripe_autopay.build_payment_intent_opt_in(student, fee_name, charge_day, autopay_consent, lang)
+			metadata.update(opt_in.pop("metadata"))
+			intent_kwargs.update(opt_in)
+		elif _is_klarna_eligible(student, billing_country):
+			intent_kwargs["automatic_payment_methods"] = {"enabled": True}
+		else:
+			intent_kwargs["payment_method_types"] = ["card"]
+
+		pi = stripe.PaymentIntent.create(metadata=metadata, **intent_kwargs)
+	except frappe.ValidationError:
+		raise
 	except Exception as e:
 		frappe.log_error(title="Stripe create_payment_intent", message=frappe.get_traceback())
 		frappe.throw(_("Payment could not be started: {0}").format(str(e)))
@@ -320,6 +361,7 @@ def create_payment_intent(fee_name, student_name=None, amount=None):
 		"amount_display": f"{pay_amount:.2f}",
 		"currency": currency,
 		"cascade_breakdown": cascade_breakdown,
+		"autopay_opt_in": bool(cint(save_for_autopay)),
 	}
 
 
@@ -592,10 +634,38 @@ def finalize_payment_and_get_volante(fee_name, payment_intent_id):
 	)
 	frappe.db.commit()
 
+	autopay = None
+	if metadata.get("autopay_opt_in") == "1":
+		try:
+			from edtools_core import stripe_autopay
+
+			autopay = stripe_autopay._enrollment_summary(stripe_autopay.activate_from_intent(pi))
+			frappe.db.commit()
+		except Exception:
+			# El pago ya entró; el webhook payment_intent.succeeded reintenta la activación.
+			frappe.db.rollback()
+			frappe.log_error(title="Autopay: activación en finalize falló", message=frappe.get_traceback())
+
 	return {
 		"payment_entry_name": pe_name,
 		"pdf_url": _fees_volante_pdf_url(fee_name),
+		"autopay": autopay,
 	}
+
+
+def _handle_autopay_event(event):
+	"""Débito automático: activación, reintentos y cambios de tarjeta. No rompe el webhook."""
+	try:
+		from edtools_core import stripe_autopay
+
+		handled = stripe_autopay.handle_stripe_event(event)
+		frappe.db.commit()
+		return handled
+	except Exception:
+		frappe.db.rollback()
+		frappe.log_error(title="Stripe webhook autopay handler failed", message=frappe.get_traceback())
+		frappe.db.commit()
+		return True
 
 
 @frappe.whitelist(allow_guest=True)
@@ -603,7 +673,8 @@ def stripe_webhook():
 	"""
 	Stripe webhook endpoint. Configure in Stripe Dashboard:
 	URL: https://cucuniversity.edtools.co/api/method/edtools_core.stripe_payment.stripe_webhook
-	Events: payment_intent.succeeded
+	Events: payment_intent.succeeded, payment_intent.payment_failed, setup_intent.succeeded,
+	payment_method.detached, payment_method.automatically_updated, charge.dispute.created
 	"""
 	try:
 		# Primera línea: confirmar que la petición llegó (buscar "Stripe webhook ENTRY" en Error Log)
@@ -709,7 +780,8 @@ def stripe_webhook():
 					)
 					frappe.db.commit()
 					frappe.db.rollback()
-		else:
+			_handle_autopay_event(event)
+		elif not _handle_autopay_event(event):
 			frappe.log_error(
 				title="Stripe webhook DEBUG event ignored",
 				message=f"event_id={event.get('id')} type={event.get('type')} (solo procesamos payment_intent.succeeded)",

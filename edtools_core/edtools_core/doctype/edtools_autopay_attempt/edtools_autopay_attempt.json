@@ -1,0 +1,204 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-09-29 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "autopay_enrollment",
+  "student",
+  "fee",
+  "status",
+  "attempt_no",
+  "triggered_by",
+  "column_break_main",
+  "amount",
+  "currency",
+  "scheduled_for",
+  "attempted_on",
+  "stripe_section",
+  "payment_intent_id",
+  "idempotency_key",
+  "payment_entry",
+  "column_break_stripe",
+  "failure_code",
+  "decline_code",
+  "failure_message"
+ ],
+ "fields": [
+  {
+   "fieldname": "autopay_enrollment",
+   "fieldtype": "Link",
+   "label": "Autopay Enrollment",
+   "options": "EdTools Autopay Enrollment",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "Student",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "fee",
+   "fieldtype": "Link",
+   "label": "Fee",
+   "options": "Fees",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Pending\nSucceeded\nFailed\nRequires Action\nError",
+   "default": "Pending",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "attempt_no",
+   "fieldtype": "Int",
+   "label": "Attempt No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "triggered_by",
+   "fieldtype": "Select",
+   "label": "Triggered By",
+   "options": "Scheduler\nManual",
+   "default": "Scheduler",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Amount",
+   "options": "currency",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "scheduled_for",
+   "fieldtype": "Date",
+   "label": "Scheduled For",
+   "read_only": 1
+  },
+  {
+   "fieldname": "attempted_on",
+   "fieldtype": "Datetime",
+   "label": "Attempted On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "stripe_section",
+   "fieldtype": "Section Break",
+   "label": "Stripe"
+  },
+  {
+   "fieldname": "payment_intent_id",
+   "fieldtype": "Data",
+   "label": "Payment Intent ID",
+   "in_standard_filter": 1,
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "idempotency_key",
+   "fieldtype": "Data",
+   "label": "Idempotency Key",
+   "unique": 1,
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_entry",
+   "fieldtype": "Link",
+   "label": "Payment Entry",
+   "options": "Payment Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_stripe",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "failure_code",
+   "fieldtype": "Data",
+   "label": "Failure Code",
+   "read_only": 1
+  },
+  {
+   "fieldname": "decline_code",
+   "fieldtype": "Data",
+   "label": "Decline Code",
+   "read_only": 1
+  },
+  {
+   "fieldname": "failure_message",
+   "fieldtype": "Small Text",
+   "label": "Failure Message",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-29 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EdTools Core",
+ "name": "EdTools Autopay Attempt",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager"
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "in_create": 1,
+ "title_field": "fee",
+ "search_fields": "student,fee,payment_intent_id"
+}

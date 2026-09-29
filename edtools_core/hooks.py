@@ -191,6 +191,14 @@ doc_events = {
 
 # Scheduled Tasks
 # ---------------
+# Débito automático de cuotas: 8:00 hora del sistema (America/Bogota ≈ 9:00 Miami).
+# Requiere el scheduler y un worker corriendo (ENABLE_SCHEDULER=1 en Railway) y
+# STRIPE_AUTOPAY_ENABLED=1; sin ese interruptor la tarea no hace nada.
+scheduler_events = {
+	"cron": {
+		"0 8 * * *": ["edtools_core.stripe_autopay.run_daily_autopay"],
+	},
+}
 
 # scheduler_events = {
 # 	"all": [
