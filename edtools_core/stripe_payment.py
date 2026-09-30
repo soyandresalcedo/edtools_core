@@ -281,6 +281,16 @@ _KLARNA_COUNTRIES = {
 }
 
 
+# Métodos que tardan días en confirmar (débitos bancarios, transferencias) u otros BNPL:
+# se excluyen aunque CUC los active en el Dashboard. Con ellos la cuota seguiría pendiente
+# durante días y el estudiante podría pagarla dos veces. Klarna, tarjeta, Link, Apple Pay y
+# Google Pay confirman al instante.
+ASYNC_PAYMENT_METHOD_TYPES = [
+	"us_bank_account", "acss_debit", "sepa_debit", "bacs_debit", "au_becs_debit",
+	"customer_balance", "cashapp", "amazon_pay", "affirm", "afterpay_clearpay", "zip",
+]
+
+
 def _is_klarna_eligible(student_name, billing_country=None):
 	"""País de facturación escrito en el formulario; si falta, el del perfil del estudiante."""
 	country = (billing_country or "").strip() or (frappe.db.get_value("Student", student_name, "country") or "")
@@ -619,6 +629,7 @@ def create_payment_intent(
 		else:
 			if _is_klarna_eligible(student, billing_country):
 				intent_kwargs["automatic_payment_methods"] = {"enabled": True}
+				intent_kwargs["excluded_payment_method_types"] = ASYNC_PAYMENT_METHOD_TYPES
 			else:
 				intent_kwargs["payment_method_types"] = ["card"]
 
