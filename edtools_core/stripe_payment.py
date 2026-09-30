@@ -4,6 +4,7 @@
 
 import json
 import os
+from contextlib import contextmanager
 from urllib.parse import quote
 
 import frappe
@@ -760,17 +761,35 @@ def _create_payment_entry_for_stripe(
 	"""
 	from frappe.utils.synchronization import filelock
 
-	with filelock(f"stripe_pe_{payment_intent_id}", timeout=60):
-		current_user = frappe.session.user
-		try:
-			if current_user != "Administrator":
-				frappe.set_user("Administrator")
-			return _create_payment_entry_for_stripe_locked(
-				student_name, payment_intent_id, paid_amount, starting_fee_name, allocations
-			)
-		finally:
-			if frappe.session.user != current_user:
-				frappe.set_user(current_user)
+	with filelock(f"stripe_pe_{payment_intent_id}", timeout=60), _as_administrator():
+		return _create_payment_entry_for_stripe_locked(
+			student_name, payment_intent_id, paid_amount, starting_fee_name, allocations
+		)
+
+
+@contextmanager
+def _as_administrator():
+	"""Ejecuta como Administrador y restaura la sesión del usuario INTACTA.
+
+	``frappe.set_user`` también reemplaza ``session.sid`` por el nombre de usuario y vacía
+	``session.data`` (token CSRF) y ``form_dict``. Si no se restauran, al terminar la petición
+	el navegador recibe una cookie de sesión inválida y la siguiente petición falla con
+	"User None is disabled". Aquí se guardan y se devuelven tal cual.
+	"""
+	session = frappe.local.session
+	if session.user == "Administrator":
+		yield
+		return
+	saved_user, saved_sid, saved_data = session.user, session.sid, session.data
+	saved_form_dict = frappe.local.form_dict
+	try:
+		frappe.set_user("Administrator")
+		yield
+	finally:
+		frappe.set_user(saved_user)
+		frappe.local.session.sid = saved_sid
+		frappe.local.session.data = saved_data
+		frappe.local.form_dict = saved_form_dict
 
 
 def _create_payment_entry_for_stripe_locked(

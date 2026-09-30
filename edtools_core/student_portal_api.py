@@ -697,6 +697,37 @@ def _get_invoices_from_fees(student):
 	return out
 
 
+def _get_confirmed_stripe_payments_by_fee(student_name):
+	"""Fees.name -> {"allocated", "posting_date"} de pagos Stripe ya cobrados (Payment Entry
+	en borrador con reference_no pi_...), pendientes solo de conciliación por Tesorería.
+
+	Esas Payment Entries solo se crean cuando Stripe confirma el cobro (finalize y el webhook
+	verifican status "succeeded"), así que para el estudiante el pago ya está hecho.
+	"""
+	if not student_name:
+		return {}
+	try:
+		from frappe.query_builder.functions import Max, Sum
+
+		pe = frappe.qb.DocType("Payment Entry")
+		ref = frappe.qb.DocType("Payment Entry Reference")
+		rows = (
+			frappe.qb.from_(pe)
+			.inner_join(ref)
+			.on(pe.name == ref.parent)
+			.select(ref.reference_name, Sum(ref.allocated_amount).as_("allocated"), Max(pe.posting_date).as_("posting_date"))
+			.where(pe.party_type == "Student")
+			.where(pe.party == student_name)
+			.where(pe.docstatus == 0)
+			.where(pe.reference_no.like("pi%"))
+			.where(ref.reference_doctype == "Fees")
+			.groupby(ref.reference_name)
+		).run(as_dict=True) or []
+	except Exception:
+		return {}
+	return {r.reference_name: r for r in rows if r.get("reference_name")}
+
+
 def _get_draft_stripe_pi_by_fee_for_student(student_name):
 	"""Map Fees.name -> Stripe payment_intent_id for draft Payment Entries created from the portal.
 
@@ -799,7 +830,17 @@ def get_student_invoices(student):
 		tagged.append(fee)
 
 	installment_labels = _build_installment_labels(fees_list, False) if fees_list else {}
-	draft_stripe_pi_by_fee = _get_draft_stripe_pi_by_fee_for_student(student)
+	confirmed_by_fee = _get_confirmed_stripe_payments_by_fee(student)
+	# Pagos confirmados por Stripe y pendientes solo de conciliación: el estudiante los ve
+	# ya aplicados (sin "Validando pago…"); la Payment Entry sigue en borrador para Tesorería.
+	for fee in fees_list:
+		confirmed = confirmed_by_fee.get(fee.get("name"))
+		if not confirmed:
+			continue
+		remaining = round(flt(fee.get("outstanding_amount")) - flt(confirmed.allocated), 2)
+		fee["outstanding_amount"] = max(0, remaining)
+		fee["status"] = _fee_status(fee["outstanding_amount"], fee.get("due_date"))
+		fee["_stripe_posting_date"] = confirmed.posting_date
 
 	total_outstanding = 0
 	total_paid = 0
@@ -831,20 +872,15 @@ def get_student_invoices(student):
 			row["payment_date"] = (
 				_get_posting_date_from_payment_entry(si.get("name"))
 				if is_si
-				else _get_posting_date_from_payment_entry_fees(si.get("name"))
+				else si.get("_stripe_posting_date") or _get_posting_date_from_payment_entry_fees(si.get("name"))
 			)
 			row["due_date"] = "-"
 		else:
 			row["due_date"] = si.get("due_date") or "-"
 			row["payment_date"] = "-"
-		if is_si:
-			row["pending_stripe_reconciliation"] = False
-			row["stripe_payment_intent_id"] = None
-		else:
-			fee_key = si.get("name")
-			pi_id = draft_stripe_pi_by_fee.get(fee_key)
-			row["pending_stripe_reconciliation"] = bool(pi_id)
-			row["stripe_payment_intent_id"] = pi_id
+		# Compatibilidad con portales en caché: ya no hay estado "Validando pago…".
+		row["pending_stripe_reconciliation"] = False
+		row["stripe_payment_intent_id"] = None
 		total_outstanding += outstanding
 		total_paid += (grand_total - outstanding)
 		student_sales_invoices.append(row)
