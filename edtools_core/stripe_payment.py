@@ -286,9 +286,111 @@ def _is_klarna_eligible(student_name, billing_country=None):
 	return country.strip().lower() in _KLARNA_COUNTRIES
 
 
+# Límite de cuotas por pago: la asignación viaja en la metadata del PaymentIntent
+# ("fee_alloc"), y Stripe limita cada valor a 500 caracteres.
+MAX_FEES_PER_PAYMENT = 12
+
+
+def _parse_fee_names(fee_names):
+	if not fee_names:
+		return []
+	if isinstance(fee_names, str):
+		fee_names = fee_names.strip()
+		fee_names = json.loads(fee_names) if fee_names.startswith("[") else fee_names.split(",")
+	result = []
+	for name in fee_names:
+		name = str(name or "").strip()
+		if name and name not in result:
+			result.append(name)
+	return result
+
+
+def _compute_selected_fees_charge(fee_names, student_name):
+	"""Cobro exacto de las cuotas elegidas por el estudiante (sin cascada).
+
+	Cada cuota debe ser suya, estar sometida y tener saldo efectivo (descontando pagos
+	Stripe en borrador). Devuelve el mismo formato que ``_compute_stripe_charge_for_fee``
+	más ``allocations`` [(fee, monto)] para la Payment Entry.
+	"""
+	if len(fee_names) > MAX_FEES_PER_PAYMENT:
+		frappe.throw(_("Puedes pagar hasta {0} cuotas en un mismo pago.").format(MAX_FEES_PER_PAYMENT))
+
+	draft_alloc = _get_draft_stripe_allocated_by_fee(student_name)
+	fees = []
+	for name in fee_names:
+		fee = frappe.db.get_value(
+			"Fees",
+			name,
+			["name", "student", "student_name", "company", "currency", "outstanding_amount", "due_date", "docstatus"],
+			as_dict=True,
+		)
+		if not fee or fee.student != student_name:
+			frappe.throw(_("Fee not found: {0}").format(name), frappe.PermissionError)
+		if fee.docstatus != 1:
+			frappe.throw(_("La cuota {0} no está disponible para pago.").format(name))
+		effective = round(flt(fee.outstanding_amount) - flt(draft_alloc.get(name)), 2)
+		if effective <= 0:
+			frappe.throw(
+				_("La cuota {0} ya tiene un pago en proceso de conciliación.").format(_get_fee_description(name) or name)
+			)
+		fee.effective_outstanding = effective
+		fees.append(fee)
+
+	currencies = {(f.currency or "USD").upper() for f in fees}
+	if len(currencies) > 1:
+		frappe.throw(_("Las cuotas elegidas tienen monedas distintas; págalas por separado."))
+
+	fees.sort(key=lambda f: (str(f.due_date or ""), f.name))
+	pay_amount = round(sum(f.effective_outstanding for f in fees), 2)
+	currency = currencies.pop()
+	amount_cents = int(round(pay_amount * 100))
+	if amount_cents < 50:
+		frappe.throw(_("Amount too small for Stripe (minimum 0.50)."))
+
+	breakdown = [
+		{
+			"fee_name": f.name,
+			"program": _get_program_for_fee(f.name) or "",
+			"description": _get_fee_description(f.name),
+			"outstanding_amount": f.effective_outstanding,
+			"allocated_amount": f.effective_outstanding,
+			"currency": f.currency or currency,
+		}
+		for f in fees
+	]
+	return {
+		"fee": fees[0],
+		"pay_amount": pay_amount,
+		"amount_cents": amount_cents,
+		"currency_stripe": currency if currency == "USD" else currency.lower(),
+		"cascade_breakdown": breakdown,
+		"allocations": [(f.name, f.effective_outstanding) for f in fees],
+	}
+
+
+def _allocations_metadata(allocations):
+	value = ";".join(f"{fee}:{amount:.2f}" for fee, amount in allocations)
+	if len(value) > 500:
+		frappe.throw(_("Demasiadas cuotas en un mismo pago; elige menos cuotas."))
+	return value
+
+
+def _allocations_from_metadata(metadata):
+	"""``fee_alloc`` = "FEE-1:120.00;FEE-2:80.00" → [("FEE-1", 120.0), ...] o None."""
+	raw = (metadata or {}).get("fee_alloc")
+	if not raw:
+		return None
+	allocations = []
+	for part in raw.split(";"):
+		fee, _sep, amount = part.rpartition(":")
+		if fee and amount:
+			allocations.append((fee, flt(amount)))
+	return allocations or None
+
+
 @frappe.whitelist()
 def create_payment_intent(
-	fee_name,
+	fee_name=None,
 	student_name=None,
 	amount=None,
 	save_for_autopay=0,
@@ -296,18 +398,27 @@ def create_payment_intent(
 	autopay_consent=0,
 	billing_country=None,
 	lang=None,
+	fee_names=None,
+	save_card=0,
+	saved_card=None,
 ):
 	"""
-	Create a Stripe PaymentIntent for the given Fee.
-	If amount is provided (partial payment), that amount is charged; otherwise full outstanding.
+	Create a Stripe PaymentIntent for the student's fees.
+
+	Selección de cuotas:
+	- ``fee_names`` (lista JSON): se cobra exactamente la suma de esas cuotas y la Payment
+	  Entry se asigna a cada una (sin cascada).
+	- Compatibilidad: solo ``fee_name`` (+ ``amount`` opcional) mantiene el cobro en cascada.
 
 	Métodos de pago:
-	- save_for_autopay=1: solo tarjeta, guardada en el Customer para el débito automático
-	  (requiere autopay_consent=1 y charge_day; ver edtools_core.stripe_autopay).
+	- ``saved_card``: tarjeta de la billetera (EdTools Saved Card); el navegador confirma con
+	  ``stripe.confirmCardPayment(client_secret, {payment_method})`` (maneja 3D Secure).
+	- ``save_for_autopay=1``: activa el pago automático (requiere ``autopay_consent=1`` y
+	  ``charge_day``); con tarjeta nueva solo se ofrece tarjeta.
 	- Estudiante de Norteamérica: métodos automáticos del Dashboard (incluye Klarna si está activo).
 	- Resto: solo tarjeta (incluye Apple Pay / Google Pay).
-
-	Returns: { "client_secret": "...", "publishable_key": "pk_test_...", "payment_intent_id": "pi_..." }
+	- ``save_card=1``: guarda la tarjeta nueva en la billetera (``setup_future_usage`` solo
+	  para tarjeta, así Klarna no se ve afectado).
 	"""
 	secret = _get_stripe_secret_key()
 	if not secret:
@@ -319,35 +430,76 @@ def create_payment_intent(
 	if student_name and student != student_name:
 		frappe.throw(_("You can only pay for your own fees."), frappe.PermissionError)
 
-	charge = _compute_stripe_charge_for_fee(fee_name, student, amount)
+	selected = _parse_fee_names(fee_names)
+	if selected:
+		charge = _compute_selected_fees_charge(selected, student)
+	elif fee_name:
+		charge = _compute_stripe_charge_for_fee(fee_name, student, amount)
+	else:
+		frappe.throw(_("Elige al menos una cuota para pagar."))
+
 	fee = charge["fee"]
+	primary_fee = fee.name
 	pay_amount = charge["pay_amount"]
 	amount_cents = charge["amount_cents"]
 	currency = charge["currency_stripe"]
 	cascade_breakdown = charge["cascade_breakdown"]
+	autopay_opt_in = bool(cint(save_for_autopay))
+	card_row = None
 
 	try:
 		import stripe
 		stripe.api_key = secret
 		metadata = {
-			"fee_name": fee_name,
+			"fee_name": primary_fee,
 			"student_name": fee.student,
 			"site": frappe.local.site,
 		}
+		if charge.get("allocations"):
+			metadata["fee_alloc"] = _allocations_metadata(charge["allocations"])
 		intent_kwargs = {"amount": amount_cents, "currency": currency}
-		if cint(save_for_autopay):
+
+		if saved_card:
+			from edtools_core import stripe_wallet
+
+			card_row = stripe_wallet.get_card_for_student(saved_card, student)
+			intent_kwargs.update(
+				{
+					"customer": card_row.stripe_customer_id,
+					"payment_method": card_row.stripe_payment_method_id,
+					"payment_method_types": ["card"],
+				}
+			)
+			if autopay_opt_in:
+				from edtools_core import stripe_autopay
+
+				opt_in = stripe_autopay.build_payment_intent_opt_in(
+					student, primary_fee, charge_day, autopay_consent, lang, saved_card=True
+				)
+				metadata.update(opt_in["metadata"])
+		elif autopay_opt_in:
 			from edtools_core import stripe_autopay
 
-			opt_in = stripe_autopay.build_payment_intent_opt_in(student, fee_name, charge_day, autopay_consent, lang)
+			opt_in = stripe_autopay.build_payment_intent_opt_in(student, primary_fee, charge_day, autopay_consent, lang)
 			metadata.update(opt_in.pop("metadata"))
 			intent_kwargs.update(opt_in)
-		elif _is_klarna_eligible(student, billing_country):
-			intent_kwargs["automatic_payment_methods"] = {"enabled": True}
 		else:
-			intent_kwargs["payment_method_types"] = ["card"]
+			if _is_klarna_eligible(student, billing_country):
+				intent_kwargs["automatic_payment_methods"] = {"enabled": True}
+			else:
+				intent_kwargs["payment_method_types"] = ["card"]
+
+			from edtools_core import stripe_wallet
+
+			if cint(save_card) and stripe_wallet.is_wallet_enabled():
+				from edtools_core.stripe_autopay import get_or_create_customer
+
+				intent_kwargs["customer"] = get_or_create_customer(student)
+				intent_kwargs["payment_method_options"] = {"card": {"setup_future_usage": "off_session"}}
+				metadata.update(stripe_wallet.card_save_metadata(lang))
 
 		pi = stripe.PaymentIntent.create(metadata=metadata, **intent_kwargs)
-	except frappe.ValidationError:
+	except (frappe.ValidationError, frappe.PermissionError):
 		raise
 	except Exception as e:
 		frappe.log_error(title="Stripe create_payment_intent", message=frappe.get_traceback())
@@ -361,7 +513,9 @@ def create_payment_intent(
 		"amount_display": f"{pay_amount:.2f}",
 		"currency": currency,
 		"cascade_breakdown": cascade_breakdown,
-		"autopay_opt_in": bool(cint(save_for_autopay)),
+		"fee_name": primary_fee,
+		"autopay_opt_in": autopay_opt_in,
+		"saved_payment_method": card_row.stripe_payment_method_id if card_row else None,
 	}
 
 
@@ -460,7 +614,9 @@ def create_stripe_checkout_session_for_fee(fee_name, amount=None):
 	}
 
 
-def _create_payment_entry_for_stripe(student_name, payment_intent_id, paid_amount, starting_fee_name=None):
+def _create_payment_entry_for_stripe(
+	student_name, payment_intent_id, paid_amount, starting_fee_name=None, allocations=None
+):
 	"""
 	Create a Payment Entry in Draft (docstatus=0) for the Stripe payment, with cascade allocation
 	across multiple Fees (one reference row per fee with allocated_amount).
@@ -488,7 +644,12 @@ def _create_payment_entry_for_stripe(student_name, payment_intent_id, paid_amoun
 		frappe.db.commit()
 		return existing[0].name
 
-	breakdown = get_fee_cascade_breakdown(student_name, paid_amount, starting_fee_name)
+	breakdown = None
+	if allocations and abs(sum(flt(a) for _f, a in allocations) - flt(paid_amount)) < 0.01:
+		# Cuotas elegidas por el estudiante: se asigna exactamente lo que se cobró a cada una.
+		breakdown = [{"fee_name": fee, "allocated_amount": flt(amount)} for fee, amount in allocations]
+	if not breakdown:
+		breakdown = get_fee_cascade_breakdown(student_name, paid_amount, starting_fee_name)
 	frappe.log_error(
 		title="Stripe PE DEBUG cascade breakdown",
 		message=f"breakdown len={len(breakdown) if breakdown else 0} items={json.dumps(breakdown, default=str) if breakdown else '[]'}",
@@ -631,8 +792,19 @@ def finalize_payment_and_get_volante(fee_name, payment_intent_id):
 		payment_intent_id,
 		amount_received,
 		starting_fee_name=fee_name,
+		allocations=_allocations_from_metadata(metadata),
 	)
 	frappe.db.commit()
+
+	saved_card = None
+	try:
+		from edtools_core import stripe_wallet
+
+		saved_card = stripe_wallet.register_card_from_intent(pi)
+		frappe.db.commit()
+	except Exception:
+		frappe.db.rollback()
+		frappe.log_error(title="Wallet: registrar tarjeta en finalize falló", message=frappe.get_traceback())
 
 	autopay = None
 	if metadata.get("autopay_opt_in") == "1":
@@ -650,6 +822,7 @@ def finalize_payment_and_get_volante(fee_name, payment_intent_id):
 		"payment_entry_name": pe_name,
 		"pdf_url": _fees_volante_pdf_url(fee_name),
 		"autopay": autopay,
+		"saved_card": bool(saved_card),
 	}
 
 
@@ -766,7 +939,11 @@ def stripe_webhook():
 			else:
 				try:
 					pe_name = _create_payment_entry_for_stripe(
-						student_name, payment_intent_id, amount_received, fee_name
+						student_name,
+						payment_intent_id,
+						amount_received,
+						fee_name,
+						allocations=_allocations_from_metadata(metadata),
 					)
 					frappe.log_error(
 						title="Stripe webhook success",

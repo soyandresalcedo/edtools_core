@@ -1,0 +1,222 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-09-30 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "student",
+  "student_name",
+  "status",
+  "is_default",
+  "column_break_main",
+  "card_brand",
+  "card_last4",
+  "card_exp_month",
+  "card_exp_year",
+  "stripe_section",
+  "stripe_customer_id",
+  "stripe_payment_method_id",
+  "card_fingerprint",
+  "column_break_stripe",
+  "source_intent_id",
+  "removed_on",
+  "consent_section",
+  "consent_at",
+  "consent_user",
+  "consent_ip",
+  "column_break_consent",
+  "consent_text"
+ ],
+ "fields": [
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "Student",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "Student Name",
+   "fetch_from": "student.student_name",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Active\nRemoved",
+   "default": "Active",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "is_default",
+   "fieldtype": "Check",
+   "label": "Default Card",
+   "description": "Tarjeta que usa el pago automático.",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "card_brand",
+   "fieldtype": "Data",
+   "label": "Card Brand",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "card_last4",
+   "fieldtype": "Data",
+   "label": "Card Last 4",
+   "length": 4,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "card_exp_month",
+   "fieldtype": "Int",
+   "label": "Card Exp. Month",
+   "read_only": 1
+  },
+  {
+   "fieldname": "card_exp_year",
+   "fieldtype": "Int",
+   "label": "Card Exp. Year",
+   "read_only": 1
+  },
+  {
+   "fieldname": "stripe_section",
+   "fieldtype": "Section Break",
+   "label": "Stripe"
+  },
+  {
+   "fieldname": "stripe_customer_id",
+   "fieldtype": "Data",
+   "label": "Stripe Customer ID",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "stripe_payment_method_id",
+   "fieldtype": "Data",
+   "label": "Stripe Payment Method ID",
+   "unique": 1,
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "card_fingerprint",
+   "fieldtype": "Data",
+   "label": "Card Fingerprint",
+   "description": "Identifica la misma tarjeta física aunque se guarde dos veces.",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_stripe",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "source_intent_id",
+   "fieldtype": "Data",
+   "label": "Source Intent ID",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "removed_on",
+   "fieldtype": "Datetime",
+   "label": "Removed On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "consent_section",
+   "fieldtype": "Section Break",
+   "label": "Autorización para guardar la tarjeta",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "consent_at",
+   "fieldtype": "Datetime",
+   "label": "Consent At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "consent_user",
+   "fieldtype": "Link",
+   "label": "Consent User",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "consent_ip",
+   "fieldtype": "Data",
+   "label": "Consent IP",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_consent",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "consent_text",
+   "fieldtype": "Small Text",
+   "label": "Consent Text",
+   "read_only": 1
+  }
+ ],
+ "in_create": 1,
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-30 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EdTools Core",
+ "name": "EdTools Saved Card",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "create": 1,
+   "delete": 1,
+   "write": 1,
+   "share": 1,
+   "email": 1
+  },
+  {
+   "role": "Accounts Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Accounts User",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "track_changes": 1,
+ "search_fields": "student,student_name,card_last4"
+}

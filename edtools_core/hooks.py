@@ -50,6 +50,7 @@ doctype_js = {
 	"Assessment Result": "public/js/assessment_result_grade_select.js",
 	"Course Enrollment": "public/js/course_enrollment.js",
 	"Fees": "public/js/fees_stripe_desk.js",
+	"Email Template": "public/js/email_template_editor.js",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}

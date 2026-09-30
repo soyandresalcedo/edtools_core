@@ -332,8 +332,12 @@ def build_autopay_metadata(student, program_enrollment, charge_day, lang) -> dic
 	}
 
 
-def build_payment_intent_opt_in(student, fee_name, charge_day, consent, lang) -> dict:
-	"""Parámetros extra de PaymentIntent para guardar la tarjeta al pagar una cuota."""
+def build_payment_intent_opt_in(student, fee_name, charge_day, consent, lang, saved_card=None) -> dict:
+	"""Parámetros extra de PaymentIntent para activar el pago automático al pagar una cuota.
+
+	Con ``saved_card`` la tarjeta ya está en la billetera: solo se añade la evidencia del
+	consentimiento (customer y payment_method los pone el llamador).
+	"""
 	_require_enabled()
 	if not cint(consent):
 		frappe.throw(_("Debes aceptar la autorización para activar el pago automático."))
@@ -344,12 +348,16 @@ def build_payment_intent_opt_in(student, fee_name, charge_day, consent, lang) ->
 		frappe.throw(_("Esta cuota no está asociada a una matrícula; no se puede activar el pago automático."))
 	_assert_program_enrollment_owner(program_enrollment, student)
 
+	metadata = build_autopay_metadata(student, program_enrollment, charge_day, lang)
+	if saved_card:
+		return {"metadata": metadata}
+
 	return {
 		"customer": get_or_create_customer(student),
 		"setup_future_usage": "off_session",
 		# Solo tarjeta: es el único método que se puede cobrar fuera de sesión cada mes.
 		"payment_method_types": ["card"],
-		"metadata": build_autopay_metadata(student, program_enrollment, charge_day, lang),
+		"metadata": metadata,
 	}
 
 
@@ -428,6 +436,11 @@ def activate_from_intent(intent):
 	doc.flags.ignore_permissions = True
 	doc.save()
 
+	from edtools_core import stripe_wallet
+
+	# La tarjeta del pago automático queda en la billetera como predeterminada.
+	stripe_wallet.register_card(student, payment_method_id, customer_id, intent=intent, make_default=True)
+
 	if previous_payment_method and previous_payment_method != payment_method_id:
 		_detach_if_unused(previous_payment_method)
 
@@ -436,7 +449,12 @@ def activate_from_intent(intent):
 
 
 def _detach_if_unused(payment_method_id):
-	"""Quita de Stripe una tarjeta reemplazada, si ninguna inscripción abierta la usa."""
+	"""Quita de Stripe una tarjeta reemplazada, si ninguna inscripción abierta la usa y el
+	estudiante no la tiene guardada en su billetera."""
+	from edtools_core.stripe_wallet import is_payment_method_in_wallet
+
+	if is_payment_method_in_wallet(payment_method_id):
+		return
 	in_use = frappe.db.exists(
 		ENROLLMENT_DOCTYPE,
 		{"stripe_payment_method_id": payment_method_id, "status": ["in", list(OPEN_STATUSES)]},
@@ -765,7 +783,10 @@ def handle_stripe_event(event) -> bool:
 	event_type = event.get("type")
 	obj = event["data"]["object"]
 
+	from edtools_core import stripe_wallet
+
 	if event_type == "payment_intent.succeeded":
+		stripe_wallet.register_card_from_intent(obj)
 		activate_from_intent(obj)
 		_sync_attempt(obj)
 		return True
@@ -773,12 +794,15 @@ def handle_stripe_event(event) -> bool:
 		_sync_attempt(obj)
 		return True
 	if event_type == "setup_intent.succeeded":
+		stripe_wallet.register_card_from_intent(obj)
 		activate_from_intent(obj)
 		return True
 	if event_type == "payment_method.detached":
+		stripe_wallet.mark_removed_by_payment_method(obj.get("id"))
 		_pause_enrollments_for_payment_method(obj.get("id"))
 		return True
 	if event_type == "payment_method.automatically_updated":
+		stripe_wallet.refresh_card_details(obj)
 		_refresh_card_details(obj)
 		return True
 	if event_type == "charge.dispute.created":
@@ -925,6 +949,9 @@ def _enrollment_summary(name):
 		"card_last4": doc.card_last4,
 		"card_exp_month": doc.card_exp_month,
 		"card_exp_year": doc.card_exp_year,
+		"wallet_card": frappe.db.get_value(
+			"EdTools Saved Card", {"stripe_payment_method_id": doc.stripe_payment_method_id, "status": "Active"}, "name"
+		),
 		"upcoming": upcoming,
 		"attempts": [
 			{
@@ -1031,6 +1058,62 @@ def create_autopay_setup_intent(program_enrollment, charge_day, consent=0, lang=
 		"setup_intent_id": setup_intent.id,
 		"publishable_key": sp._get_stripe_publishable_key() or "",
 	}
+
+
+@frappe.whitelist()
+def activate_autopay_with_card(program_enrollment, card, charge_day, consent=0, lang="es"):
+	"""Activar el pago automático con una tarjeta de la billetera (sin volver a escribirla)."""
+	from edtools_core import stripe_wallet
+
+	student = _require_student()
+	_require_enabled()
+	_assert_program_enrollment_owner(program_enrollment, student)
+	if not cint(consent):
+		frappe.throw(_("Debes aceptar la autorización para activar el pago automático."))
+	charge_day = normalize_charge_day(charge_day)
+	lang = _normalize_lang(lang)
+	card_row = stripe_wallet.get_card_for_student(card, student)
+
+	# La tarjeta debe seguir vinculada al cliente en Stripe (pudo eliminarse desde otro lado).
+	payment_method = _stripe().PaymentMethod.retrieve(card_row.stripe_payment_method_id)
+	if _intent_id(payment_method.get("customer")) != card_row.stripe_customer_id:
+		stripe_wallet.mark_removed_by_payment_method(card_row.stripe_payment_method_id)
+		frappe.db.commit()
+		frappe.throw(_("Esa tarjeta ya no está disponible. Agrega otra tarjeta."))
+
+	name = _open_enrollment_name(student, program_enrollment)
+	doc = frappe.get_doc(ENROLLMENT_DOCTYPE, name) if name else frappe.new_doc(ENROLLMENT_DOCTYPE)
+	doc.update(
+		{
+			"student": student,
+			"program_enrollment": program_enrollment,
+			"status": "Active",
+			"charge_day": charge_day,
+			"next_charge_date": compute_next_charge_date(charge_day),
+			"retry_count": 0,
+			"status_reason": None,
+			"last_error": None,
+			"stripe_customer_id": card_row.stripe_customer_id,
+			"stripe_payment_method_id": card_row.stripe_payment_method_id,
+			"source_intent_id": None,
+			"card_brand": card_row.card_brand,
+			"card_last4": card_row.card_last4,
+			"card_exp_month": card_row.card_exp_month,
+			"card_exp_year": card_row.card_exp_year,
+			"consent_version": CONSENT_VERSION,
+			"consent_at": now_datetime(),
+			"consent_ip": frappe.local.request_ip,
+			"consent_user": frappe.session.user,
+			"consent_language": lang,
+			"consent_text": build_consent_text(charge_day, lang),
+		}
+	)
+	doc.flags.ignore_permissions = True
+	doc.save()
+	stripe_wallet.set_default(student, card)
+	frappe.db.commit()
+	_send_autopay_email(doc, "Activated")
+	return _enrollment_summary(doc.name)
 
 
 @frappe.whitelist()
