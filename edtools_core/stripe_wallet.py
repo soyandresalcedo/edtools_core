@@ -65,7 +65,7 @@ def _stripe():
 def _require_student() -> str:
 	student = sp._get_current_student_name()
 	if not student:
-		frappe.throw(_("Not authenticated as a student."), frappe.PermissionError)
+		frappe.throw(_("Tu sesión expiró. Vuelve a iniciar sesión en el portal."), frappe.PermissionError)
 	return student
 
 
@@ -100,7 +100,20 @@ def get_card_for_student(card_name, student):
 
 
 def register_card(student, payment_method_id, customer_id, intent=None, make_default=False):
-	"""Guarda (o actualiza) la tarjeta en la billetera. Idempotente por ``pm_...``."""
+	"""Guarda (o actualiza) la tarjeta en la billetera. Idempotente por ``pm_...``.
+
+	El webhook y la confirmación del navegador llegan a la vez: candado por tarjeta.
+	"""
+	from frappe.utils.synchronization import filelock
+
+	with filelock(f"wallet_pm_{payment_method_id}", timeout=60):
+		frappe.db.commit()  # ver lo que el otro proceso haya confirmado mientras esperábamos
+		name = _register_card_locked(student, payment_method_id, customer_id, intent, make_default)
+		frappe.db.commit()
+		return name
+
+
+def _register_card_locked(student, payment_method_id, customer_id, intent=None, make_default=False):
 	payment_method = _stripe().PaymentMethod.retrieve(payment_method_id)
 	if payment_method.get("type") != "card":
 		return None
@@ -344,8 +357,15 @@ def create_card_setup_intent(lang="es"):
 	_require_wallet()
 	from edtools_core.stripe_autopay import get_or_create_customer
 
+	try:
+		customer = get_or_create_customer(student)
+	except Exception as e:
+		frappe.log_error(title="Stripe: crear cliente", message=frappe.get_traceback())
+		from edtools_core.stripe_payment import friendly_stripe_error
+
+		frappe.throw(friendly_stripe_error(e))
 	setup_intent = _stripe().SetupIntent.create(
-		customer=get_or_create_customer(student),
+		customer=customer,
 		usage="off_session",
 		payment_method_types=["card"],
 		metadata={

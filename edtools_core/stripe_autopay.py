@@ -157,7 +157,7 @@ def _require_enabled():
 def _stripe():
 	secret = sp._get_stripe_secret_key()
 	if not secret:
-		frappe.throw(_("Stripe is not configured."))
+		frappe.throw(_("Los pagos en línea no están disponibles en este momento. Contacta a Tesorería."))
 	import stripe
 
 	stripe.api_key = secret
@@ -222,7 +222,7 @@ def _intent_id(value):
 def _require_student() -> str:
 	student = sp._get_current_student_name()
 	if not student:
-		frappe.throw(_("Not authenticated as a student."), frappe.PermissionError)
+		frappe.throw(_("Tu sesión expiró. Vuelve a iniciar sesión en el portal."), frappe.PermissionError)
 	return student
 
 
@@ -365,12 +365,21 @@ def activate_from_intent(intent):
 	"""Crea o actualiza el débito automático desde un PaymentIntent/SetupIntent exitoso.
 
 	Idempotente (por ``source_intent_id``): lo llaman finalize, confirm_autopay_setup y el
-	webhook, en cualquier orden. Devuelve el nombre de la inscripción o None.
+	webhook, en cualquier orden y a veces en el mismo instante; un candado por Intent hace
+	que el segundo encuentre lo que creó el primero. Devuelve el nombre de la inscripción o None.
 	"""
 	metadata = intent.get("metadata") or {}
 	if metadata.get("autopay_opt_in") != "1" or intent.get("status") != "succeeded":
 		return None
 
+	from frappe.utils.synchronization import filelock
+
+	with filelock(f"autopay_intent_{intent.get('id')}", timeout=60):
+		frappe.db.commit()  # ver lo que el otro proceso haya confirmado mientras esperábamos
+		return _activate_from_intent_locked(intent, metadata)
+
+
+def _activate_from_intent_locked(intent, metadata):
 	intent_id = intent.get("id")
 	existing = frappe.db.get_value(ENROLLMENT_DOCTYPE, {"source_intent_id": intent_id}, "name")
 	if existing:
@@ -435,6 +444,7 @@ def activate_from_intent(intent):
 	)
 	doc.flags.ignore_permissions = True
 	doc.save()
+	frappe.db.commit()
 
 	from edtools_core import stripe_wallet
 
@@ -1042,8 +1052,15 @@ def create_autopay_setup_intent(program_enrollment, charge_day, consent=0, lang=
 	if not pending_fees(program_enrollment, student) and not _open_enrollment_name(student, program_enrollment):
 		frappe.throw(_("No tienes cuotas pendientes en esta matrícula."))
 
+	try:
+		customer = get_or_create_customer(student)
+	except Exception as e:
+		frappe.log_error(title="Stripe: crear cliente", message=frappe.get_traceback())
+		from edtools_core.stripe_payment import friendly_stripe_error
+
+		frappe.throw(friendly_stripe_error(e))
 	setup_intent = _stripe().SetupIntent.create(
-		customer=get_or_create_customer(student),
+		customer=customer,
 		usage="off_session",
 		payment_method_types=["card"],
 		metadata={

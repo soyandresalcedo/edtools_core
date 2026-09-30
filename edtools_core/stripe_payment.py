@@ -229,9 +229,9 @@ def _compute_stripe_charge_for_fee(fee_name, student_name, amount=None):
 		as_dict=True,
 	)
 	if not fee:
-		frappe.throw(_("Fee not found: {0}").format(fee_name))
+		frappe.throw(_("No encontramos la cuota {0}. Recarga la página e intenta de nuevo.").format(fee_name))
 	if fee.student != student_name:
-		frappe.throw(_("This fee does not belong to the given student."), frappe.ValidationError)
+		frappe.throw(_("Esta cuota no pertenece a tu cuenta."), frappe.ValidationError)
 
 	outstanding = flt(fee.outstanding_amount or 0)
 	draft_alloc = _get_draft_stripe_allocated_by_fee(student_name)
@@ -247,9 +247,9 @@ def _compute_stripe_charge_for_fee(fee_name, student_name, amount=None):
 	# Minimum = selected fee's effective outstanding (DB minus draft Stripe PE allocations).
 	pay_amount = flt(amount) if amount is not None else effective_outstanding
 	if pay_amount < effective_outstanding:
-		frappe.throw(_("Amount must be at least {0} (outstanding for this fee).").format(effective_outstanding))
+		frappe.throw(_("El monto mínimo es {0}, el saldo de esta cuota.").format(fmt_money(effective_outstanding)))
 	if pay_amount <= 0:
-		frappe.throw(_("Amount to pay must be greater than zero."))
+		frappe.throw(_("Escribe un monto mayor que cero."))
 	# Allow amount >= outstanding for cascade payments: extra goes to overdue first, then future.
 	cascade_breakdown = get_fee_cascade_breakdown(student_name, pay_amount, fee_name)
 
@@ -260,7 +260,7 @@ def _compute_stripe_charge_for_fee(fee_name, student_name, amount=None):
 		currency = currency.lower()
 	amount_cents = int(round(pay_amount * 100))
 	if amount_cents < 50:
-		frappe.throw(_("Amount too small for Stripe (minimum 0.50)."))
+		frappe.throw(_("El monto mínimo para pagar en línea es $0.50."))
 
 	return {
 		"fee": fee,
@@ -284,6 +284,29 @@ def _is_klarna_eligible(student_name, billing_country=None):
 	"""País de facturación escrito en el formulario; si falta, el del perfil del estudiante."""
 	country = (billing_country or "").strip() or (frappe.db.get_value("Student", student_name, "country") or "")
 	return country.strip().lower() in _KLARNA_COUNTRIES
+
+
+def friendly_stripe_error(error) -> str:
+	"""Mensaje para el estudiante a partir de una excepción de Stripe (el detalle va al log)."""
+	import stripe
+
+	code = getattr(getattr(error, "error", None), "decline_code", None) or getattr(error, "code", None)
+	card_messages = {
+		"card_declined": _("Tu banco rechazó la tarjeta. Prueba con otra tarjeta o contacta a tu banco."),
+		"insufficient_funds": _("La tarjeta no tiene fondos suficientes."),
+		"expired_card": _("La tarjeta está vencida. Usa otra tarjeta."),
+		"incorrect_cvc": _("El código de seguridad (CVC) no es correcto."),
+		"authentication_required": _("Tu banco necesita que confirmes el pago. Intenta de nuevo y completa la verificación."),
+		"card_not_supported": _("Esta tarjeta no admite pagos en línea. Usa otra tarjeta."),
+		"do_not_honor": _("Tu banco rechazó el pago. Contacta a tu banco para autorizarlo."),
+	}
+	if isinstance(error, stripe.error.CardError):
+		return card_messages.get(code) or _("El banco no autorizó la operación. Prueba con otra tarjeta.")
+	if isinstance(error, stripe.error.RateLimitError):
+		return _("Hay muchas operaciones en este momento. Espera un minuto e intenta de nuevo.")
+	if isinstance(error, (stripe.error.APIConnectionError, stripe.error.APIError)):
+		return _("No pudimos comunicarnos con el procesador de pagos. Intenta de nuevo en unos minutos.")
+	return _("No pudimos iniciar el pago. Intenta de nuevo; si el problema continúa, contacta a Tesorería.")
 
 
 # Límite de cuotas por pago: la asignación viaja en la metadata del PaymentIntent
@@ -330,7 +353,7 @@ def _compute_selected_fees_charge(fee_names, student_name, amount=None):
 			as_dict=True,
 		)
 		if not fee or fee.student != student_name:
-			frappe.throw(_("Fee not found: {0}").format(name), frappe.PermissionError)
+			frappe.throw(_("No encontramos la cuota {0}. Recarga la página e intenta de nuevo.").format(name), frappe.PermissionError)
 		if fee.docstatus != 1:
 			frappe.throw(_("La cuota {0} no está disponible para pago.").format(name))
 		effective = round(flt(fee.outstanding_amount) - flt(draft_alloc.get(name)), 2)
@@ -354,7 +377,7 @@ def _compute_selected_fees_charge(fee_names, student_name, amount=None):
 		pay_amount = round(flt(amount), 2)
 		if pay_amount < selected_total:
 			frappe.throw(
-				_("El monto mínimo es {0} (las cuotas seleccionadas).").format(fmt_money(selected_total, currency=currency))
+				_("El monto mínimo es {0}: el valor de las cuotas que seleccionaste.").format(fmt_money(selected_total, currency=currency))
 			)
 		surplus = round(pay_amount - selected_total, 2)
 		for other in _cascade_candidates(student_name, {f.name for f in fees}, draft_alloc, currency):
@@ -366,14 +389,16 @@ def _compute_selected_fees_charge(fee_names, student_name, amount=None):
 		if surplus > 0:
 			total_outstanding = round(pay_amount - surplus, 2)
 			frappe.throw(
-				_("El monto supera tu saldo pendiente total ({0}).").format(fmt_money(total_outstanding, currency=currency))
+				_("No puedes pagar más de {0}, que es todo lo que debes en tu plan financiero.").format(
+					fmt_money(total_outstanding, currency=currency)
+				)
 			)
 	else:
 		pay_amount = selected_total
 
 	amount_cents = int(round(pay_amount * 100))
 	if amount_cents < 50:
-		frappe.throw(_("Amount too small for Stripe (minimum 0.50)."))
+		frappe.throw(_("El monto mínimo para pagar en línea es $0.50."))
 
 	breakdown = [
 		{
@@ -464,13 +489,35 @@ def preview_payment_allocation(fee_names, amount=None):
 	"""Cómo se repartirá un pago entre las cuotas (para mostrarlo antes de pagar)."""
 	student = _get_current_student_name()
 	if not student:
-		frappe.throw(_("Not authenticated as a student."), frappe.PermissionError)
-	charge = _compute_selected_fees_charge(_parse_fee_names(fee_names), student, amount)
-	return {
-		"pay_amount": charge["pay_amount"],
-		"selected_total": charge["selected_total"],
-		"breakdown": charge["cascade_breakdown"],
+		frappe.throw(_("Tu sesión expiró. Vuelve a iniciar sesión en el portal."), frappe.PermissionError)
+	selected = _parse_fee_names(fee_names)
+	base = _compute_selected_fees_charge(selected, student)
+	currency = (base["fee"].currency or "USD").upper()
+	others = _cascade_candidates(
+		student, set(selected), _get_draft_stripe_allocated_by_fee(student), currency
+	)
+	min_amount = base["selected_total"]
+	max_amount = round(min_amount + sum(flt(o.effective_outstanding) for o in others), 2)
+	result = {
+		"ok": True,
+		"min_amount": min_amount,
+		"max_amount": max_amount,
+		"currency": currency,
+		"pay_amount": min_amount,
+		"selected_total": min_amount,
+		"breakdown": base["cascade_breakdown"],
 	}
+	value = round(flt(amount), 2) if amount not in (None, "") else None
+	if value is None or value == min_amount:
+		return result
+	if value < min_amount:
+		return {**result, "ok": False, "code": "below_minimum",
+			"message": _("El monto mínimo es {0}: el valor de las cuotas que seleccionaste.").format(fmt_money(min_amount, currency=currency))}
+	if value > max_amount:
+		return {**result, "ok": False, "code": "above_balance",
+			"message": _("No puedes pagar más de {0}, que es todo lo que debes en tu plan financiero.").format(fmt_money(max_amount, currency=currency))}
+	charge = _compute_selected_fees_charge(selected, student, value)
+	return {**result, "pay_amount": charge["pay_amount"], "breakdown": charge["cascade_breakdown"]}
 
 
 @frappe.whitelist()
@@ -507,13 +554,13 @@ def create_payment_intent(
 	"""
 	secret = _get_stripe_secret_key()
 	if not secret:
-		frappe.throw(_("Stripe is not configured. Please set stripe_secret_key in Site Config or Stripe Settings."))
+		frappe.throw(_("Los pagos en línea no están disponibles en este momento. Contacta a Tesorería."))
 
 	student = _get_current_student_name()
 	if not student:
-		frappe.throw(_("Not authenticated as a student."), frappe.PermissionError)
+		frappe.throw(_("Tu sesión expiró. Vuelve a iniciar sesión en el portal."), frappe.PermissionError)
 	if student_name and student != student_name:
-		frappe.throw(_("You can only pay for your own fees."), frappe.PermissionError)
+		frappe.throw(_("Solo puedes pagar tus propias cuotas."), frappe.PermissionError)
 
 	selected = _parse_fee_names(fee_names)
 	if selected:
@@ -588,7 +635,7 @@ def create_payment_intent(
 		raise
 	except Exception as e:
 		frappe.log_error(title="Stripe create_payment_intent", message=frappe.get_traceback())
-		frappe.throw(_("Payment could not be started: {0}").format(str(e)))
+		frappe.throw(friendly_stripe_error(e))
 
 	publishable = _get_stripe_publishable_key()
 	return {
@@ -632,7 +679,7 @@ def create_stripe_checkout_session_for_fee(fee_name, amount=None):
 
 	student_name = frappe.db.get_value("Fees", fee_name, "student")
 	if not student_name:
-		frappe.throw(_("Fee not found: {0}").format(fee_name))
+		frappe.throw(_("No encontramos la cuota {0}. Recarga la página e intenta de nuevo.").format(fee_name))
 
 	charge = _compute_stripe_charge_for_fee(fee_name, student_name, amount)
 	fee = charge["fee"]
@@ -861,11 +908,11 @@ def finalize_payment_and_get_volante(fee_name, payment_intent_id):
 	"""
 	student = _get_current_student_name()
 	if not student:
-		frappe.throw(_("Not authenticated as a student."), frappe.PermissionError)
+		frappe.throw(_("Tu sesión expiró. Vuelve a iniciar sesión en el portal."), frappe.PermissionError)
 
 	secret = _get_stripe_secret_key()
 	if not secret:
-		frappe.throw(_("Stripe is not configured."), frappe.ValidationError)
+		frappe.throw(_("Los pagos en línea no están disponibles en este momento. Contacta a Tesorería."), frappe.ValidationError)
 
 	fee = frappe.db.get_value(
 		"Fees",
@@ -874,9 +921,9 @@ def finalize_payment_and_get_volante(fee_name, payment_intent_id):
 		as_dict=True,
 	)
 	if not fee:
-		frappe.throw(_("Fee not found: {0}").format(fee_name))
+		frappe.throw(_("No encontramos la cuota {0}. Recarga la página e intenta de nuevo.").format(fee_name))
 	if fee.student != student:
-		frappe.throw(_("This fee does not belong to you."), frappe.PermissionError)
+		frappe.throw(_("Esta cuota no pertenece a tu cuenta."), frappe.PermissionError)
 
 	try:
 		import stripe
@@ -884,18 +931,18 @@ def finalize_payment_and_get_volante(fee_name, payment_intent_id):
 		pi = stripe.PaymentIntent.retrieve(payment_intent_id)
 	except Exception as e:
 		frappe.log_error(title="Stripe finalize retrieve PI failed", message=frappe.get_traceback())
-		frappe.throw(_("Could not verify payment: {0}").format(str(e)))
+		frappe.throw(_("No pudimos confirmar tu pago con el banco todavía. Si ya se descontó, aparecerá en unos minutos."))
 
 	if pi.get("status") != "succeeded":
-		frappe.throw(_("Payment is not completed yet."), frappe.ValidationError)
+		frappe.throw(_("Tu pago todavía se está procesando. Lo verás reflejado en unos minutos."), frappe.ValidationError)
 
 	metadata = pi.get("metadata") or {}
 	meta_student = metadata.get("student_name")
 	meta_fee = metadata.get("fee_name")
 	if not meta_student or meta_student != student:
-		frappe.throw(_("This payment does not belong to your account."), frappe.PermissionError)
+		frappe.throw(_("Este pago no pertenece a tu cuenta."), frappe.PermissionError)
 	if not meta_fee or meta_fee != fee_name:
-		frappe.throw(_("Payment does not match this fee."), frappe.ValidationError)
+		frappe.throw(_("Este pago no corresponde a la cuota seleccionada."), frappe.ValidationError)
 
 	amount_received = (pi.get("amount_received") or pi.get("amount") or 0) / 100.0
 
