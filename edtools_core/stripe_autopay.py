@@ -64,6 +64,9 @@ REMINDER_DAYS_BEFORE = 3
 # idempotency_key mientras Stripe la recuerde (24 h); pasado ese margen se da por perdido.
 ERROR_ATTEMPT_REUSE_HOURS = 20
 PENDING_ATTEMPT_STALE_HOURS = 1
+# El estudiante puede mover SOLO el próximo cobro: desde mañana hasta N días después de
+# la fecha regular (decisión de CUC: 7 días).
+MAX_RESCHEDULE_DAYS = 7
 
 STUDENT_CUSTOMER_FIELD = "stripe_customer_id"
 
@@ -297,8 +300,14 @@ def find_fee_to_charge(doc, charge_date):
 	Una cuota por ciclo: la pendiente más antigua, siempre que venza a más tardar el último
 	día del mes de cobro (si la más antigua es de un mes futuro, el estudiante va adelantado).
 	"""
+	fees = pending_fees(doc.program_enrollment, doc.student)
+	if doc.get("next_charge_fee"):
+		# Cuota elegida por el estudiante para este cobro (si sigue pendiente).
+		chosen = next((f for f in fees if f.name == doc.next_charge_fee), None)
+		if chosen:
+			return chosen
 	cycle_end = get_last_day(charge_date)
-	for fee in pending_fees(doc.program_enrollment, doc.student):
+	for fee in fees:
 		if fee.due_date and getdate(fee.due_date) > cycle_end:
 			return None
 		return fee
@@ -424,6 +433,8 @@ def _activate_from_intent_locked(intent, metadata):
 			# Primer cobro: la próxima ocurrencia del día elegido (nunca hoy: si pagó con el
 			# mismo Intent, ya cubrió la cuota; si solo guardó la tarjeta, se le avisa antes).
 			"next_charge_date": compute_next_charge_date(charge_day),
+			"next_charge_fee": None,
+			"original_charge_date": None,
 			"retry_count": 0,
 			"status_reason": None,
 			"last_error": None,
@@ -565,7 +576,8 @@ def charge_enrollment(enrollment_name, triggered_by="Scheduler") -> dict:
 			doc.status = "Completed"
 			doc.status_reason = _("No quedan cuotas pendientes en esta matrícula.")
 		else:
-			doc.next_charge_date = compute_next_charge_date(doc.charge_day, charge_date)
+			doc.next_charge_date = _next_regular_date(doc)
+		_clear_reschedule(doc)
 		doc.flags.ignore_permissions = True
 		doc.save()
 		return {"status": "Skipped", "message": _("No hay cuota por cobrar en este ciclo.")}
@@ -650,6 +662,20 @@ def _apply_intent_result(doc, attempt, intent):
 		_on_failure(doc, attempt, code, error.get("decline_code"), error.get("message"))
 
 
+def _clear_reschedule(doc):
+	doc.next_charge_fee = None
+	doc.original_charge_date = None
+
+
+def _next_regular_date(doc):
+	"""Siguiente fecha regular. Si el cobro se adelantó (p. ej. del 22 al 15), no se vuelve a
+	cobrar el 22 de ese mismo mes: se parte de la fecha original."""
+	base = getdate(today())
+	if doc.get("original_charge_date") and getdate(doc.original_charge_date) > base:
+		base = getdate(doc.original_charge_date)
+	return compute_next_charge_date(doc.charge_day, base)
+
+
 def _on_success(doc, attempt, intent):
 	attempt.status = "Succeeded"
 	attempt.attempted_on = now_datetime()
@@ -671,7 +697,8 @@ def _on_success(doc, attempt, intent):
 	doc.last_error = None
 	doc.status_reason = None
 	doc.last_attempt_on = now_datetime()
-	doc.next_charge_date = compute_next_charge_date(doc.charge_day)
+	doc.next_charge_date = _next_regular_date(doc)
+	_clear_reschedule(doc)
 	doc.flags.ignore_permissions = True
 	doc.save()
 	frappe.db.commit()
@@ -708,6 +735,7 @@ def _on_failure(doc, attempt, code, decline_code, message):
 	else:
 		doc.status = "Needs Attention"
 		doc.status_reason = _failure_reason(decline_code or code, fallback=message)
+		_clear_reschedule(doc)
 	doc.flags.ignore_permissions = True
 	doc.save()
 	frappe.db.commit()
@@ -941,6 +969,18 @@ def _enrollment_summary(name):
 				"currency": fee.currency or "USD",
 				"charge_date": str(doc.next_charge_date),
 			}
+	can_reschedule = doc.status == "Active" and not cint(doc.retry_count) and bool(doc.next_charge_date)
+	original = getdate(doc.original_charge_date or doc.next_charge_date) if doc.next_charge_date else None
+	reschedule = None
+	if can_reschedule:
+		reschedule = {
+			"min_date": str(getdate(add_days(today(), 1))),
+			"max_date": str(getdate(add_days(original, MAX_RESCHEDULE_DAYS))),
+			"original_date": str(original),
+			"is_rescheduled": bool(doc.original_charge_date) or bool(doc.next_charge_fee),
+			"chosen_fee": doc.next_charge_fee,
+			"max_days": MAX_RESCHEDULE_DAYS,
+		}
 	attempts = frappe.get_all(
 		ATTEMPT_DOCTYPE,
 		filters={"autopay_enrollment": name},
@@ -963,6 +1003,7 @@ def _enrollment_summary(name):
 			"EdTools Saved Card", {"stripe_payment_method_id": doc.stripe_payment_method_id, "status": "Active"}, "name"
 		),
 		"upcoming": upcoming,
+		"reschedule": reschedule,
 		"attempts": [
 			{
 				"fee": a.fee,
@@ -1023,6 +1064,15 @@ def get_autopay_status():
 				"program": frappe.db.get_value("Program Enrollment", program_enrollment, "program") or "",
 				"pending_count": len(fees),
 				"pending_fee_names": [f.name for f in fees],
+				"pending_fees": [
+					{
+						"fee": f.name,
+						"description": _fee_description(f.name),
+						"due_date": str(f.due_date) if f.due_date else None,
+						"amount": f.effective_outstanding,
+					}
+					for f in fees
+				],
 				"pending_total": round(sum(flt(f.effective_outstanding) for f in fees), 2),
 				"currency": (next_fee.currency if next_fee else None) or "USD",
 				"next_fee": {
@@ -1107,6 +1157,8 @@ def activate_autopay_with_card(program_enrollment, card, charge_day, consent=0, 
 			"status": "Active",
 			"charge_day": charge_day,
 			"next_charge_date": compute_next_charge_date(charge_day),
+			"next_charge_fee": None,
+			"original_charge_date": None,
 			"retry_count": 0,
 			"status_reason": None,
 			"last_error": None,
@@ -1165,6 +1217,8 @@ def update_autopay_day(program_enrollment, charge_day, consent=0, lang="es"):
 		{
 			"charge_day": charge_day,
 			"next_charge_date": compute_next_charge_date(charge_day),
+			"next_charge_fee": None,
+			"original_charge_date": None,
 			"consent_version": CONSENT_VERSION,
 			"consent_at": now_datetime(),
 			"consent_ip": frappe.local.request_ip,
@@ -1173,6 +1227,57 @@ def update_autopay_day(program_enrollment, charge_day, consent=0, lang="es"):
 			"consent_text": build_consent_text(charge_day, lang),
 		}
 	)
+	doc.flags.ignore_permissions = True
+	doc.save()
+	frappe.db.commit()
+	return _enrollment_summary(name)
+
+
+@frappe.whitelist()
+def reschedule_next_charge(program_enrollment, charge_date, fee=None):
+	"""Mover SOLO el próximo cobro (fecha y, opcionalmente, qué cuota se cobra).
+
+	Límites: desde mañana hasta ``MAX_RESCHEDULE_DAYS`` días después de la fecha regular.
+	Después de ese cobro se vuelve al día fijo del mes. No aplica durante reintentos.
+	"""
+	student = _require_student()
+	_require_enabled()
+	name = _open_enrollment_name(student, program_enrollment)
+	if not name:
+		frappe.throw(_("No tienes un pago automático activo en esta matrícula."))
+	doc = frappe.get_doc(ENROLLMENT_DOCTYPE, name)
+	if doc.status != "Active":
+		frappe.throw(_("Tu pago automático está en pausa. Actualiza tu tarjeta antes de mover el cobro."))
+	if cint(doc.retry_count):
+		frappe.throw(
+			_("Tu último cobro fue rechazado y ya tiene un reintento programado. Paga la cuota o cambia tu tarjeta.")
+		)
+
+	new_date = getdate(charge_date)
+	original = getdate(doc.original_charge_date or doc.next_charge_date)
+	min_date = getdate(add_days(today(), 1))
+	max_date = getdate(add_days(original, MAX_RESCHEDULE_DAYS))
+	if new_date < min_date:
+		frappe.throw(_("Elige una fecha a partir de mañana ({0}).").format(format_date(min_date)))
+	if new_date > max_date:
+		frappe.throw(
+			_("Solo puedes posponer el cobro hasta {0} días: la fecha máxima es {1}.").format(
+				MAX_RESCHEDULE_DAYS, format_date(max_date)
+			)
+		)
+
+	chosen_fee = None
+	if fee:
+		pending = {f.name for f in pending_fees(program_enrollment, student)}
+		if fee not in pending:
+			frappe.throw(_("Esa cuota ya no está pendiente. Recarga la página y elige otra."))
+		chosen_fee = fee
+
+	back_to_original = new_date == original and not chosen_fee
+	doc.next_charge_date = new_date
+	doc.original_charge_date = None if back_to_original else original
+	doc.next_charge_fee = chosen_fee
+	doc.last_reminder_for = None
 	doc.flags.ignore_permissions = True
 	doc.save()
 	frappe.db.commit()

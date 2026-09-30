@@ -14,6 +14,8 @@
   "status",
   "charge_day",
   "next_charge_date",
+  "original_charge_date",
+  "next_charge_fee",
   "retry_count",
   "status_reason",
   "card_section",
@@ -109,6 +111,23 @@
    "fieldtype": "Date",
    "label": "Next Charge Date",
    "in_list_view": 1
+  },
+  {
+   "fieldname": "original_charge_date",
+   "fieldtype": "Date",
+   "label": "Original Charge Date",
+   "description": "Fecha regular del próximo cobro antes de que el estudiante lo reprogramara (límite: 7 días después).",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "next_charge_fee",
+   "fieldtype": "Link",
+   "label": "Next Charge Fee",
+   "options": "Fees",
+   "description": "Cuota elegida por el estudiante para el próximo cobro. Vacío = la pendiente más antigua.",
+   "read_only": 1,
+   "no_copy": 1
   },
   {
    "fieldname": "retry_count",
