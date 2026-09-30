@@ -9,7 +9,7 @@ from urllib.parse import quote
 import frappe
 from frappe import _
 from frappe.query_builder.functions import Sum
-from frappe.utils import cint, flt, getdate, today
+from frappe.utils import cint, flt, fmt_money, getdate, today
 
 
 def _get_program_for_fee(fee_name):
@@ -305,8 +305,13 @@ def _parse_fee_names(fee_names):
 	return result
 
 
-def _compute_selected_fees_charge(fee_names, student_name):
-	"""Cobro exacto de las cuotas elegidas por el estudiante (sin cascada).
+def _compute_selected_fees_charge(fee_names, student_name, amount=None):
+	"""Cobro de las cuotas elegidas por el estudiante.
+
+	- Sin ``amount``: exactamente la suma de las cuotas elegidas.
+	- Con ``amount`` (monto libre, mínimo la suma elegida): el excedente se aplica en
+	  cascada a las demás cuotas, primero las vencidas y luego las siguientes, igual que
+	  el pago manual de siempre. No puede superar el saldo pendiente total.
 
 	Cada cuota debe ser suya, estar sometida y tener saldo efectivo (descontando pagos
 	Stripe en borrador). Devuelve el mismo formato que ``_compute_stripe_charge_for_fee``
@@ -341,8 +346,31 @@ def _compute_selected_fees_charge(fee_names, student_name):
 		frappe.throw(_("Las cuotas elegidas tienen monedas distintas; págalas por separado."))
 
 	fees.sort(key=lambda f: (str(f.due_date or ""), f.name))
-	pay_amount = round(sum(f.effective_outstanding for f in fees), 2)
+	selected_total = round(sum(f.effective_outstanding for f in fees), 2)
 	currency = currencies.pop()
+	allocations = [(f, f.effective_outstanding, True) for f in fees]
+
+	if amount not in (None, ""):
+		pay_amount = round(flt(amount), 2)
+		if pay_amount < selected_total:
+			frappe.throw(
+				_("El monto mínimo es {0} (las cuotas seleccionadas).").format(fmt_money(selected_total, currency=currency))
+			)
+		surplus = round(pay_amount - selected_total, 2)
+		for other in _cascade_candidates(student_name, {f.name for f in fees}, draft_alloc, currency):
+			if surplus <= 0:
+				break
+			portion = round(min(other.effective_outstanding, surplus), 2)
+			allocations.append((other, portion, False))
+			surplus = round(surplus - portion, 2)
+		if surplus > 0:
+			total_outstanding = round(pay_amount - surplus, 2)
+			frappe.throw(
+				_("El monto supera tu saldo pendiente total ({0}).").format(fmt_money(total_outstanding, currency=currency))
+			)
+	else:
+		pay_amount = selected_total
+
 	amount_cents = int(round(pay_amount * 100))
 	if amount_cents < 50:
 		frappe.throw(_("Amount too small for Stripe (minimum 0.50)."))
@@ -352,32 +380,75 @@ def _compute_selected_fees_charge(fee_names, student_name):
 			"fee_name": f.name,
 			"program": _get_program_for_fee(f.name) or "",
 			"description": _get_fee_description(f.name),
+			"due_date": str(f.due_date) if f.due_date else None,
 			"outstanding_amount": f.effective_outstanding,
-			"allocated_amount": f.effective_outstanding,
+			"allocated_amount": allocated,
 			"currency": f.currency or currency,
+			"selected": selected,
 		}
-		for f in fees
+		for f, allocated, selected in allocations
 	]
 	return {
 		"fee": fees[0],
 		"pay_amount": pay_amount,
+		"selected_total": selected_total,
 		"amount_cents": amount_cents,
 		"currency_stripe": currency if currency == "USD" else currency.lower(),
 		"cascade_breakdown": breakdown,
-		"allocations": [(f.name, f.effective_outstanding) for f in fees],
+		"allocations": [(f.name, allocated) for f, allocated, _selected in allocations],
 	}
 
 
+def _cascade_candidates(student_name, exclude, draft_alloc, currency):
+	"""Otras cuotas con saldo, en el orden del pago manual: vencidas y luego las siguientes."""
+	rows = frappe.get_all(
+		"Fees",
+		filters={"student": student_name, "docstatus": 1, "outstanding_amount": [">", 0]},
+		fields=["name", "due_date", "outstanding_amount", "currency"],
+		order_by="due_date asc, name asc",
+		ignore_permissions=True,
+	)
+	result = []
+	for row in rows:
+		if row.name in exclude or (row.currency or "USD").upper() != currency:
+			continue
+		effective = round(flt(row.outstanding_amount) - flt(draft_alloc.get(row.name)), 2)
+		if effective > 0:
+			row.effective_outstanding = effective
+			result.append(row)
+	today_dt = getdate(today())
+	overdue = [r for r in result if r.due_date and getdate(r.due_date) < today_dt]
+	upcoming = [r for r in result if not r.due_date or getdate(r.due_date) >= today_dt]
+	return overdue + upcoming
+
+
 def _allocations_metadata(allocations):
-	value = ";".join(f"{fee}:{amount:.2f}" for fee, amount in allocations)
-	if len(value) > 500:
-		frappe.throw(_("Demasiadas cuotas en un mismo pago; elige menos cuotas."))
-	return value
+	"""Asignación por cuota en metadata: "FEE-1:120.00;FEE-2:80.00", repartida en claves
+	fee_alloc, fee_alloc_2, ... porque Stripe limita cada valor a 500 caracteres."""
+	chunks, current = [], ""
+	for fee, amount in allocations:
+		part = f"{fee}:{flt(amount):.2f}"
+		candidate = f"{current};{part}" if current else part
+		if len(candidate) > 500:
+			chunks.append(current)
+			current = part
+		else:
+			current = candidate
+	if current:
+		chunks.append(current)
+	if len(chunks) > 20:
+		frappe.throw(_("Demasiadas cuotas en un mismo pago; elige un monto menor."))
+	return {("fee_alloc" if i == 0 else f"fee_alloc_{i + 1}"): chunk for i, chunk in enumerate(chunks)}
 
 
 def _allocations_from_metadata(metadata):
-	"""``fee_alloc`` = "FEE-1:120.00;FEE-2:80.00" → [("FEE-1", 120.0), ...] o None."""
-	raw = (metadata or {}).get("fee_alloc")
+	"""fee_alloc (+ fee_alloc_2, ...) → [("FEE-1", 120.0), ...] o None."""
+	metadata = metadata or {}
+	keys = sorted(
+		(k for k in metadata if k == "fee_alloc" or k.startswith("fee_alloc_")),
+		key=lambda k: 1 if k == "fee_alloc" else cint(k.rsplit("_", 1)[-1]),
+	)
+	raw = ";".join(metadata[k] for k in keys if metadata.get(k))
 	if not raw:
 		return None
 	allocations = []
@@ -386,6 +457,20 @@ def _allocations_from_metadata(metadata):
 		if fee and amount:
 			allocations.append((fee, flt(amount)))
 	return allocations or None
+
+
+@frappe.whitelist()
+def preview_payment_allocation(fee_names, amount=None):
+	"""Cómo se repartirá un pago entre las cuotas (para mostrarlo antes de pagar)."""
+	student = _get_current_student_name()
+	if not student:
+		frappe.throw(_("Not authenticated as a student."), frappe.PermissionError)
+	charge = _compute_selected_fees_charge(_parse_fee_names(fee_names), student, amount)
+	return {
+		"pay_amount": charge["pay_amount"],
+		"selected_total": charge["selected_total"],
+		"breakdown": charge["cascade_breakdown"],
+	}
 
 
 @frappe.whitelist()
@@ -432,7 +517,7 @@ def create_payment_intent(
 
 	selected = _parse_fee_names(fee_names)
 	if selected:
-		charge = _compute_selected_fees_charge(selected, student)
+		charge = _compute_selected_fees_charge(selected, student, amount)
 	elif fee_name:
 		charge = _compute_stripe_charge_for_fee(fee_name, student, amount)
 	else:
@@ -456,7 +541,7 @@ def create_payment_intent(
 			"site": frappe.local.site,
 		}
 		if charge.get("allocations"):
-			metadata["fee_alloc"] = _allocations_metadata(charge["allocations"])
+			metadata.update(_allocations_metadata(charge["allocations"]))
 		intent_kwargs = {"amount": amount_cents, "currency": currency}
 
 		if saved_card:
@@ -513,6 +598,7 @@ def create_payment_intent(
 		"amount_display": f"{pay_amount:.2f}",
 		"currency": currency,
 		"cascade_breakdown": cascade_breakdown,
+		"selected_total": charge.get("selected_total"),
 		"fee_name": primary_fee,
 		"autopay_opt_in": autopay_opt_in,
 		"saved_payment_method": card_row.stripe_payment_method_id if card_row else None,
@@ -615,6 +701,32 @@ def create_stripe_checkout_session_for_fee(fee_name, amount=None):
 
 
 def _create_payment_entry_for_stripe(
+	student_name, payment_intent_id, paid_amount, starting_fee_name=None, allocations=None
+):
+	"""Crea (o reutiliza) la Payment Entry en borrador de un pago Stripe.
+
+	- finalize (navegador) y el webhook llegan casi a la vez: un candado por PaymentIntent
+	  evita dos Payment Entries para el mismo pago (el segundo ve la del primero).
+	- ERPNext exige permiso sobre Payment Entry al validar cuentas (``get_account_details``)
+	  y el estudiante no lo tiene: se inserta como Administrador. Los llamadores ya
+	  validaron que el pago y las cuotas pertenecen al estudiante.
+	"""
+	from frappe.utils.synchronization import filelock
+
+	with filelock(f"stripe_pe_{payment_intent_id}", timeout=60):
+		current_user = frappe.session.user
+		try:
+			if current_user != "Administrator":
+				frappe.set_user("Administrator")
+			return _create_payment_entry_for_stripe_locked(
+				student_name, payment_intent_id, paid_amount, starting_fee_name, allocations
+			)
+		finally:
+			if frappe.session.user != current_user:
+				frappe.set_user(current_user)
+
+
+def _create_payment_entry_for_stripe_locked(
 	student_name, payment_intent_id, paid_amount, starting_fee_name=None, allocations=None
 ):
 	"""
