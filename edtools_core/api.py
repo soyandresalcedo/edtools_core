@@ -2772,7 +2772,30 @@ def enroll_student_from_applicant(source_name: str):
     """
     from edtools_core.overrides.enrollment import enroll_student_with_azure_provisioning
 
-    return enroll_student_with_azure_provisioning(source_name)
+    program_enrollment = enroll_student_with_azure_provisioning(source_name)
+
+    # Admisiones: la matrícula queda validada de una vez (antes se enviaba a mano).
+    # Si el submit falla, se deja en borrador para no perder el Student ya creado;
+    # el asistente de admisiones la muestra como pendiente de validar.
+    if program_enrollment and program_enrollment.docstatus == 0:
+        frappe.db.savepoint("auto_submit_pe")
+        try:
+            program_enrollment.submit()
+        except Exception:
+            frappe.db.rollback(save_point="auto_submit_pe")
+            program_enrollment.reload()
+            frappe.log_error(
+                title=f"Auto-validar Program Enrollment {program_enrollment.name}",
+                message=frappe.get_traceback(),
+            )
+            frappe.msgprint(
+                _("El estudiante se creó, pero la matrícula {0} quedó en borrador. Valídala manualmente.").format(
+                    program_enrollment.name
+                ),
+                indicator="orange",
+            )
+
+    return program_enrollment
 
 
 # =====================================================================
