@@ -567,7 +567,7 @@ class AdmissionsWizard {
 			if (r && r.status === 'skipped') status = `<span class="indicator-pill blue">${__('Ya tenía plan')}</span>`;
 			if (r && r.status === 'error') status = `<span class="indicator-pill red" title="${this.esc(r.detail)}">${__('Error')}</span><div class="text-danger small">${this.esc(r.detail)}</div>`;
 			html += `<tr><td>${this.esc(e.student_name)}</td><td class="small">${this.esc(e.program)}</td><td>${this.esc((r && r.status === 'skipped') || (!r && e.has_plan) ? '—' : beca)}</td><td>${status}</td>
-				<td class="text-right">${r && r.ea_fee ? `<a class="btn btn-default btn-xs" target="_blank" href="${this.pdfUrl([r.ea_fee])}">PDF</a>` : ''}
+				<td class="text-right">${r && r.ea_fee ? `<a class="btn btn-default btn-xs" target="_blank" href="${this.printUrl(r.ea_fee)}">${__('Imprimir')}</a>` : ''}
 				${r && r.status === 'error' && !s.running ? `<button class="btn btn-default btn-xs aw-retry" data-pe="${this.esc(e.program_enrollment)}">${__('Reintentar')}</button>` : ''}</td></tr>`;
 		});
 		html += `</tbody></table></div>`;
@@ -585,6 +585,11 @@ class AdmissionsWizard {
 			const fees = Object.values(s.results).map((r) => r.ea_fee).filter(Boolean);
 			window.open(this.pdfUrl(fees));
 		});
+	}
+
+	printUrl(fee) {
+		// Misma vista que el botón Print de la Fee: formato HTML + diálogo de impresión del navegador.
+		return `/printview?doctype=Fees&name=${encodeURIComponent(fee)}&trigger_print=1&format=${encodeURIComponent('Matrícula')}&no_letterhead=1`;
 	}
 
 	pdfUrl(fees) {
