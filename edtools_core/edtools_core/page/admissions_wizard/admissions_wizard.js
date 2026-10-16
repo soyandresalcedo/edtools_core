@@ -768,11 +768,12 @@ class AdmissionsWizard {
 	inject_styles() {
 		if (document.getElementById('aw-styles')) return;
 		$(`<style id="aw-styles">
-			.aw { max-width: 1100px; margin: 0 auto; padding-bottom: 2rem; }
+			.aw { max-width: 1100px; margin: 0 auto; padding-bottom: 2rem; --aw-red: #e03636; --aw-orange: #e86c13; --aw-green: #278f5e; }
+			[data-theme="dark"] .aw { --aw-red: #ff7b7b; --aw-orange: #ffa95c; --aw-green: #5fd49a; }
 			.aw-stepper { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 8px 0 16px; }
 			.aw-step { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-muted); text-align: left; font-size: var(--text-sm); }
-			.aw-step.is-active { border-color: var(--primary); color: var(--text-color); font-weight: 600; }
-			.aw-step.is-done { color: var(--green-600); }
+			.aw-step.is-active { border-color: var(--text-color); color: var(--text-color); font-weight: 600; }
+			.aw-step.is-done { color: var(--aw-green); }
 			.aw-step:disabled { opacity: 1; cursor: default; }
 			.aw-num { display: inline-flex; width: 20px; height: 20px; border-radius: 50%; align-items: center; justify-content: center; background: var(--control-bg); font-size: 11px; }
 			.aw-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--border-radius-lg); padding: 14px 16px; margin-bottom: 12px; }
@@ -786,17 +787,21 @@ class AdmissionsWizard {
 			.aw-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
 			.aw-metric { background: var(--control-bg); border-radius: var(--border-radius-md); padding: 10px 14px; font-size: var(--text-sm); color: var(--text-muted); }
 			.aw-metric b { display: block; font-size: 20px; color: var(--text-color); font-weight: 600; }
-			.aw-metric.is-warning b { color: var(--orange-600); }
+			.aw-metric.is-warning b { color: var(--aw-orange); }
 			.aw-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-radius: var(--border-radius-md); margin-bottom: 12px; font-size: var(--text-sm); }
-			.aw-banner.is-warning { background: var(--bg-orange); color: var(--text-on-orange); }
-			.aw-banner.is-danger { background: var(--bg-red); color: var(--text-on-red); margin: 0; }
+			.aw-banner.is-warning { background: color-mix(in srgb, var(--aw-orange) 12%, transparent); border: 1px solid color-mix(in srgb, var(--aw-orange) 35%, transparent); color: var(--text-color); }
+			.aw-banner.is-danger { background: color-mix(in srgb, var(--aw-red) 12%, transparent); border: 1px solid color-mix(in srgb, var(--aw-red) 35%, transparent); color: var(--text-color); margin: 0; }
 			.aw-empty { padding: 32px; text-align: center; color: var(--text-muted); }
 			.aw-details summary { cursor: pointer; font-size: var(--text-sm); color: var(--text-muted); margin-top: 6px; }
 			.aw-bulk { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 			.aw-bulk select { width: 180px; } .aw-bulk input { width: 90px; }
 			.aw-bulk.is-active { background: var(--control-bg); border-radius: var(--border-radius-md); padding: 8px 10px; }
 			.aw-bulk { min-height: 32px; }
-			.aw-invalid td { background: var(--bg-red); }
+			.aw-invalid td { background: color-mix(in srgb, var(--aw-red) 9%, transparent); }
+			.aw-invalid td:first-child { box-shadow: inset 3px 0 0 var(--aw-red); }
+			.aw .text-danger { color: var(--aw-red) !important; }
+			.aw .text-warning { color: var(--aw-orange) !important; }
+			.aw .text-success { color: var(--aw-green) !important; }
 			.aw-date-reset, .aw-sim-retry { cursor: pointer; display: block; }
 			.aw-table { width: 100%; font-size: var(--text-sm); }
 			.aw-table th { color: var(--text-muted); font-weight: normal; padding: 6px; border-bottom: 1px solid var(--border-color); }
