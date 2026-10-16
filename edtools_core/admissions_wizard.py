@@ -38,6 +38,7 @@ def _parse(val):
 # Programas cuyo nombre no lleva el prefijo (MS)/(AS)/(BS).
 PROGRAM_LEVEL_OVERRIDES = {
 	"Marketing and Mass Media Communication": "MS",
+	"MARKETING": "MS",
 }
 
 
