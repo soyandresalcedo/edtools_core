@@ -35,6 +35,10 @@ class AdmissionsWizard {
 			running: false,
 			done: false,
 		};
+		this._guard = (ev) => {
+			ev.preventDefault();
+			ev.returnValue = '';
+		};
 		this.$root = $('<div class="aw"></div>').appendTo(page.main);
 		this.inject_styles();
 		this.load_terms();
@@ -103,9 +107,20 @@ class AdmissionsWizard {
 			return;
 		}
 		if (s.step === 2) {
-			const missing = this.selectedEnrollments().filter((e) => !e.has_plan && !(s.rows[e.program_enrollment] || {}).fee_structure);
-			if (missing.length) {
-				this.hint(__('{0} estudiante(s) sin beca asignada.', [missing.length]));
+			const pending = this.selectedEnrollments().filter((e) => !e.has_plan);
+			const bad = pending.filter((e) => this.rowIssues(e).length);
+			const simulating = pending.some((e) => {
+				const row = s.rows[e.program_enrollment] || {};
+				return row.fee_structure && !s.sims[this.simKey(row)];
+			});
+			if (bad.length) {
+				s.showIssues = true;
+				this.render();
+				this.hint(__('{0} estudiante(s) con datos incompletos: están marcados en rojo.', [bad.length]));
+				return;
+			}
+			if (simulating) {
+				this.hint(__('Espera a que termine la simulación.'));
 				return;
 			}
 		}
@@ -142,6 +157,8 @@ class AdmissionsWizard {
 			s.drafts = data.drafts;
 			s.selected = new Set(data.enrollments.filter((e) => !e.has_plan).map((e) => e.program_enrollment));
 			s.rows = {};
+			s.marked = new Set();
+			s.showIssues = false;
 			s.options = {};
 			s.startDate = null;
 			this.render();
@@ -304,18 +321,21 @@ class AdmissionsWizard {
 	prepare_plans() {
 		const s = this.state;
 		const list = this.selectedEnrollments();
-		const programs = this.programsOf(list).filter((p) => !s.options[p]);
-		const year = (s.termInfo || {}).academic_year;
+		const missing = list.filter((e) => !s.options[e.program]);
+		const byYear = {};
+		missing.forEach((e) => (byYear[e.academic_year] = byYear[e.academic_year] || new Set()).add(e.program));
 		const pDate = s.startDate
 			? Promise.resolve(s.startDate)
 			: this.call('default_start_date', { academic_term: s.term });
-		const pOpts = programs.length
-			? this.call('get_plan_options', { programs, academic_year: year })
-			: Promise.resolve({});
+		const pOpts = Promise.all(
+			Object.entries(byYear).map(([year, programs]) =>
+				this.call('get_plan_options', { programs: [...programs], academic_year: year })
+			)
+		);
 
-		Promise.all([pDate, pOpts]).then(([date, opts]) => {
-			s.startDate = s.startDate || date;
-			Object.assign(s.options, opts || {});
+		Promise.all([pDate, pOpts]).then(([date, optsList]) => {
+			s.startDate = s.startDate || date || frappe.datetime.get_today();
+			(optsList || []).forEach((opts) => Object.assign(s.options, opts || {}));
 			list.forEach((e) => {
 				const opt = s.options[e.program] || { fee_structures: [], default_installments: 12 };
 				const row = s.rows[e.program_enrollment] || {};
@@ -332,6 +352,22 @@ class AdmissionsWizard {
 		return [row.fee_structure, row.installments, row.start_date, this.state.interest].join('|');
 	}
 
+	// Problemas que impiden crear el plan de una fila (vacío = lista).
+	rowIssues(e) {
+		const s = this.state;
+		const row = s.rows[e.program_enrollment] || {};
+		const opt = s.options[e.program];
+		const issues = [];
+		if (!opt || !opt.fee_structures.length) issues.push(__('el programa no tiene becas (Fee Structures) para {0}', [e.academic_year]));
+		else if (!row.fee_structure) issues.push(__('falta la beca'));
+		const n = cint(row.installments);
+		if (n < 1 || n > 60) issues.push(__('las cuotas deben estar entre 1 y 60'));
+		if (!row.start_date) issues.push(__('falta la fecha de inicio'));
+		const sim = row.fee_structure && s.sims[this.simKey(row)];
+		if (sim && sim.error) issues.push(__('no se pudo simular el plan'));
+		return issues;
+	}
+
 	render_plans($body) {
 		const s = this.state;
 		const all = this.selectedEnrollments();
@@ -340,6 +376,7 @@ class AdmissionsWizard {
 			$body.html(`<div class="aw-empty">${__('Cargando becas…')}</div>`);
 			return;
 		}
+		s.marked = s.marked || new Set();
 		const termStart = (s.termInfo || {}).term_start_date;
 
 		let html = `
@@ -358,53 +395,63 @@ class AdmissionsWizard {
 
 		Object.keys(byProgram).forEach((program) => {
 			const opt = s.options[program] || { fee_structures: [], default_installments: 12 };
+			const rows = byProgram[program];
 			const fsOptions = (selected) =>
 				`<option value="">${__('Elegir beca…')}</option>` +
 				opt.fee_structures
 					.map((f) => `<option value="${this.esc(f.name)}" ${f.name === selected ? 'selected' : ''}>${this.esc(f.label)}</option>`)
 					.join('');
 			const mix = {};
-			byProgram[program].forEach((e) => {
+			rows.forEach((e) => {
 				const fs = (s.rows[e.program_enrollment] || {}).fee_structure;
 				const label = fs ? (opt.fee_structures.find((f) => f.name === fs) || {}).label : __('Sin beca');
 				mix[label] = (mix[label] || 0) + 1;
 			});
+			const markedHere = rows.filter((e) => s.marked.has(e.program_enrollment)).length;
+			const p = this.esc(program);
 
-			html += `<div class="aw-card">
+			html += `<div class="aw-card" data-program="${p}">
 				<div class="aw-card-head">
-					<span><b>${this.esc(program)}</b> <span class="text-muted small">${opt.level || ''} · ${__('{0} cuotas por defecto', [opt.default_installments])}</span></span>
+					<span><b>${p}</b> <span class="text-muted small">${opt.level || ''} · ${__('{0} cuotas por defecto', [opt.default_installments])}</span>
+					${opt.level ? '' : `<span class="indicator-pill orange" title="${__('El nombre no indica si es MS, AS o BS; revisa las cuotas.')}">${__('Nivel sin definir')}</span>`}</span>
 					<span class="aw-mix">${Object.entries(mix).map(([k, v]) => `<span class="indicator-pill gray">${v} × ${this.esc(k)}</span>`).join(' ')}</span>
 				</div>`;
 
 			if (!opt.fee_structures.length) {
-				html += `<div class="aw-banner is-danger">${__('No hay Fee Structures validadas para este programa en {0}. Créalas antes de continuar.', [this.esc((s.termInfo || {}).academic_year)])}</div></div>`;
+				html += `<div class="aw-banner is-danger">${__('No hay Fee Structures validadas para este programa en {0}. Créalas antes de continuar o quita a estos estudiantes en el paso 1.', [this.esc(rows[0].academic_year)])}</div></div>`;
 				return;
 			}
 
-			html += `
-				<div class="aw-bulk">
-					<span class="text-muted small">${__('Asignar a los marcados:')}</span>
-					<select class="form-control input-xs aw-bulk-fs" data-program="${this.esc(program)}">${fsOptions('')}</select>
-					<input type="number" min="1" max="60" class="form-control input-xs aw-bulk-inst" placeholder="${__('Cuotas')}" data-program="${this.esc(program)}">
-					<button class="btn btn-default btn-xs aw-bulk-apply" data-program="${this.esc(program)}">${__('Aplicar')}</button>
-				</div>
-				<table class="aw-table">
+			html += markedHere
+				? `<div class="aw-bulk is-active">
+					<b class="small">${__('{0} marcado(s):', [markedHere])}</b>
+					<select class="form-control input-xs aw-bulk-fs">${fsOptions('')}</select>
+					<input type="number" min="1" max="60" class="form-control input-xs aw-bulk-inst" placeholder="${__('Cuotas')}">
+					<button class="btn btn-primary btn-xs aw-bulk-apply">${__('Aplicar a los marcados')}</button>
+					<button class="btn btn-link btn-xs aw-bulk-clear">${__('Quitar marcas')}</button>
+					<span class="text-danger small aw-bulk-error"></span>
+				</div>`
+				: `<div class="aw-bulk text-muted small">${__('Marca varios estudiantes para darles la misma beca o cuotas de una vez.')}</div>`;
+
+			html += `<table class="aw-table">
 					<thead><tr>
-						<th><input type="checkbox" class="aw-mark-all" data-program="${this.esc(program)}"></th>
+						<th><input type="checkbox" class="aw-mark-all" ${markedHere === rows.length ? 'checked' : ''}></th>
 						<th>${__('Estudiante')}</th><th>${__('Beca')}</th><th>${__('Cuotas')}</th><th>${__('Inicio')}</th><th class="text-right">${__('Simulación')}</th>
 					</tr></thead><tbody>`;
 
-			byProgram[program].forEach((e) => {
+			rows.forEach((e) => {
 				const pe = e.program_enrollment;
 				const row = s.rows[pe] || {};
 				const isException = row.installments && +row.installments !== +opt.default_installments;
-				html += `<tr data-pe="${this.esc(pe)}">
-					<td><input type="checkbox" class="aw-mark" data-program="${this.esc(program)}"></td>
-					<td>${this.esc(e.student_name)}</td>
+				const invalid = s.showIssues && this.rowIssues(e).length;
+				html += `<tr data-pe="${this.esc(pe)}" class="${invalid ? 'aw-invalid' : ''}">
+					<td><input type="checkbox" class="aw-mark" ${s.marked.has(pe) ? 'checked' : ''}></td>
+					<td>${this.esc(e.student_name)}${invalid ? `<div class="text-danger small">${this.esc(this.rowIssues(e).join(' · '))}</div>` : ''}</td>
 					<td><select class="form-control input-xs aw-fs">${fsOptions(row.fee_structure)}</select></td>
 					<td><input type="number" min="1" max="60" class="form-control input-xs aw-inst" value="${row.installments || ''}">
 						${isException ? `<span class="text-warning small">${__('Excepción')}</span>` : ''}</td>
-					<td><input type="date" class="form-control input-xs aw-date" value="${this.esc(row.start_date || '')}"></td>
+					<td><input type="date" class="form-control input-xs aw-date" value="${this.esc(row.start_date || '')}">
+						${row.customDate ? `<a class="small aw-date-reset">${__('usar la general')}</a>` : ''}</td>
 					<td class="text-right aw-sim">${this.simCell(row)}</td>
 				</tr>`;
 			});
@@ -420,15 +467,24 @@ class AdmissionsWizard {
 		if (!row.fee_structure) return `<span class="text-muted small">—</span>`;
 		const sim = this.state.sims[this.simKey(row)];
 		if (!sim) return `<span class="text-muted small">${__('Calculando…')}</span>`;
-		if (sim.error) return `<span class="text-danger small">${__('No se pudo simular')}</span>`;
+		if (sim.error) return `<span class="text-danger small">${__('No se pudo simular')}</span> <a class="small aw-sim-retry">${__('reintentar')}</a>`;
 		return `<b>${sim.installments} × ${this.money(sim.installment_amount)}</b>
 			<div class="text-muted small">${__('Total')} ${this.money(sim.total)} · <a class="aw-schedule">${__('ver calendario')}</a></div>`;
 	}
 
 	bind_plans($body) {
 		const s = this.state;
-		const rowOf = (el) => s.rows[$(el).closest('tr').data('pe')];
+		const peOf = (el) => $(el).closest('tr').data('pe');
+		const rowOf = (el) => s.rows[peOf(el)];
+		const programOf = (el) => $(el).closest('.aw-card').data('program');
+		const rowsOf = (program) =>
+			this.selectedEnrollments().filter((e) => !e.has_plan && e.program === program).map((e) => e.program_enrollment);
+
 		$body.find('.aw-start').on('change', (e) => {
+			if (!e.target.value) {
+				e.target.value = s.startDate; // la fecha general no puede quedar vacía
+				return;
+			}
 			s.startDate = e.target.value;
 			Object.values(s.rows).forEach((r) => !r.customDate && (r.start_date = s.startDate));
 			this.render();
@@ -442,36 +498,63 @@ class AdmissionsWizard {
 			this.render();
 		});
 		$body.find('.aw-inst').on('change', (e) => {
-			rowOf(e.target).installments = Math.max(1, cint(e.target.value));
+			rowOf(e.target).installments = cint(e.target.value);
 			this.render();
 		});
 		$body.find('.aw-date').on('change', (e) => {
 			const r = rowOf(e.target);
 			r.start_date = e.target.value || s.startDate;
-			r.customDate = !!e.target.value && e.target.value !== s.startDate;
+			r.customDate = r.start_date !== s.startDate;
+			this.render();
+		});
+		$body.find('.aw-date-reset').on('click', (e) => {
+			const r = rowOf(e.target);
+			r.start_date = s.startDate;
+			r.customDate = false;
+			this.render();
+		});
+		$body.find('.aw-mark').on('change', (e) => {
+			const pe = peOf(e.target);
+			e.target.checked ? s.marked.add(pe) : s.marked.delete(pe);
 			this.render();
 		});
 		$body.find('.aw-mark-all').on('change', (e) => {
-			$body.find(`.aw-mark[data-program="${CSS.escape($(e.target).data('program'))}"]`).prop('checked', e.target.checked);
+			rowsOf(programOf(e.target)).forEach((pe) => (e.target.checked ? s.marked.add(pe) : s.marked.delete(pe)));
+			this.render();
+		});
+		$body.find('.aw-bulk-clear').on('click', (e) => {
+			rowsOf(programOf(e.target)).forEach((pe) => s.marked.delete(pe));
+			this.render();
 		});
 		$body.find('.aw-bulk-apply').on('click', (e) => {
-			const program = $(e.target).data('program');
-			const sel = CSS.escape(program);
-			const fs = $body.find(`.aw-bulk-fs[data-program="${sel}"]`).val();
-			const inst = cint($body.find(`.aw-bulk-inst[data-program="${sel}"]`).val());
-			const $marked = $body.find(`.aw-mark[data-program="${sel}"]:checked`);
-			if (!$marked.length) {
-				frappe.show_alert({ message: __('Marca al menos un estudiante'), indicator: 'orange' });
+			const $card = $(e.target).closest('.aw-card');
+			const fs = $card.find('.aw-bulk-fs').val();
+			const rawInst = $card.find('.aw-bulk-inst').val();
+			const inst = cint(rawInst);
+			const $err = $card.find('.aw-bulk-error');
+			if (!fs && !rawInst) {
+				$err.text(__('Elige una beca o escribe las cuotas.'));
 				return;
 			}
-			$marked.each((_, el) => {
-				const r = rowOf(el);
-				if (fs) r.fee_structure = fs;
-				if (inst > 0) r.installments = inst;
+			if (rawInst && (inst < 1 || inst > 60)) {
+				$err.text(__('Las cuotas deben estar entre 1 y 60.'));
+				return;
+			}
+			const targets = rowsOf(programOf(e.target)).filter((pe) => s.marked.has(pe));
+			targets.forEach((pe) => {
+				if (fs) s.rows[pe].fee_structure = fs;
+				if (inst) s.rows[pe].installments = inst;
+				s.marked.delete(pe);
 			});
+			const label = fs ? $card.find('.aw-bulk-fs option:selected').text() : __('{0} cuotas', [inst]);
+			frappe.show_alert({ message: __('{0} asignado a {1} estudiante(s)', [label, targets.length]), indicator: 'green' });
 			this.render();
 		});
 		$body.find('.aw-schedule').on('click', (e) => this.show_schedule(rowOf(e.target)));
+		$body.find('.aw-sim-retry').on('click', (e) => {
+			delete s.sims[this.simKey(rowOf(e.target))];
+			this.render();
+		});
 	}
 
 	refresh_sims() {
@@ -576,10 +659,10 @@ class AdmissionsWizard {
 		$body.find('.aw-run').on('click', () => this.run());
 		$body.find('.aw-retry').on('click', (e) => {
 			const pe = $(e.currentTarget).data('pe');
-			this.generate(list.filter((x) => x.program_enrollment === pe));
+			this.retry(list.filter((x) => x.program_enrollment === pe));
 		});
 		$body.find('.aw-retry-all').on('click', () => {
-			this.generate(list.filter((x) => (s.results[x.program_enrollment] || {}).status === 'error'));
+			this.retry(list.filter((x) => (s.results[x.program_enrollment] || {}).status === 'error'));
 		});
 		$body.find('.aw-download-all').on('click', () => {
 			const fees = Object.values(s.results).map((r) => r.ea_fee).filter(Boolean);
@@ -606,24 +689,54 @@ class AdmissionsWizard {
 		s.running = true;
 		s.results = {};
 		this.render();
+		window.addEventListener('beforeunload', this._guard);
+		let summary;
 		try {
-			await this.call('ensure_groups', {
+			summary = await this.call('ensure_groups', {
 				academic_term: s.term,
 				program_enrollments: list.map((e) => e.program_enrollment),
 			});
-			list.forEach((e) => (e.in_group = true));
 		} catch (err) {
 			s.running = false;
+			window.removeEventListener('beforeunload', this._guard);
 			this.render();
 			return;
 		}
+		// Si un grupo no se pudo guardar, sus estudiantes no pueden tener plan (el plan cuelga del grupo).
+		const failedGroups = {};
+		(summary || []).filter((g) => g.error).forEach((g) => (failedGroups[g.group] = g.error));
+		const ready = [];
+		list.forEach((e) => {
+			if (failedGroups[e.group]) {
+				s.results[e.program_enrollment] = { status: 'error', detail: __('No se pudo guardar el grupo: {0}', [failedGroups[e.group]]), group: true };
+			} else {
+				e.in_group = true;
+				ready.push(e);
+			}
+		});
 
-		await this.generate(list, true);
+		await this.generate(ready, true);
+	}
+
+	async retry(list) {
+		const s = this.state;
+		const needGroup = list.filter((e) => (s.results[e.program_enrollment] || {}).group);
+		if (needGroup.length) {
+			const summary = await this.call('ensure_groups', {
+				academic_term: s.term,
+				program_enrollments: needGroup.map((e) => e.program_enrollment),
+			});
+			const failed = new Set((summary || []).filter((g) => g.error).map((g) => g.group));
+			list = list.filter((e) => !failed.has(e.group));
+			if (failed.size) frappe.show_alert({ message: __('Hay grupos que siguen sin poder guardarse'), indicator: 'red' });
+		}
+		await this.generate(list);
 	}
 
 	async generate(list, fromRun) {
 		const s = this.state;
 		if (!fromRun) {
+			window.addEventListener('beforeunload', this._guard);
 			s.running = true;
 			list.forEach((e) => delete s.results[e.program_enrollment]);
 			this.render();
@@ -640,12 +753,13 @@ class AdmissionsWizard {
 				});
 				if (s.results[e.program_enrollment].ea_fee) e.has_plan = true;
 			} catch (err) {
-				s.results[e.program_enrollment] = { status: 'error', detail: __('Revisa el Error Log') };
+				s.results[e.program_enrollment] = { status: 'error', detail: __('Error de conexión. Reintenta.') };
 			}
 			this.render();
 		}
 		s.running = false;
 		s.done = true;
+		window.removeEventListener('beforeunload', this._guard);
 		this.render();
 	}
 
@@ -680,6 +794,10 @@ class AdmissionsWizard {
 			.aw-details summary { cursor: pointer; font-size: var(--text-sm); color: var(--text-muted); margin-top: 6px; }
 			.aw-bulk { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 			.aw-bulk select { width: 180px; } .aw-bulk input { width: 90px; }
+			.aw-bulk.is-active { background: var(--control-bg); border-radius: var(--border-radius-md); padding: 8px 10px; }
+			.aw-bulk { min-height: 32px; }
+			.aw-invalid td { background: var(--bg-red); }
+			.aw-date-reset, .aw-sim-retry { cursor: pointer; display: block; }
 			.aw-table { width: 100%; font-size: var(--text-sm); }
 			.aw-table th { color: var(--text-muted); font-weight: normal; padding: 6px; border-bottom: 1px solid var(--border-color); }
 			.aw-table td { padding: 6px; border-bottom: 1px solid var(--border-color); vertical-align: middle; }

@@ -196,9 +196,16 @@ def ensure_groups(academic_term: str, program_enrollments):
 				},
 			)
 			added += 1
-		if created or added:
-			sg.save(ignore_permissions=True)
-		summary.append({"group": group_name, "created": created, "added": added})
+		try:
+			if created or added:
+				sg.save(ignore_permissions=True)
+			frappe.db.commit()
+			summary.append({"group": group_name, "created": created, "added": added})
+		except Exception as e:
+			frappe.db.rollback()
+			frappe.log_error(title=f"Asistente de admisiones - grupo {group_name}", message=frappe.get_traceback())
+			frappe.clear_messages()
+			summary.append({"group": group_name, "error": _clean_error(e), "students": [m.name for m in members]})
 
 	frappe.db.commit()
 	return summary
@@ -303,10 +310,33 @@ def generate_plan(program_enrollment: str, fee_structure: str, installments, sta
 	"""Crea el plan de un estudiante (Fee Schedule + Fees). Se llama una vez por estudiante
 	desde la página para mostrar progreso y no pasar el timeout de Gunicorn con planes de 40 cuotas."""
 	frappe.only_for(("System Manager", "Education Manager", "Accounts User"))
+	try:
+		return _generate_plan(program_enrollment, fee_structure, installments, start_date, apply_interest)
+	except Exception as e:
+		frappe.db.rollback()
+		frappe.log_error(title=f"Asistente de admisiones - {program_enrollment}", message=frappe.get_traceback())
+		frappe.db.commit()  # conservar el Error Log
+		frappe.clear_messages()
+		return {"status": "error", "detail": _clean_error(e)}
+
+
+def _clean_error(e) -> str:
+	from frappe.utils import strip_html
+
+	return strip_html(cstr(e)).strip()[:300] or _("Error inesperado. Revisa el Error Log.")
+
+
+def _generate_plan(program_enrollment, fee_structure, installments, start_date, apply_interest):
+	if not fee_structure:
+		frappe.throw(_("Falta la beca."))
+	if not start_date:
+		frappe.throw(_("Falta la fecha de inicio."))
+	if not 1 <= cint(installments) <= 60:
+		frappe.throw(_("Las cuotas deben estar entre 1 y 60."))
 	pe = frappe.db.get_value(
 		"Program Enrollment",
 		program_enrollment,
-		["name", "student", "program", "academic_term", "docstatus"],
+		["name", "student", "program", "academic_year", "academic_term", "docstatus"],
 		as_dict=True,
 	)
 	if not pe or pe.docstatus != 1:
@@ -314,9 +344,15 @@ def generate_plan(program_enrollment: str, fee_structure: str, installments, sta
 	if _has_plan(pe.name):
 		return {"status": "skipped", "detail": _("Ya tiene plan"), "ea_fee": first_fee(pe.name)}
 
-	fs_program = frappe.db.get_value("Fee Structure", fee_structure, "program")
-	if fs_program != pe.program:
+	fs = frappe.db.get_value("Fee Structure", fee_structure, ["program", "academic_year", "docstatus"], as_dict=True)
+	if not fs or fs.docstatus != 1:
+		frappe.throw(_("La beca {0} no existe o no está validada.").format(fee_structure))
+	if fs.program != pe.program:
 		frappe.throw(_("La beca {0} no corresponde al programa {1}.").format(fee_structure, pe.program))
+	if fs.academic_year != pe.academic_year:
+		frappe.throw(
+			_("La beca es del año {0} y la matrícula del año {1}.").format(fs.academic_year, pe.academic_year)
+		)
 
 	group = group_name_for(pe.program, pe.academic_term)
 	if not frappe.db.exists("Student Group Student", {"parent": group, "student": pe.student, "active": 1}):
