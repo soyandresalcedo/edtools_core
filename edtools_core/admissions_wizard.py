@@ -35,7 +35,15 @@ def _parse(val):
 	return val
 
 
+# Programas cuyo nombre no lleva el prefijo (MS)/(AS)/(BS).
+PROGRAM_LEVEL_OVERRIDES = {
+	"Marketing and Mass Media Communication": "MS",
+}
+
+
 def _program_level(program: str) -> str | None:
+	if program in PROGRAM_LEVEL_OVERRIDES:
+		return PROGRAM_LEVEL_OVERRIDES[program]
 	text = cstr(program).lower()
 	if text.startswith("(ms)") or "master" in text or "mba" in text or "maestr" in text:
 		return "MS"
