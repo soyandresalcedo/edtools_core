@@ -3,6 +3,7 @@
 // Backend: edtools_core/admissions_wizard.py
 
 const AW_API = 'edtools_core.admissions_wizard.';
+const AW_CAPITAL_TYPES = ['Capital', 'Capital+Graduacion', 'Mixta'];
 const AW_STEPS = [__('Cohorte'), __('Grupos'), __('Planes'), __('Crear y descargar EA')];
 
 frappe.pages['admissions-wizard'].on_page_load = function (wrapper) {
@@ -349,7 +350,7 @@ class AdmissionsWizard {
 	}
 
 	simKey(row) {
-		return [row.fee_structure, row.installments, row.start_date, this.state.interest].join('|');
+		return [row.fee_structure, row.installments, row.start_date, row.legacy ? 'L' : this.state.interest].join('|');
 	}
 
 	// Problemas que impiden crear el plan de una fila (vacío = lista).
@@ -377,6 +378,16 @@ class AdmissionsWizard {
 			return;
 		}
 		s.marked = s.marked || new Set();
+		let stale = 0;
+		Object.values(s.rows).forEach((r) => {
+			if (r.custom && r.custom.key !== this.simKey(r)) {
+				delete r.custom;
+				stale++;
+			}
+		});
+		if (stale) {
+			frappe.show_alert({ message: __('{0} calendario(s) personalizado(s) se descartaron porque cambió la beca, las cuotas, la fecha o el interés.', [stale]), indicator: 'orange' }, 7);
+		}
 		const termStart = (s.termInfo || {}).term_start_date;
 
 		let html = `
@@ -384,6 +395,7 @@ class AdmissionsWizard {
 				<label>${__('Inicio del plan (Inscripción)')}
 					<input type="date" class="form-control input-sm aw-start" value="${this.esc(s.startDate)}"></label>
 				<label class="aw-check"><input type="checkbox" class="aw-interest" ${s.interest ? 'checked' : ''}> ${__('Con interés')}</label>
+				<label class="aw-check" title="${__('TyE y Graduación repartidos en las cuotas, sin interés')}"><input type="checkbox" class="aw-legacy-toggle" ${s.legacyEnabled ? 'checked' : ''}> ${__('Planes antiguos')}</label>
 				<div class="text-muted small aw-grow">${__('Por defecto 2 meses antes del inicio del periodo ({0}): Inscripción, Traducción y equivalencia, y la cuota 1 cae al iniciar clases. Cámbiala para planes atrasados.', [frappe.datetime.str_to_user(termStart)])}</div>
 			</div>`;
 		if (all.length > list.length) {
@@ -427,6 +439,7 @@ class AdmissionsWizard {
 					<b class="small">${__('{0} marcado(s):', [markedHere])}</b>
 					<select class="form-control input-xs aw-bulk-fs">${fsOptions('')}</select>
 					<input type="number" min="1" max="60" class="form-control input-xs aw-bulk-inst" placeholder="${__('Cuotas')}">
+					${s.legacyEnabled ? `<select class="form-control input-xs aw-bulk-plan"><option value="">${__('Tipo de plan…')}</option><option value="0">${__('Plan actual')}</option><option value="1">${__('Plan antiguo')}</option></select>` : ''}
 					<button class="btn btn-primary btn-xs aw-bulk-apply">${__('Aplicar a los marcados')}</button>
 					<button class="btn btn-link btn-xs aw-bulk-clear">${__('Quitar marcas')}</button>
 					<span class="text-danger small aw-bulk-error"></span>
@@ -436,7 +449,8 @@ class AdmissionsWizard {
 			html += `<table class="aw-table">
 					<thead><tr>
 						<th><input type="checkbox" class="aw-mark-all" ${markedHere === rows.length ? 'checked' : ''}></th>
-						<th>${__('Estudiante')}</th><th>${__('Beca')}</th><th>${__('Cuotas')}</th><th>${__('Inicio')}</th><th class="text-right">${__('Simulación')}</th>
+						<th>${__('Estudiante')}</th><th>${__('Beca')}</th><th>${__('Cuotas')}</th><th>${__('Inicio')}</th>
+						${s.legacyEnabled ? `<th>${__('Antiguo')}</th>` : ''}<th class="text-right">${__('Simulación')}</th>
 					</tr></thead><tbody>`;
 
 			rows.forEach((e) => {
@@ -452,6 +466,7 @@ class AdmissionsWizard {
 						${isException ? `<span class="text-warning small">${__('Excepción')}</span>` : ''}</td>
 					<td><input type="date" class="form-control input-xs aw-date" value="${this.esc(row.start_date || '')}">
 						${row.customDate ? `<a class="small aw-date-reset">${__('usar la general')}</a>` : ''}</td>
+					${s.legacyEnabled ? `<td><input type="checkbox" class="aw-legacy" ${row.legacy ? 'checked' : ''} title="${__('Plan antiguo')}"></td>` : ''}
 					<td class="text-right aw-sim">${this.simCell(row)}</td>
 				</tr>`;
 			});
@@ -468,8 +483,16 @@ class AdmissionsWizard {
 		const sim = this.state.sims[this.simKey(row)];
 		if (!sim) return `<span class="text-muted small">${__('Calculando…')}</span>`;
 		if (sim.error) return `<span class="text-danger small">${__('No se pudo simular')}</span> <a class="small aw-sim-retry">${__('reintentar')}</a>`;
+		const custom = this.customOf(row);
+		if (custom) {
+			const total = custom.reduce((t, r) => t + flt(r.amount), 0);
+			const n = custom.filter((r) => AW_CAPITAL_TYPES.includes(r.type)).length;
+			return `<span class="indicator-pill blue">${__('Personalizado')}</span> <b>${__('{0} cuotas', [n])}</b>
+				<div class="text-muted small">${__('Total')} ${this.money(total)} · <a class="aw-schedule">${__('editar calendario')}</a></div>`;
+		}
+		const note = row.legacy ? ` · ${__('antiguo')}` : '';
 		return `<b>${sim.installments} × ${this.money(sim.installment_amount)}</b>
-			<div class="text-muted small">${__('Total')} ${this.money(sim.total)} · <a class="aw-schedule">${__('ver calendario')}</a></div>`;
+			<div class="text-muted small">${__('Total')} ${this.money(sim.total)}${note} · <a class="aw-schedule">${__('ver / editar calendario')}</a></div>`;
 	}
 
 	bind_plans($body) {
@@ -491,6 +514,15 @@ class AdmissionsWizard {
 		});
 		$body.find('.aw-interest').on('change', (e) => {
 			s.interest = e.target.checked ? 1 : 0;
+			this.render();
+		});
+		$body.find('.aw-legacy-toggle').on('change', (e) => {
+			s.legacyEnabled = e.target.checked;
+			if (!s.legacyEnabled) Object.values(s.rows).forEach((r) => (r.legacy = false));
+			this.render();
+		});
+		$body.find('.aw-legacy').on('change', (e) => {
+			rowOf(e.target).legacy = e.target.checked;
 			this.render();
 		});
 		$body.find('.aw-fs').on('change', (e) => {
@@ -529,11 +561,12 @@ class AdmissionsWizard {
 		$body.find('.aw-bulk-apply').on('click', (e) => {
 			const $card = $(e.target).closest('.aw-card');
 			const fs = $card.find('.aw-bulk-fs').val();
+			const plan = $card.find('.aw-bulk-plan').val() || '';
 			const rawInst = $card.find('.aw-bulk-inst').val();
 			const inst = cint(rawInst);
 			const $err = $card.find('.aw-bulk-error');
-			if (!fs && !rawInst) {
-				$err.text(__('Elige una beca o escribe las cuotas.'));
+			if (!fs && !rawInst && !plan) {
+				$err.text(__('Elige una beca, las cuotas o el tipo de plan.'));
 				return;
 			}
 			if (rawInst && (inst < 1 || inst > 60)) {
@@ -544,9 +577,14 @@ class AdmissionsWizard {
 			targets.forEach((pe) => {
 				if (fs) s.rows[pe].fee_structure = fs;
 				if (inst) s.rows[pe].installments = inst;
+				if (plan) s.rows[pe].legacy = plan === '1';
 				s.marked.delete(pe);
 			});
-			const label = fs ? $card.find('.aw-bulk-fs option:selected').text() : __('{0} cuotas', [inst]);
+			const label = [
+				fs && $card.find('.aw-bulk-fs option:selected').text(),
+				inst && __('{0} cuotas', [inst]),
+				plan && $card.find('.aw-bulk-plan option:selected').text(),
+			].filter(Boolean).join(', ');
 			frappe.show_alert({ message: __('{0} asignado a {1} estudiante(s)', [label, targets.length]), indicator: 'green' });
 			this.render();
 		});
@@ -570,6 +608,7 @@ class AdmissionsWizard {
 		Object.entries(pending).forEach(([key, row]) => {
 			s.sims[key] = null;
 			this.call('simulate_plan', {
+				legacy: row.legacy ? 1 : 0,
 				fee_structure: row.fee_structure,
 				installments: row.installments,
 				start_date: row.start_date,
@@ -591,19 +630,111 @@ class AdmissionsWizard {
 		});
 	}
 
+	// Calendario personalizado vigente de una fila (o null).
+	customOf(row) {
+		return row && row.custom && row.custom.key === this.simKey(row) ? row.custom.schedule : null;
+	}
+
 	show_schedule(row) {
 		const sim = this.state.sims[this.simKey(row)];
 		if (!sim) return;
-		const d = new frappe.ui.Dialog({ title: __('Calendario · {0}', [sim.beca]), size: 'large' });
-		d.$body.html(`
-			<div class="aw-metrics">
-				${this.metric(__('Costo de programa'), this.money(sim.program_cost))}
-				${this.metric(__('Beca'), this.money(sim.discount))}
-				${this.metric(__('Cuota'), this.money(sim.installment_amount))}
-				${this.metric(__('Total del plan'), this.money(sim.total))}
-			</div>
-			<table class="aw-table"><thead><tr><th>${__('Concepto')}</th><th>${__('Vence')}</th><th class="text-right">${__('Monto')}</th></tr></thead>
-			<tbody>${sim.schedule.map((r) => `<tr><td>${this.esc(r.term)}</td><td>${frappe.datetime.str_to_user(r.due_date)}</td><td class="text-right">${this.money(r.amount)}</td></tr>`).join('')}</tbody></table>`);
+		const pe = Object.keys(this.state.rows).find((k) => this.state.rows[k] === row);
+		const student = (this.state.enrollments.find((e) => e.program_enrollment === pe) || {}).student_name || '';
+		const source = this.customOf(row) || sim.schedule;
+		// Copia de trabajo: _on = se crea; _grad = la cuota final incluye graduación.
+		const work = sim.schedule.map((base, i) => {
+			const cur = source.find((r) => r._idx === i);
+			const r = JSON.parse(JSON.stringify(cur || base));
+			r._idx = i;
+			r._on = !this.customOf(row) || !!cur;
+			r._gradBase = flt(base.graduacion_amount);
+			r._grad = r.type === 'Capital+Graduacion' ? flt(r.graduacion_amount) > 0 : false;
+			return r;
+		});
+
+		const d = new frappe.ui.Dialog({ title: __('Calendario · {0} · {1}', [sim.beca, student]), size: 'large' });
+		const draw = () => {
+			const on = work.filter((r) => r._on);
+			const total = on.reduce((t, r) => t + flt(r.amount), 0);
+			const cuotas = on.filter((r) => AW_CAPITAL_TYPES.includes(r.type)).length;
+			d.$body.html(`
+				<div class="aw aw-editor">
+				<div class="aw-metrics">
+					${this.metric(__('Costo de programa'), this.money(sim.program_cost))}
+					${this.metric(__('Beca'), this.money(sim.discount))}
+					${this.metric(__('Cuotas'), cuotas)}
+					${this.metric(__('Total del plan'), this.money(total), Math.abs(total - sim.total) > 0.009 ? 'warning' : '')}
+				</div>
+				${Math.abs(total - sim.total) > 0.009 ? `<p class="small text-warning">${__('El total cambió {0} respecto al plan calculado ({1}).', [this.money(total - sim.total), this.money(sim.total)])}</p>` : ''}
+				<p class="text-muted small">${__('Desmarca una fila para no crearla (por ejemplo, si no paga Traducción y equivalencia). Puedes cambiar fechas y montos.')}</p>
+				<table class="aw-table"><thead><tr><th></th><th>${__('Concepto')}</th><th>${__('Vence')}</th><th class="text-right">${__('Monto')}</th></tr></thead>
+				<tbody>${work
+					.map(
+						(r, i) => `<tr data-i="${i}" class="${r._on ? '' : 'aw-off'}">
+						<td><input type="checkbox" class="aw-ed-on" ${r._on ? 'checked' : ''}></td>
+						<td>${this.esc(r.term)}${r._gradBase ? `<label class="aw-check small"><input type="checkbox" class="aw-ed-grad" ${r._grad ? 'checked' : ''} ${r._on ? '' : 'disabled'}> ${__('incluye graduación {0}', [this.money(r._gradBase)])}</label>` : ''}
+							${r.type === 'Mixta' ? `<div class="text-muted small">${__('Capital + TyE + Graduación')}</div>` : ''}</td>
+						<td><input type="date" class="form-control input-xs aw-ed-date" value="${this.esc(r.due_date)}" ${r._on ? '' : 'disabled'}></td>
+						<td class="text-right"><input type="number" step="0.01" min="0.01" class="form-control input-xs aw-ed-amount text-right" value="${flt(r.amount, 2)}" ${r._on ? '' : 'disabled'}></td>
+					</tr>`
+					)
+					.join('')}</tbody></table>
+				<div class="aw-footer">
+					<button class="btn btn-default btn-sm aw-ed-reset">${__('Restablecer')}</button>
+					<span class="text-danger small aw-ed-error"></span>
+					<button class="btn btn-primary btn-sm aw-ed-save">${__('Guardar calendario')}</button>
+				</div></div>`);
+			const at = (el) => work[+$(el).closest('tr').data('i')];
+			d.$body.find('.aw-ed-on').on('change', (e) => {
+				at(e.target)._on = e.target.checked;
+				draw();
+			});
+			d.$body.find('.aw-ed-grad').on('change', (e) => {
+				const r = at(e.target);
+				r._grad = e.target.checked;
+				r.amount = flt(flt(r.amount) + (r._grad ? r._gradBase : -r._gradBase), 2);
+				draw();
+			});
+			d.$body.find('.aw-ed-date').on('change', (e) => (at(e.target).due_date = e.target.value));
+			d.$body.find('.aw-ed-amount').on('change', (e) => {
+				at(e.target).amount = flt(e.target.value, 2);
+				draw();
+			});
+			d.$body.find('.aw-ed-reset').on('click', () => {
+				delete row.custom;
+				d.hide();
+				this.render();
+				frappe.show_alert({ message: __('Calendario restablecido'), indicator: 'blue' });
+			});
+			d.$body.find('.aw-ed-save').on('click', () => {
+				const $err = d.$body.find('.aw-ed-error');
+				const on = work.filter((r) => r._on);
+				const bad = on.find((r) => !r.due_date || !(flt(r.amount) > 0) || (r._grad && flt(r.amount) <= r._gradBase));
+				if (bad) {
+					$err.text(__('Revisa «{0}»: necesita fecha y un monto mayor que cero (y mayor que la graduación si la incluye).', [bad.term]));
+					return;
+				}
+				if (!on.some((r) => AW_CAPITAL_TYPES.includes(r.type))) {
+					$err.text(__('El plan debe tener al menos una cuota.'));
+					return;
+				}
+				const schedule = on.map((r) => {
+					const out = Object.assign({}, r);
+					if (r.type === 'Capital+Graduacion') out.graduacion_amount = r._grad ? r._gradBase : 0;
+					['_on', '_grad', '_gradBase'].forEach((k) => delete out[k]);
+					return out;
+				});
+				const unchanged =
+					schedule.length === sim.schedule.length &&
+					schedule.every((r, i) => r.due_date === sim.schedule[i].due_date && Math.abs(flt(r.amount) - flt(sim.schedule[i].amount)) < 0.005);
+				if (unchanged) delete row.custom;
+				else row.custom = { key: this.simKey(row), schedule };
+				d.hide();
+				this.render();
+				frappe.show_alert({ message: unchanged ? __('Sin cambios') : __('Calendario personalizado guardado'), indicator: 'green' });
+			});
+		};
+		draw();
 		d.show();
 	}
 
@@ -644,7 +775,10 @@ class AdmissionsWizard {
 			const r = s.results[e.program_enrollment];
 			const row = s.rows[e.program_enrollment] || {};
 			const opt = s.options[e.program] || { fee_structures: [] };
-			const beca = (opt.fee_structures.find((f) => f.name === row.fee_structure) || {}).label || '—';
+			const beca =
+				((opt.fee_structures.find((f) => f.name === row.fee_structure) || {}).label || '—') +
+				(row.legacy ? ` · ${__('antiguo')}` : '') +
+				(this.customOf(row) ? ` · ${__('personalizado')}` : '');
 			let status = `<span class="indicator-pill gray">${__('Pendiente')}</span>`;
 			if (r && r.status === 'ok') status = `<span class="indicator-pill green">${__('Plan creado')}</span>`;
 			if (r && r.status === 'skipped') status = `<span class="indicator-pill blue">${__('Ya tenía plan')}</span>`;
@@ -745,6 +879,8 @@ class AdmissionsWizard {
 			const row = s.rows[e.program_enrollment] || {};
 			try {
 				s.results[e.program_enrollment] = await this.call('generate_plan', {
+					legacy: row.legacy ? 1 : 0,
+					schedule: this.customOf(row) ? JSON.stringify(this.customOf(row)) : null,
 					program_enrollment: e.program_enrollment,
 					fee_structure: row.fee_structure,
 					installments: row.installments,
@@ -811,6 +947,10 @@ class AdmissionsWizard {
 			.aw-table td select { min-width: 140px; }
 			.aw-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 8px; }
 			.aw-schedule { cursor: pointer; }
+			.aw-off td { opacity: 0.45; }
+			.aw-off td:first-child { opacity: 1; }
+			.aw-editor { max-width: none; padding: 0; }
+			.aw-editor .aw-table td input[type=number] { width: 110px; }
 			@media (max-width: 768px) { .aw-stepper { grid-template-columns: repeat(2, minmax(0, 1fr)); } .aw-table { display: block; overflow-x: auto; } }
 		</style>`).appendTo(document.head);
 	}

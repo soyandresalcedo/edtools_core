@@ -2080,7 +2080,15 @@ def generate_batch_records(student_group, fee_structure, components, schedule_da
                 row_amount = flt(row.get("amount"))
                 term_txt = _coerce_financial_tool_text(row.get("term"))
 
-                if row_type == "Inscripcion":
+                if row_type == "Mixta":
+                    # Plan antiguo (asistente de admisiones): una cuota con varias categorías.
+                    for part in row.get("parts") or []:
+                        fee.append("components", {
+                            "fees_category": _coerce_financial_tool_text(part.get("fees_category")),
+                            "description": _coerce_financial_tool_text(part.get("description")) or term_txt or None,
+                            "amount": flt(part.get("amount"), 2),
+                        })
+                elif row_type == "Inscripcion":
                     fee.append("components", {"fees_category": CAT_INSCRIPCION, "description": "application fee", "amount": row_amount})
                 elif row_type == "Traduccion":
                     fee.append("components", {"fees_category": CAT_TRADUCCION, "description": "Translation and equivalence", "amount": row_amount})
