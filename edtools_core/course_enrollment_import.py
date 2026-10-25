@@ -347,12 +347,55 @@ def get_unique_program_enrollment(student: str, academic_year: str) -> tuple[str
 	return pe.get("name"), pe.get("academic_year"), None
 
 
+def get_enrollment_block_reason(student: str) -> str | None:
+	"""
+	Motivo por el que el estudiante no se puede matricular, o None si puede.
+
+	Misma regla que validations.enrollment.validate_student_status (hook de Course
+	Enrollment), pero sin lanzar excepción: el import la usa antes de agregar al
+	estudiante al grupo, para no dejar en el grupo a quien no quedará matriculado.
+	"""
+	data = frappe.db.get_value(
+		"Student", student, ["enabled", "student_status", "student_name"], as_dict=True
+	)
+	if not data:
+		return _("No se encontró el estudiante {0}.").format(student)
+	display_name = (data.student_name or student or "").strip() or student
+	if not data.enabled:
+		return _("No se puede matricular a {0}: la cuenta del estudiante está deshabilitada.").format(
+			display_name
+		)
+	status = data.student_status or "Active"
+	if status != "Active":
+		return _(
+			"No se puede matricular a {0}: el estado del estudiante es {1}. "
+			"Solo se permite matricular estudiantes en estado Activo."
+		).format(display_name, status)
+	return None
+
+
 def process_enrollments(
 	file_path: str,
 	default_enrollment_date: str | None = None,
 	progress_callback: Callable | None = None,
+	commit_each_row: bool = False,
 ) -> dict[str, Any]:
+	"""
+	Procesa el archivo de matrículas.
+
+	commit_each_row=True (lo usa el trabajo en segundo plano): guarda en la base después
+	de cada grupo y de cada matrícula, y revierte solo la fila que falla. Así un corte a
+	mitad del archivo no deja matrículas a medias y volver a correrlo salta lo ya hecho.
+	"""
 	results: list[dict[str, Any]] = []
+
+	def _commit():
+		if commit_each_row:
+			frappe.db.commit()
+
+	def _rollback():
+		if commit_each_row:
+			frappe.db.rollback()
 
 	def _add_result(
 		*,
@@ -413,6 +456,7 @@ def process_enrollments(
 	default_date = coerced_default or nowdate()
 
 	groups: dict[tuple[str, str, str], list[tuple[int, str, str, str]]] = defaultdict(list)
+	block_reasons: dict[str, str | None] = {}
 	for i, row in enumerate(data_rows):
 		row_num = i + 2
 		semester = (row.get("SEMESTER") or "").strip().replace(" ", "")
@@ -457,6 +501,24 @@ def process_enrollments(
 				academic_term=term_name,
 				status="ErrorValidacion",
 				detail=msg,
+			)
+			continue
+		# Quien no está Activo (o está deshabilitado) no se matricula: se reporta aquí y no
+		# entra al grupo de estudiantes ni a Moodle.
+		if student_name not in block_reasons:
+			block_reasons[student_name] = get_enrollment_block_reason(student_name)
+		block_msg = block_reasons[student_name]
+		if block_msg:
+			out["errors"].append({"row": row_num, "message": block_msg})
+			_add_result(
+				row=row_num,
+				student_id=student_raw,
+				student=student_name,
+				course_input=course_code,
+				course=course_frappe,
+				academic_term=term_name,
+				status="ErrorEstado",
+				detail=block_msg,
 			)
 			continue
 		enroll_date = coerce_enrollment_date_str(row.get("ENROLLMENT DATE")) or default_date
@@ -512,7 +574,9 @@ def process_enrollments(
 				moodle_course_id,
 				log_context="Course Enrollment Import",
 			)
+			_commit()
 		except Exception as e:
+			_rollback()
 			for row_num, __s, __raw, __d in rows:
 				msg = _("Error Moodle/grupo: {0}").format(str(e)[:200])
 				out["errors"].append(
@@ -612,6 +676,7 @@ def process_enrollments(
 					title="Course Enrollment Import — Moodle",
 					message=f"student={student_name} course={course_frappe}: {moodle_err}",
 				)
+				_commit()
 				continue
 
 			try:
@@ -632,6 +697,9 @@ def process_enrollments(
 				enrollment = frappe.get_doc(ce_props)
 				enrollment.insert(ignore_permissions=True)
 				enrollment.submit()
+				# insert + submit se guardan juntos: si el proceso muere antes, no queda
+				# una matrícula en borrador.
+				_commit()
 				total_ok += 1
 				detail = enrollment.name
 				if pe_year and str(pe_year) != str(year):
@@ -647,6 +715,9 @@ def process_enrollments(
 					detail=detail,
 				)
 			except Exception as e:
+				# Revertir solo esta fila (en Postgres, además, la transacción queda abortada
+				# tras un error y las filas siguientes fallarían).
+				_rollback()
 				msg = _plain_user_message_from_exception(e)
 				out["errors"].append(
 					{"row": row_num, "message": msg}
@@ -665,6 +736,7 @@ def process_enrollments(
 					title="Course Enrollment Import — CE",
 					message=f"student={student_name} course={course_frappe}: {e}",
 				)
+				_commit()
 
 	out["summary"]["course_enrollments_created"] = total_ok
 	out["summary"]["duplicates"] = total_dup
