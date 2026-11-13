@@ -72,6 +72,32 @@ def patch_education_api():
 		pass
 
 
+def _get_course_equivalences(program, student):
+	"""{curso del plan: [cursos equivalentes]} activos para el programa y el estudiante.
+
+	Primero las equivalencias del estudiante, luego las generales (sin estudiante).
+	"""
+	if not frappe.db.table_exists("EdTools Course Equivalence"):
+		return {}
+	rows = frappe.get_all(
+		"EdTools Course Equivalence",
+		filters={"program": program, "enabled": 1},
+		fields=["course", "equivalent_course", "student"],
+		order_by="creation asc",
+		ignore_permissions=True,
+	)
+	out = {}
+	for own in (True, False):
+		for r in rows:
+			is_own = bool(r.student) and r.student == student
+			is_general = not r.student
+			if (own and is_own) or (not own and is_general):
+				lst = out.setdefault(r.course, [])
+				if r.equivalent_course not in lst:
+					lst.append(r.equivalent_course)
+	return out
+
+
 @frappe.whitelist()
 def get_student_curriculum(student, program_enrollment=None):
 	"""Devuelve el pensum del estudiante para un Program Enrollment: lista de cursos con estado (completed, in_progress, upcoming)."""
@@ -164,6 +190,7 @@ def get_student_curriculum(student, program_enrollment=None):
 		c = ce.get("course")
 		if c and c not in enrollments_by_course:
 			enrollments_by_course[c] = ce
+	equivalences = _get_course_equivalences(program_name, student)
 	courses_out = []
 	summary = {"completed": 0, "in_progress": 0, "upcoming": 0}
 	for row in program_doc.courses:
@@ -172,6 +199,14 @@ def get_student_curriculum(student, program_enrollment=None):
 		required = 1 if row.get("required") else 0
 		ar = results_by_course.get(course_id)
 		ce = enrollments_by_course.get(course_id)
+		equivalent_course = None
+		if not ar:
+			# Equivalencia autorizada: el curso del plan se da por aprobado con la nota del equivalente.
+			for eq_course in equivalences.get(course_id, []):
+				if results_by_course.get(eq_course):
+					ar = results_by_course[eq_course]
+					equivalent_course = eq_course
+					break
 		if ar:
 			status = "completed"
 			summary["completed"] += 1
@@ -206,6 +241,7 @@ def get_student_curriculum(student, program_enrollment=None):
 			"maximum_score": maximum_score,
 			"academic_term": academic_term,
 			"enrollment_date": enrollment_date,
+			"equivalent_course": equivalent_course,
 		})
 	summary["total"] = len(courses_out)
 	return {
