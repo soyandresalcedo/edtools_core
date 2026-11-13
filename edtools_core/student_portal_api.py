@@ -75,23 +75,33 @@ def patch_education_api():
 def _get_course_equivalences(program, student):
 	"""{curso del plan: [cursos equivalentes]} activos para el programa y el estudiante.
 
-	Primero las equivalencias del estudiante, luego las generales (sin estudiante).
+	Una equivalencia aplica si su tabla de estudiantes está vacía (general) o incluye al estudiante.
+	Primero las que nombran al estudiante, luego las generales.
 	"""
 	if not frappe.db.table_exists("EdTools Course Equivalence"):
 		return {}
 	rows = frappe.get_all(
 		"EdTools Course Equivalence",
 		filters={"program": program, "enabled": 1},
-		fields=["course", "equivalent_course", "student"],
+		fields=["name", "course", "equivalent_course"],
 		order_by="creation asc",
 		ignore_permissions=True,
 	)
+	if not rows:
+		return {}
+	students_by_eq = {}
+	for r in frappe.get_all(
+		"EdTools Course Equivalence Student",
+		filters={"parenttype": "EdTools Course Equivalence", "parent": ("in", [r.name for r in rows])},
+		fields=["parent", "student"],
+		ignore_permissions=True,
+	):
+		students_by_eq.setdefault(r.parent, set()).add(r.student)
 	out = {}
 	for own in (True, False):
 		for r in rows:
-			is_own = bool(r.student) and r.student == student
-			is_general = not r.student
-			if (own and is_own) or (not own and is_general):
+			listed = students_by_eq.get(r.name)
+			if (own and listed and student in listed) or (not own and not listed):
 				lst = out.setdefault(r.course, [])
 				if r.equivalent_course not in lst:
 					lst.append(r.equivalent_course)
