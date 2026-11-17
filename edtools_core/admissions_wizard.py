@@ -341,6 +341,29 @@ def _schedule_sums(schedule) -> dict:
 	return sums
 
 
+def _split_interest(before: dict, after: dict, interest: float) -> None:
+	"""Separa el interés del capital antes de cuadrar componentes con un calendario editado.
+
+	Las cuotas de capital del plan calculado traen el interés incluido y `_schedule_sums`
+	las cuenta todas como «Costo de programa». Sin esta separación, si el calendario editado
+	cobra menos capital, la diferencia se le restaba al costo del programa y el interés
+	quedaba intacto (p. ej. costo 13,438.76 + intereses 1.24 con beca de 13,440).
+
+	Regla: lo que se quite del capital sale primero del interés y luego del costo;
+	lo que se agregue va al costo.
+	"""
+	interest = flt(interest, 2)
+	if interest <= 0:
+		return
+	principal = flt(before.get(CAT_COSTO_PROGRAMA, 0) - interest, 2)
+	before[CAT_COSTO_PROGRAMA] = principal
+	before[CAT_INTERESES] = interest
+	charged = flt(after.get(CAT_COSTO_PROGRAMA, 0), 2)
+	kept = min(interest, max(0.0, flt(charged - principal, 2)))
+	after[CAT_COSTO_PROGRAMA] = flt(charged - kept, 2)
+	after[CAT_INTERESES] = kept
+
+
 def _normalize_custom_schedule(rows) -> list:
 	"""Valida el calendario editado en la página: fechas, montos y tipos conocidos."""
 	if not rows:
@@ -407,6 +430,7 @@ def _build_plan(fee_structure: str, installments, start_date, apply_interest, le
 		custom = _normalize_custom_schedule(_parse(custom_schedule))
 		# Cuadrar los componentes con lo que realmente se cobra (cuota eliminada, monto editado, etc.).
 		before, after = _schedule_sums(schedule), _schedule_sums(custom)
+		_split_interest(before, after, interest)
 		for cat in set(before) | set(after):
 			delta = flt(after.get(cat, 0) - before.get(cat, 0), 2)
 			if not delta:
